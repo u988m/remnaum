@@ -1,0 +1,98 @@
+import hashlib
+import hmac
+import json
+import unittest
+from urllib.parse import quote, urlencode
+from unittest.mock import patch
+
+import httpx
+
+from app.services.payment_providers import CryptoPayProvider, YooKassaProvider, YooMoneyProvider
+
+
+class PaymentProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_yoomoney_notification_signature_and_reference(self):
+        with patch("app.services.payment_providers.settings") as config:
+            config.yoomoney_receiver = "410000000000"
+            config.yoomoney_notification_secret = "wallet-secret"
+            provider = YooMoneyProvider()
+            fields = {
+                "notification_type": "card-incoming",
+                "operation_id": "operation-123",
+                "amount": "98.00",
+                "withdraw_amount": "100.00",
+                "currency": "643",
+                "datetime": "2026-11-18T12:00:00Z",
+                "sender": "",
+                "codepro": "false",
+                "label": "remnaum-42",
+                "unaccepted": "false",
+            }
+            signed = "&".join(
+                f"{quote(key, safe='~')}={quote(value, safe='~')}"
+                for key, value in sorted(fields.items())
+            )
+            fields["sign"] = hmac.new(b"wallet-secret", signed.encode(), hashlib.sha256).hexdigest()
+            result = await provider.verify_webhook(urlencode(fields).encode(), {})
+            self.assertEqual(result.local_payment_id, 42)
+            self.assertEqual(result.provider_payment_id, "operation-123")
+            self.assertEqual(result.amount_minor, 10000)
+            self.assertEqual(result.currency, "RUB")
+
+    async def test_cryptopay_webhook_signature(self):
+        token = "test-token"
+        body = json.dumps({
+            "update_type": "invoice_paid",
+            "payload": {
+                "invoice_id": 991,
+                "status": "paid",
+                "payload": "7",
+                "currency_type": "fiat",
+                "fiat": "RUB",
+                "amount": "125.50",
+            },
+        }, separators=(",", ":")).encode()
+        secret = hashlib.sha256(token.encode()).digest()
+        signature = hmac.new(secret, body, hashlib.sha256).hexdigest()
+        with patch("app.services.payment_providers.settings") as config:
+            config.cryptopay_api_token = token
+            config.cryptopay_accepted_assets = "USDT,TON"
+            provider = CryptoPayProvider()
+            result = await provider.verify_webhook(body, {"crypto-pay-api-signature": signature})
+        self.assertEqual(result.local_payment_id, 7)
+        self.assertEqual(result.provider_payment_id, "991")
+        self.assertEqual(result.amount_minor, 12550)
+
+    async def test_yookassa_create_payment_uses_idempotency_and_redirect(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["auth"] = request.headers.get("Authorization")
+            seen["key"] = request.headers.get("Idempotence-Key")
+            seen["body"] = json.loads(request.read())
+            return httpx.Response(200, json={
+                "id": "yk-1",
+                "confirmation": {"confirmation_url": "https://pay.example/1"},
+            })
+
+        with patch("app.services.payment_providers.settings") as config:
+            config.yookassa_shop_id = "shop"
+            config.yookassa_secret_key = "secret"
+            config.yookassa_currency = "RUB"
+            config.public_base_url = "https://remnaum.example"
+            provider = YooKassaProvider(httpx.MockTransport(handler))
+            link = await provider.create_payment(
+                local_payment_id=9,
+                amount_minor=19900,
+                currency="RUB",
+                description="Remnaum test",
+            )
+        self.assertEqual(link.payment_id, "yk-1")
+        self.assertEqual(link.url, "https://pay.example/1")
+        self.assertTrue(seen["key"])
+        self.assertEqual(seen["body"]["metadata"]["payment_id"], "9")
+        self.assertEqual(seen["body"]["amount"]["value"], "199.00")
+
+
+if __name__ == "__main__":
+    unittest.main()
