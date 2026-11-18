@@ -95,9 +95,11 @@ async def settle_payment(verified: VerifiedPayment, provider_name: str) -> bool:
             raise ValueError("Provider payment ID mismatch")
         if payment.status == "succeeded":
             return False
+        if payment.status == "paid":
+            return True
         if payment.status != "pending":
             raise ValueError("Payment is not pending")
         payment.provider_payment_id = verified.provider_payment_id
-        payment.status = "succeeded"
+        payment.status = "paid"
         await session.commit()
         return True
