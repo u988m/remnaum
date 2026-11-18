@@ -11,7 +11,7 @@ Remnaum is a Telegram-first VPN subscription platform built around the Remnawave
 - Telegram bot: onboarding, plans, subscription status and support.
 - Billing: provider adapters, payment verification, idempotent webhook processing and refunds.
 - Subscription service: lifecycle, renewals, expiry jobs and panel synchronization.
-- Remnawave adapter: isolated client for panel API operations.
+- Remnawave adapter: isolated client for creating users, reading user/subscription data, enabling/disabling accounts and extending expiry. API calls use Bearer-token authentication.
 - Admin: role-based access, users, plans, payments, announcements and audit log.
 - Web App: authenticated customer dashboard and subscription management.
 - Operations: installer, updater, backups, migrations, health checks and release notes.
@@ -39,7 +39,7 @@ See [`.env.example`](.env.example). Keep secrets in `.env`; never commit it.
 
 - Set `TELEGRAM_USE_WEBHOOK=false` to use polling.
 - For webhook mode, set `TELEGRAM_USE_WEBHOOK=true`, `TELEGRAM_WEBHOOK_URL` and a long random `TELEGRAM_WEBHOOK_SECRET`. Put the service behind HTTPS.
-- Set `REMNAWAVE_BASE_URL` and `REMNAWAVE_API_TOKEN` to enable the panel adapter.
+- Set `REMNAWAVE_BASE_URL` to the panel root URL (without `/api`) and `REMNAWAVE_API_TOKEN` to the panel API token. The adapter currently implements the documented `/api/users` and `/api/subscriptions` operations.
 - Set `SUPPORT_CONTACT` to the text or contact link shown in the support section.
 - Payment integration is intentionally disabled until a provider is selected and verified.
 
