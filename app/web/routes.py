@@ -2,7 +2,7 @@ from pathlib import Path
 from html import escape
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -18,31 +18,10 @@ from app.services.telegram_webapp import validate_telegram_init_data
 
 router = APIRouter()
 
-@router.get("/admin/payments", response_class=HTMLResponse)
+@router.get("/admin/payments")
 async def admin_payments_page():
-    return HTMLResponse("""<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Remnaum — платежи</title><script src="https://telegram.org/js/telegram-web-app.js"></script><style>
-body{font:16px system-ui;background:#10131a;color:#f4f6fb;margin:0;padding:24px}
-main{max-width:760px;margin:auto}section{background:#1a202b;border:1px solid #303949;border-radius:14px;padding:18px;margin:14px 0}
-label{display:block;margin:10px 0}input[type=text],input[type=password]{box-sizing:border-box;width:100%;padding:11px;background:#0e131b;color:#fff;border:1px solid #465267;border-radius:8px}
-button{padding:11px 16px;border:0;border-radius:8px;background:#dbeafe;color:#111827;font-weight:700}
-small{color:#aab5c7}.row{display:flex;justify-content:space-between;align-items:center;gap:12px}
-</style></head><body><main><h1>Платёжные системы</h1>
-<p>Настройки магазина Remnaum. Секреты сохраняются в зашифрованном виде и не отображаются повторно.</p>
-<a href="/admin" style="color:#9ecbff">← Панель управления</a>
-<section><div class="row"><b>Telegram Stars</b><input id="telegram_stars" type="checkbox" checked></div><small>Оплата в Telegram. Включена по умолчанию.</small></section>
-<section><div class="row"><b>ЮKassa</b><input id="yookassa" type="checkbox"></div><label>Shop ID<input id="yookassa_shop_id" type="text"></label><label>Secret key<input id="yookassa_secret_key" type="password"></label><small id="yookassa_status"></small></section>
-<section><div class="row"><b>ЮMoney</b><input id="yoomoney" type="checkbox"></div><label>Номер кошелька<input id="yoomoney_receiver" type="text"></label><label>Секрет уведомлений<input id="yoomoney_notification_secret" type="password"></label><small id="yoomoney_status"></small></section>
-<section><div class="row"><b>Crypto Pay</b><input id="cryptopay" type="checkbox"></div><label>API token<input id="cryptopay_api_token" type="password"></label><small id="cryptopay_status"></small></section>
-<button id="load">Загрузить настройки</button> <button id="save">Сохранить</button><p id="status"></p>
-<script>
-const ids=["telegram_stars","yookassa","yoomoney","cryptopay"];
-const tg=window.Telegram?.WebApp;tg?.ready();
-async function api(method,body){const r=await fetch("/admin/api/payment-settings",{method,headers:{"X-Telegram-Init-Data":tg?.initData||"","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(d.detail||"Ошибка запроса");return d}
-document.getElementById("load").onclick=async()=>{try{const d=await api("GET");ids.forEach(k=>document.getElementById(k).checked=!!d.methods[k]);Object.keys(d.configured).forEach(k=>{const el=document.getElementById(k+"_status");if(el)el.textContent=d.configured[k]?"Реквизиты сохранены":"Реквизиты не настроены"});document.getElementById("status").textContent="Настройки загружены"}catch(e){document.getElementById("status").textContent=e.message}};
-document.getElementById("save").onclick=async()=>{try{const methods={};ids.forEach(k=>methods[k]=document.getElementById(k).checked);const credentials={yookassa:{shop_id:document.getElementById("yookassa_shop_id").value,secret_key:document.getElementById("yookassa_secret_key").value},yoomoney:{receiver:document.getElementById("yoomoney_receiver").value,notification_secret:document.getElementById("yoomoney_notification_secret").value},cryptopay:{api_token:document.getElementById("cryptopay_api_token").value}};const d=await api("PUT",{methods,credentials});Object.keys(d.configured).forEach(k=>{const el=document.getElementById(k+"_status");if(el)el.textContent=d.configured[k]?"Реквизиты сохранены":"Реквизиты не настроены"});["yookassa_secret_key","yoomoney_notification_secret","cryptopay_api_token"].forEach(k=>document.getElementById(k).value="");document.getElementById("status").textContent="Настройки сохранены"}catch(e){document.getElementById("status").textContent=e.message}};
-</script></main></body></html>""")
+    return RedirectResponse("/admin?tab=settings", status_code=307)
+
 
 from pydantic import BaseModel, Field
 from app.services.store_settings import get_store_payment_settings, public_payment_settings, update_store_payment_settings, is_payment_method_enabled
@@ -95,15 +74,7 @@ class TariffPricingUpdate(BaseModel):
 
 @router.get("/admin/tariffs")
 async def admin_tariffs_page():
-    return HTMLResponse("""<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Remnaum — тарифы</title><script src="https://telegram.org/js/telegram-web-app.js"></script><body style="font:16px system-ui;max-width:760px;margin:32px auto;padding:0 16px;background:#10131a;color:#f4f6fb"><h1>Цены тарифов</h1><p>Настройте формулу стоимости отдельно для рублей и Telegram Stars.</p><a href="/admin" style="color:#9ecbff">← Панель управления</a><div id="fields"></div><button id="load">Загрузить</button> <button id="save">Сохранить</button><p id="status"></p><script>
-const tg=window.Telegram?.WebApp;tg?.ready();const keys=["rub_per_day_minor","rub_per_gb_minor","rub_per_device_minor","stars_per_day","stars_per_gb","stars_per_device","currency"];
-const labels={rub_per_day_minor:"Рубли: за день (копейки)",rub_per_gb_minor:"Рубли: за 1 ГБ (копейки)",rub_per_device_minor:"Рубли: за устройство (копейки)",stars_per_day:"Stars: за день",stars_per_gb:"Stars: за 1 ГБ",stars_per_device:"Stars: за устройство",currency:"Валюта внешнего магазина"};
-const fields=document.getElementById("fields");keys.forEach(k=>{const l=document.createElement("label");l.style.display="block";l.style.margin="12px 0";l.textContent=labels[k];const i=document.createElement("input");i.id=k;i.type=k==="currency"?"text":"number";i.min="0";i.style.display="block";i.style.padding="9px";l.appendChild(i);fields.appendChild(l)});
-async function api(method,body){const r=await fetch("/admin/api/tariff-pricing",{method,headers:{"X-Telegram-Init-Data":tg?.initData||"","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(d.detail||"Ошибка запроса");return d}
-function fill(d){keys.forEach(k=>document.getElementById(k).value=d[k])}
-document.getElementById("load").onclick=async()=>{try{fill(await api("GET"));document.getElementById("status").textContent="Цены загружены"}catch(e){document.getElementById("status").textContent=e.message}};
-document.getElementById("save").onclick=async()=>{try{const pricing={};keys.forEach(k=>pricing[k]=k==="currency"?document.getElementById(k).value:Number(document.getElementById(k).value));fill(await api("PUT",{pricing}));document.getElementById("status").textContent="Цены сохранены"}catch(e){document.getElementById("status").textContent=e.message}};
-</script></body></html>""")
+    return RedirectResponse("/admin?tab=tariffs", status_code=307)
 
 
 @router.get("/admin/api/tariff-pricing")
@@ -295,7 +266,8 @@ async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=Non
         }
     return {
         "user": {"id": identity["id"], "first_name": identity.get("first_name", "")},
-        "profile": await get_store_profile(),
+        "profile": await public_store_profile(),
+        "is_admin": int(identity["id"]) in settings.admin_id_set,
         "pricing": pricing,
         "stars_enabled": await is_payment_method_enabled("telegram_stars"),
         "payment_methods": await _get_public_checkout_methods(),
@@ -359,12 +331,12 @@ async def webapp_create_checkout(data: WebAppCheckout, x_telegram_init_data: str
         raise HTTPException(status_code=503, detail="Telegram bot is not initialized")
     try:
         invoice_url = await bot.create_invoice_link(
-            title="Remnaum VPN",
+            title=(await get_store_profile())["name"][:28] + " VPN",
             description=f"VPN-подписка: {data.days} дней, {data.traffic} ГБ, {data.devices} устройств",
             payload=f"remnaum:{payment.id}",
             provider_token="",
             currency="XTR",
-            prices=[LabeledPrice(label="Remnaum VPN subscription", amount=stars)],
+            prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Could not create Telegram Stars invoice") from exc
@@ -606,10 +578,10 @@ async def webapp_checkout_ready_plan(data: WebAppFixedPlanCheckout, x_telegram_i
         raise HTTPException(status_code=503, detail="Telegram bot is not initialized")
     try:
         url = await bot.create_invoice_link(
-            title="Remnaum VPN",
+            title=(await get_store_profile())["name"][:28] + " VPN",
             description=f"VPN: {quote.duration_days} дней, {quote.traffic_gb} ГБ, {quote.device_limit} устройств",
             payload=f"remnaum:{payment.id}", provider_token="", currency="XTR",
-            prices=[LabeledPrice(label="Remnaum VPN subscription", amount=stars)],
+            prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Could not create Stars invoice") from exc
@@ -628,15 +600,65 @@ class StoreProfilePayload(BaseModel):
     terms_url: str = Field(default="", max_length=300)
 
 
+from app.services.store_media import welcome_image_url, welcome_image_path, save_welcome_image, delete_welcome_image
+
 @router.get("/api/v1/store-profile")
 async def public_store_profile():
-    return await get_store_profile()
+    return {**await get_store_profile(), "welcome_image_url": welcome_image_url()}
 
 
 @router.get("/admin/api/store-profile")
 async def admin_get_store_profile(x_telegram_init_data: str | None = Header(default=None)):
     await _require_telegram_admin(x_telegram_init_data)
-    return await get_store_profile()
+    return {**await get_store_profile(), "welcome_image_url": welcome_image_url()}
+
+
+
+
+class WelcomeImagePayload(BaseModel):
+    data_base64: str = Field(min_length=32, max_length=7_200_000)
+
+
+@router.get("/api/v1/store-profile/welcome-image")
+async def public_welcome_image():
+    image = welcome_image_path()
+    if image is None:
+        raise HTTPException(status_code=404, detail="Изображение не установлено")
+    return FileResponse(
+        image, media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.put("/admin/api/store-profile/welcome-image")
+async def admin_upload_welcome_image(
+    data: WelcomeImagePayload,
+    x_telegram_init_data: str | None = Header(default=None),
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    try:
+        return {"url": save_welcome_image(data.data_base64)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.delete("/admin/api/store-profile/welcome-image")
+async def admin_delete_welcome_image(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    delete_welcome_image()
+    return {"url": None}
+
+
+@router.get("/admin/api/bot-identity")
+async def admin_bot_identity(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    if bot is None:
+        return {"username": "", "name": "", "id": None}
+    try:
+        identity = await bot.get_me()
+    except Exception:
+        return {"username": settings.telegram_bot_username.lstrip("@"), "name": "", "id": None}
+    return {"username": identity.username or "", "name": identity.first_name or "", "id": identity.id}
 
 
 @router.put("/admin/api/store-profile")
@@ -695,7 +717,8 @@ async def webapp_referrals(x_telegram_init_data: str | None = Header(default=Non
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     identity = await _webapp_user(x_telegram_init_data)
     telegram_id = int(identity["id"])
-    username = settings.telegram_bot_username.lstrip("@")
+    from app.services.bot_identity import bot_username
+    username = bot_username()
     return {
         "link": f"https://t.me/{username}?start={referral_code(telegram_id)}" if username else None,
         "count": await referral_count(telegram_id),

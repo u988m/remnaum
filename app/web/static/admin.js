@@ -36,10 +36,66 @@ $("plan-form").onsubmit=async e=>{
     $("status").textContent="Тариф сохранён";await loadPlans();
   }catch(e){$("status").textContent=e.message}
 };
+let currentPhotoPreviewUrl=null;
+function renderWelcomePhoto(url){
+  const image=$("brand-photo-preview");
+  const placeholder=$("brand-photo-placeholder");
+  if(url){image.src=url;image.hidden=false;placeholder.hidden=true}
+  else{image.removeAttribute("src");image.hidden=true;placeholder.hidden=false}
+}
+function readImageAsDataUrl(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(String(reader.result||""));
+    reader.onerror=()=>reject(Error("Не удалось прочитать фотографию"));
+    reader.readAsDataURL(file);
+  });
+}
+$("brand-photo").addEventListener("change",()=>{
+  const file=$("brand-photo").files?.[0];
+  if(currentPhotoPreviewUrl)URL.revokeObjectURL(currentPhotoPreviewUrl);
+  if(file){currentPhotoPreviewUrl=URL.createObjectURL(file);renderWelcomePhoto(currentPhotoPreviewUrl)}
+});
+$("brand-photo-upload").onclick=async()=>{
+  const file=$("brand-photo").files?.[0];
+  if(!file){$("brand-photo-status").textContent="Сначала выберите изображение";return}
+  if(!["image/jpeg","image/png","image/webp"].includes(file.type)||file.size>5*1024*1024){
+    $("brand-photo-status").textContent="Допустимы JPG, PNG или WebP до 5 МБ";return
+  }
+  $("brand-photo-upload").disabled=true;
+  $("brand-photo-status").textContent="Обрабатываем изображение…";
+  try{
+    const data_base64=await readImageAsDataUrl(file);
+    const result=await adminApi("PUT","/admin/api/store-profile/welcome-image",{data_base64});
+    $("brand-photo-status").textContent="Обложка опубликована в боте и Mini App";
+    $("brand-photo").value="";
+    renderWelcomePhoto(result.url);
+  }catch(e){$("brand-photo-status").textContent=e.message}
+  $("brand-photo-upload").disabled=false;
+};
+$("brand-photo-remove").onclick=async()=>{
+  $("brand-photo-remove").disabled=true;
+  try{
+    await adminApi("DELETE","/admin/api/store-profile/welcome-image");
+    $("brand-photo").value="";
+    renderWelcomePhoto(null);
+    $("brand-photo-status").textContent="Обложка удалена";
+  }catch(e){$("brand-photo-status").textContent=e.message}
+  $("brand-photo-remove").disabled=false;
+};
+async function loadBotIdentity(){
+  try{
+    const info=await adminApi("GET","/admin/api/bot-identity");
+    $("bot-identity").textContent=(info.name||"Бот")+" · "+(info.username?"@"+info.username:"username не определён");
+  }catch{$("bot-identity").textContent="Не удалось получить данные бота"}
+}
 async function loadBrand(){
   const d=await adminApi("GET","/admin/api/store-profile");
   $("brand-name").value=d.name;$("brand-tagline").value=d.tagline;$("brand-description").value=d.description;
   $("brand-support").value=d.support_contact;$("brand-terms").value=d.terms_url||"";$("brand-color").value=d.accent_color;
+  $("admin-shop-name").textContent=d.name;
+  renderWelcomePhoto(d.welcome_image_url);
+  loadBotIdentity();
 }
 $("brand-form").onsubmit=async e=>{
   e.preventDefault();try{
@@ -47,7 +103,7 @@ $("brand-form").onsubmit=async e=>{
       name:$("brand-name").value,tagline:$("brand-tagline").value,
       description:$("brand-description").value,support_contact:$("brand-support").value,terms_url:$("brand-terms").value,
       accent_color:$("brand-color").value
-    });$("status").textContent="Оформление сохранено";
+    });$("admin-shop-name").textContent=$("brand-name").value;$("status").textContent="Оформление сохранено";
   }catch(e){$("status").textContent=e.message}
 };
 const paymentNames=["telegram_stars","yookassa","yoomoney","cryptopay"];
@@ -124,7 +180,7 @@ $("referral-form").onsubmit=async e=>{
     $("status").textContent="Реферальная программа сохранена";
   }catch(err){$("status").textContent=err.message}
 };
-async function start(){try{if(!tg?.initData)throw Error("Откройте панель через Telegram Mini App");const d=await api("/admin/api/overview");$("loading").hidden=true;$("dashboard").hidden=false;$("welcome").textContent="Здравствуйте, "+(d.admin_name||"администратор");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments;await loadUsers()}catch(e){$("loading").textContent=e.message}}
+async function start(){try{if(!tg?.initData)throw Error("Откройте панель через Telegram Mini App");const d=await api("/admin/api/overview");$("loading").hidden=true;$("dashboard").hidden=false;$("welcome").textContent="Здравствуйте, "+(d.admin_name||"администратор");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments;await loadUsers();await loadBrand();const tab=new URLSearchParams(window.location.search).get("tab");if(tab){document.querySelector(`nav button[data-tab="${tab}"]`)?.click()}}catch(e){$("loading").textContent=e.message}}
 document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const tab=b.dataset.tab;$("users-view").hidden=tab!=="users";$("payments-view").hidden=tab!=="payments";$("plans-view").hidden=tab!=="plans";$("brand-view").hidden=tab!=="brand";$("referrals-view").hidden=tab!=="referrals";$("trial-view").hidden=tab!=="trial";$("promos-view").hidden=tab!=="promos";$("payment-settings-view").hidden=tab!=="settings";$("pricing-view").hidden=tab!=="tariffs";try{if(tab==="payments")await loadPayments();if(tab==="plans")await loadPlans();if(tab==="brand")await loadBrand();if(tab==="referrals")await loadReferrals();if(tab==="trial")await loadTrialSettings();if(tab==="promos")await loadPromos();if(tab==="settings")await loadPaymentSettings();if(tab==="tariffs")await loadPricing()}catch(e){$("status").textContent=e.message}}));
 $("users-refresh").onclick=()=>loadUsers().catch(e=>$("status").textContent=e.message);$("payments-refresh").onclick=()=>loadPayments().catch(e=>$("status").textContent=e.message);
 $("users-prev").onclick=()=>{userOffset=Math.max(0,userOffset-pageSize);loadUsers()};$("users-next").onclick=()=>{userOffset+=pageSize;loadUsers()};

@@ -16,6 +16,7 @@ import sys
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 import terminal_ui as ui
 import backup_manager as backups
 from remnawave_setup import (
@@ -29,6 +30,30 @@ ROOT = Path(__file__).resolve().parents[1]
 ENV_PATH = ROOT / ".env"
 DOMAIN_RE = re.compile(r"(?=.{4,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}")
 NETWORK_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
+
+
+def identify_telegram_bot(token: str) -> tuple[str, str] | None:
+    """Read BotFather's actual @username and display name using getMe.
+
+    Token stays in memory; a failed request is never printed or logged.
+    """
+    if not re.fullmatch(r"[0-9]{5,20}:[A-Za-z0-9_-]{20,}", token):
+        return None
+    try:
+        request = Request(
+            "https://api.telegram.org/bot" + token + "/getMe",
+            headers={"Accept": "application/json", "User-Agent": "Remnaum-Installer"},
+        )
+        with urlopen(request, timeout=8) as response:
+            result = json.load(response)
+        bot = result.get("result", {}) if result.get("ok") else {}
+        username = bot.get("username")
+        name = bot.get("first_name")
+        if not isinstance(username, str) or not re.fullmatch(r"[A-Za-z0-9_]{5,32}", username):
+            return None
+        return username, str(name or username)[:80]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def valid_domain(value: str) -> bool:
@@ -728,9 +753,16 @@ def config_for_install(existing: dict[str, str], mode: str,
                 cfg["REMNAWAVE_BASE_URL"] = "https://" + panel_domain
                 print("✅ Адрес установленной панели найден автоматически:", cfg["REMNAWAVE_BASE_URL"])
 
+    if not cfg.get("TELEGRAM_BOT_TOKEN"):
+        cfg["TELEGRAM_BOT_TOKEN"] = prompt("Токен Telegram-бота из BotFather", hidden=True)
+    if not cfg.get("TELEGRAM_BOT_USERNAME"):
+        info = identify_telegram_bot(cfg["TELEGRAM_BOT_TOKEN"])
+        if info is not None:
+            cfg["TELEGRAM_BOT_USERNAME"] = info[0]
+            print(f"✅ BotFather: {info[1]} (@{info[0]})")
+        else:
+            cfg["TELEGRAM_BOT_USERNAME"] = prompt("Username бота без @ (Telegram API недоступен)")
     required = (
-        ("TELEGRAM_BOT_USERNAME", "Имя бота из BotFather (без @)", False),
-        ("TELEGRAM_BOT_TOKEN", "Токен Telegram-бота", True),
         ("ADMIN_IDS", "Telegram ID администраторов (через запятую)", False),
         ("REMNAWAVE_BASE_URL", "Адрес панели Remnawave (с https://)", False),
         ("REMNAWAVE_API_TOKEN", "API-токен Remnawave", True),

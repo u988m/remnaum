@@ -1,8 +1,9 @@
 from html import escape
+from urllib.parse import urlsplit
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message, PreCheckoutQuery, WebAppInfo
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message, PreCheckoutQuery, WebAppInfo, FSInputFile
 
 from app.config import settings
 from app.services.tariffs import TariffQuote, get_tariff_draft, update_tariff_draft, calculate_store_stars_price
@@ -21,6 +22,8 @@ from app.services.users import get_or_create_user
 from app.services.store_settings import is_payment_method_enabled, get_store_payment_settings, public_payment_settings
 from app.services.store_profile import get_terms_url
 from app.services.store_profile import get_store_profile
+from app.services.store_media import welcome_image_path
+from app.services.bot_identity import bot_username
 from app.services.referrals import parse_referral_start, register_referral, referral_count, referral_code, reward_balance, get_referral_settings
 from app.services.plans import list_plans, choose_plan, selected_stars_price, clear_selected_plan
 from app.services.trials import get_trial_settings, trial_eligible, claim_trial
@@ -32,23 +35,34 @@ from sqlalchemy import select
 router = Router(name="user")
 
 
-def main_menu() -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text="📦 Собрать тариф", callback_data="menu:plans"),
-         InlineKeyboardButton(text="👤 Мой профиль", callback_data="menu:profile")],
-        [InlineKeyboardButton(text="🔐 Подписка", callback_data="menu:subscription"),
-         InlineKeyboardButton(text="📱 Устройства", callback_data="menu:devices")],
-        [InlineKeyboardButton(text="🧾 Мои покупки", callback_data="menu:purchases"),
-         InlineKeyboardButton(text="🎁 Пригласить друга", callback_data="menu:referral")],
-        [InlineKeyboardButton(text="🎟 Промокод", callback_data="menu:promo"),
-         InlineKeyboardButton(text="🎁 Пробный доступ", callback_data="menu:trial")],
-        [InlineKeyboardButton(text="📖 Как подключиться", callback_data="menu:connect"),
-         InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support")],
-    ]
-    if settings.webapp_url:
-        rows.append([InlineKeyboardButton(text="🌐 Личный кабинет", web_app=WebAppInfo(url=settings.webapp_url))])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+def _admin_webapp_url() -> str:
+    url = urlsplit(settings.webapp_url)
+    if url.scheme == "https" and url.netloc:
+        return f"https://{url.netloc}/admin"
+    return f"{settings.public_base_url.rstrip('/')}/admin"
 
+
+def main_menu(*, is_admin: bool = False) -> InlineKeyboardMarkup:
+    """Short, balanced two-column navigation instead of a wall of buttons."""
+    rows = [
+        [InlineKeyboardButton(text="🛍 Тарифы", callback_data="menu:plans"),
+         InlineKeyboardButton(text="🔐 Мой VPN", callback_data="menu:subscription")],
+        [InlineKeyboardButton(text="📱 Устройства", callback_data="menu:devices"),
+         InlineKeyboardButton(text="🧾 Покупки", callback_data="menu:purchases")],
+        [InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile"),
+         InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses")],
+        [InlineKeyboardButton(text="📖 Подключение", callback_data="menu:connect"),
+         InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support")],
+    ]
+    if settings.webapp_url.startswith("https://"):
+        rows.append([InlineKeyboardButton(
+            text="✨ Открыть магазин", web_app=WebAppInfo(url=settings.webapp_url),
+        )])
+    if is_admin and settings.webapp_url.startswith("https://"):
+        rows.append([InlineKeyboardButton(
+            text="⚙️ Управление магазином", web_app=WebAppInfo(url=_admin_webapp_url()),
+        )])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def back_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
@@ -102,10 +116,21 @@ async def start_handler(message: Message) -> None:
     if is_new_user and inviter is not None:
         await register_referral(message.from_user.id, inviter)
     profile = await get_store_profile()
+    image = welcome_image_path()
+    if image is not None:
+        try:
+            await message.answer_photo(
+                FSInputFile(image),
+                caption=f"<b>{escape(profile['name'])}</b> · {escape(profile['tagline'])}",
+            )
+        except Exception:
+            # A broken upload or Telegram photo failure must never block /start.
+            pass
     await message.answer(
-        f"Добро пожаловать в <b>{escape(profile['name'])}</b>! 🚀\n\n"
-        f"{escape(profile['description']) or 'Выберите подходящую подписку.'}",
-        reply_markup=main_menu(),
+        f"<b>{escape(profile['name'])}</b>\n"
+        f"{escape(profile['description']) or 'Выберите подходящую подписку.'}\n\n"
+        "Выберите раздел — всё самое важное под рукой.",
+        reply_markup=main_menu(is_admin=message.from_user.id in settings.admin_id_set),
     )
 
 
@@ -114,7 +139,7 @@ async def admin_command_handler(message: Message) -> None:
     if message.from_user is None or message.from_user.id not in settings.admin_id_set:
         await message.answer("Доступ к панели управления запрещён.")
         return
-    admin_url = f"{settings.public_base_url.rstrip('/')}/admin"
+    admin_url = _admin_webapp_url()
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="⚙️ Открыть панель управления", web_app=WebAppInfo(url=admin_url))
     ]])
@@ -126,7 +151,7 @@ async def help_handler(message: Message) -> None:
     await message.answer(
         "Используйте кнопки меню для настройки тарифа и управления аккаунтом. "
         "Если нужна помощь, откройте раздел «Поддержка».",
-        reply_markup=main_menu(),
+        reply_markup=main_menu(is_admin=message.from_user is not None and message.from_user.id in settings.admin_id_set),
     )
 
 
@@ -134,7 +159,27 @@ async def help_handler(message: Message) -> None:
 async def home_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
-        await callback.message.edit_text("Главное меню Remnaum. Выберите раздел:", reply_markup=main_menu())
+        profile = await get_store_profile()
+        await callback.message.edit_text(
+            f"<b>{escape(profile['name'])}</b>\n{escape(profile['tagline'])}\n\nВыберите раздел:",
+            reply_markup=main_menu(is_admin=callback.from_user.id in settings.admin_id_set),
+        )
+
+
+@router.callback_query(F.data == "menu:bonuses")
+async def bonuses_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if callback.message:
+        await callback.message.edit_text(
+            "🎁 <b>Бонусы и подарки</b>\n\n"
+            "Приглашайте друзей, активируйте промокоды и получите пробный доступ.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🤝 Пригласить друга", callback_data="menu:referral")],
+                [InlineKeyboardButton(text="🎟 Активировать промокод", callback_data="menu:promo")],
+                [InlineKeyboardButton(text="✨ Пробный доступ", callback_data="menu:trial")],
+                [InlineKeyboardButton(text="← Главное меню", callback_data="menu:home")],
+            ]),
+        )
 
 
 @router.callback_query(F.data == "menu:plans")
@@ -318,13 +363,14 @@ async def stars_payment_create_handler(callback: CallbackQuery) -> None:
             await callback.message.answer(escape(str(exc)))
         return
     if callback.message:
+        profile = await get_store_profile()
         await callback.message.answer_invoice(
-            title="Remnaum VPN",
+            title=profile["name"][:28] + " VPN",
             description="VPN-подписка с выбранными вами параметрами.",
             payload=f"remnaum:{payment.id}",
             provider_token="",
             currency="XTR",
-            prices=[LabeledPrice(label="Remnaum VPN subscription", amount=stars)],
+            prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
         )
 
 
@@ -380,7 +426,7 @@ async def terms_handler(message: Message) -> None:
     terms_url = await get_terms_url()
     if terms_url:
         await message.answer(
-            f"Условия Remnaum: <a href=\"{escape(terms_url, quote=True)}\">прочитать</a>"
+            f"Условия магазина: <a href=\"{escape(terms_url, quote=True)}\">прочитать</a>"
         )
     else:
         await message.answer("Условия ещё не опубликованы.")
@@ -625,10 +671,11 @@ async def purchases_handler(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "menu:referral")
 async def referral_handler(callback: CallbackQuery) -> None:
     await callback.answer()
-    if not settings.telegram_bot_username:
-        text = "🎁 Реферальная ссылка пока не настроена владельцем."
+    username = bot_username()
+    if not username:
+        text = "🎁 Реферальная ссылка пока недоступна."
     else:
-        link = f"https://t.me/{settings.telegram_bot_username.lstrip('@')}?start={referral_code(callback.from_user.id)}"
+        link = f"https://t.me/{username}?start={referral_code(callback.from_user.id)}"
         count = await referral_count(callback.from_user.id)
         balance = await reward_balance(callback.from_user.id)
         config = await get_referral_settings()

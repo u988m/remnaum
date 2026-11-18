@@ -99,13 +99,34 @@ class InstallerTests(unittest.TestCase):
             "POSTGRES_PASSWORD": "keep-this-db-password",
             "DATABASE_URL": "postgresql+asyncpg://remnaum:keep-this-db-password@postgres:5432/remnaum",
         }
-        with patch.object(installer, "network_exists", return_value=False):
+        with patch.object(installer, "network_exists", return_value=False), \
+             patch.object(installer, "identify_telegram_bot", return_value=None):
             with patch.object(installer, "prompt", return_value="test_bot") as ask:
                 cfg = installer.config_for_install(old, "panel", "none", 18080)
         ask.assert_called_once()
         self.assertEqual(cfg["TELEGRAM_BOT_USERNAME"], "test_bot")
         self.assertEqual(cfg["APP_SECRET_KEY"], "keep-this-key")
         self.assertEqual(cfg["POSTGRES_PASSWORD"], "keep-this-db-password")
+
+    def test_bot_username_is_discovered_without_manual_entry(self):
+        previous = {
+            "PUBLIC_DOMAIN": "hook.myvpn.site",
+            "WEBAPP_DOMAIN": "miniapp.myvpn.site",
+            "TELEGRAM_BOT_USERNAME": "",
+            "TELEGRAM_BOT_TOKEN": "123456789:MOCK_TOKEN",
+            "ADMIN_IDS": "123456789",
+            "REMNAWAVE_BASE_URL": "https://panel.myvpn.site",
+            "REMNAWAVE_API_TOKEN": "mock",
+            "REMNAWAVE_ACTIVE_INTERNAL_SQUADS": "known-id",
+            "APP_SECRET_KEY": "already-set",
+            "POSTGRES_PASSWORD": "already-set",
+        }
+        with patch.object(installer, "network_exists", return_value=False), \
+             patch.object(installer, "identify_telegram_bot", return_value=("real_bot", "Remnaum Shop")), \
+             patch.object(installer, "prompt") as ask:
+            cfg = installer.config_for_install(previous, "panel", "none", 18080)
+        self.assertEqual(cfg["TELEGRAM_BOT_USERNAME"], "real_bot")
+        ask.assert_not_called()
 
     def test_existing_mode_is_preserved_when_reconfiguring(self):
         self.assertEqual(

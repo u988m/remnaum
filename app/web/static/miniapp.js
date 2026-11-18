@@ -1,6 +1,35 @@
 const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
 let data=null;
 const $=id=>document.getElementById(id);
+function switchPage(page){
+  document.querySelectorAll("[data-page-panel]").forEach(panel=>{
+    const visible=panel.dataset.pagePanel===page;
+    panel.hidden=!visible;
+    panel.classList.toggle("active",visible);
+  });
+  document.querySelectorAll("#bottom-nav [data-page]").forEach(button=>{
+    const active=button.dataset.page===page;
+    button.classList.toggle("nav-active",active);
+    if(active)button.setAttribute("aria-current","page");else button.removeAttribute("aria-current");
+  });
+  window.scrollTo({top:0,behavior:"smooth"});
+  tg?.HapticFeedback?.selectionChanged();
+}
+document.querySelectorAll("[data-page], [data-go-page]").forEach(button=>{
+  button.addEventListener("click",()=>switchPage(button.dataset.page||button.dataset.goPage));
+});
+$("copy-referral").onclick=async()=>{
+  const link=$("account-referral-link").href;
+  try{
+    if(!navigator.clipboard?.writeText)throw Error("clipboard unavailable");
+    await navigator.clipboard.writeText(link);
+    $("copy-referral").textContent="✓ Ссылка скопирована";
+    tg?.HapticFeedback?.notificationOccurred("success");
+  }catch{
+    $("copy-referral").textContent="Откройте ссылку выше для копирования";
+  }
+};
+
 function api(path,body){return fetch(path,{method:body?"POST":"GET",headers:{"Content-Type":"application/json","X-Telegram-Init-Data":tg?.initData||""},body:body?JSON.stringify(body):undefined}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.detail||"Ошибка запроса");return d})}
 async function loadOffers(){
   try{
@@ -43,7 +72,7 @@ async function loadAccountPanels(){
   if(results[2].status==="fulfilled"){
     const d=results[2].value;
     $("account-referral-info").textContent="Приглашено: "+d.count+" · Бонусных дней: "+(d.reward?.days||0)+" · Начислено: "+(d.reward?.earned||0)+(d.rewards_enabled?" · Бонусы применятся при следующем продлении.":" · Программа пока отключена.");
-    if(d.link){$("account-referral-link").href=d.link;$("account-referral-link").textContent=d.link;$("account-referral-link").style.display="block"}
+    if(d.link){$("account-referral-link").href=d.link;$("account-referral-link").textContent=d.link;$("account-referral-link").style.display="block";$("copy-referral").hidden=false}
   }else $("account-referral-info").textContent="Реферальная информация временно недоступна";
 }
 function fillOptions(id,min,max,step,selected,label){const el=$(id);el.replaceChildren();const chosen=Math.min(max,Math.max(min,selected));const values=[];for(let n=min;n<=max;n+=step)values.push(n);if(!values.includes(chosen))values.push(chosen);values.sort((a,b)=>a-b);values.forEach(n=>{const o=document.createElement("option");o.value=String(n);o.textContent=n+" "+label;el.appendChild(o)});el.value=String(chosen)}
@@ -116,7 +145,7 @@ $("buy").onclick=async()=>{try{
   });
 }catch(e){$("status").textContent=e.message;recalc()}};
 
-async function start(){try{if(!tg?.initData)throw Error("Откройте Mini App через кнопку в Telegram");data=await api("/api/v1/webapp/bootstrap");if(data.profile){$("store-name").textContent=data.profile.name;$("store-tagline").textContent=data.profile.tagline||"Ваш VPN";document.documentElement.style.setProperty("--tg-theme-button-color",data.profile.accent_color)}$("loading").style.display="none";$("app").style.display="block";$("welcome").textContent=data.user.first_name?"Здравствуйте, "+data.user.first_name+"! Настройте подписку под себя.":"Выберите параметры подписки.";if(data.terms_url){$("terms-link").href=data.terms_url}else{$("terms-link").textContent="условия не настроены";$("terms-link").removeAttribute("href");$("buy").disabled=true}
-fillOptions("days",data.limits.days_min,data.limits.days_max,1,data.limits.days_default,"дней");fillOptions("traffic",data.limits.traffic_min,data.limits.traffic_max,1,data.limits.traffic_default,"ГБ");fillOptions("devices",data.limits.devices_min,data.limits.devices_max,1,data.limits.devices_default,"устройств");if(data.subscription){const s=data.subscription;$("subscription").style.display="block";$("sub-status").textContent=s.status;$("sub-expiry").textContent=s.expires_at?new Date(s.expires_at).toLocaleString():"—";$("sub-traffic").textContent=s.traffic_gb??"—";$("sub-devices").textContent=s.device_limit??"—";$("sub-days").textContent=s.days_left??"—";if(s.subscription_url){$("sub-link").href=s.subscription_url;$("sub-link").style.display="inline-block"}}
+async function start(){try{if(!tg?.initData)throw Error("Откройте Mini App через кнопку в Telegram");data=await api("/api/v1/webapp/bootstrap");if(data.profile){$("store-name").textContent=data.profile.name;$("store-tagline").textContent=data.profile.tagline||"Ваш VPN";document.documentElement.style.setProperty("--accent",data.profile.accent_color);document.documentElement.style.setProperty("--tg-theme-button-color",data.profile.accent_color);if(data.profile.welcome_image_url){$("hero-image").src=data.profile.welcome_image_url;$("hero-image").hidden=false}if(data.profile.support_contact){$("support-text").textContent=data.profile.support_contact;const contact=data.profile.support_contact.trim();const candidate=contact.startsWith("@")?"https://t.me/"+contact.slice(1):contact;if(candidate.startsWith("https://t.me/")||candidate.startsWith("https://telegram.me/")){$("support-link").href=candidate;$("support-link").hidden=false}}}$("loading").style.display="none";$("app").style.display="block";$("bottom-nav").hidden=false;$("profile-name").textContent=data.user.first_name||"Покупатель";$("profile-id").textContent=data.user.id;$("admin-entry").hidden=!data.is_admin;if(data.is_admin){$("admin-entry").onclick=()=>window.location.assign("/admin")}$("welcome").textContent=data.user.first_name?"Здравствуйте, "+data.user.first_name+"! Настройте подписку под себя.":"Выберите параметры подписки.";if(data.terms_url){$("terms-link").href=data.terms_url}else{$("terms-link").textContent="условия не настроены";$("terms-link").removeAttribute("href");$("buy").disabled=true}
+fillOptions("days",data.limits.days_min,data.limits.days_max,1,data.limits.days_default,"дней");fillOptions("traffic",data.limits.traffic_min,data.limits.traffic_max,1,data.limits.traffic_default,"ГБ");fillOptions("devices",data.limits.devices_min,data.limits.devices_max,1,data.limits.devices_default,"устройств");if(data.subscription){const s=data.subscription;$("no-subscription").hidden=true;$("subscription").style.display="block";$("sub-status").textContent=s.status;$("sub-expiry").textContent=s.expires_at?new Date(s.expires_at).toLocaleString():"—";$("sub-traffic").textContent=s.traffic_gb??"—";$("sub-devices").textContent=s.device_limit??"—";$("sub-days").textContent=s.days_left??"—";if(s.subscription_url){$("sub-link").href=s.subscription_url;$("sub-link").style.display="inline-block"}}
 $("buy").disabled=true;fillPaymentOptions();recalc();loadAccountPanels();loadOffers();await loadReadyPlans()}catch(e){$("loading").textContent=e.message}}
 start();
