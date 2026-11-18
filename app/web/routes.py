@@ -711,6 +711,21 @@ async def public_store_profile():
     return {k: v for k, v in profile.items() if k != "welcome_photo_file_id"}
 
 
+@router.get("/admin/api/bot-info")
+async def admin_bot_info(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    if not bot:
+        return {"name": "", "username": ""}
+    try:
+        details = await bot.get_me()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Не удалось получить сведения о Telegram-боте") from exc
+    return {
+        "name": details.first_name or "",
+        "username": details.username or "",
+    }
+
+
 @router.get("/admin/api/store-profile")
 async def admin_get_store_profile(x_telegram_init_data: str | None = Header(default=None)):
     await _require_telegram_admin(x_telegram_init_data)
