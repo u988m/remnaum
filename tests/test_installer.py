@@ -77,7 +77,9 @@ class InstallerTests(unittest.TestCase):
             "REMNAWAVE_WEBHOOK_SECRET": "rem-secret",
             "DATABASE_URL": "postgresql+asyncpg://remnaum:db-secret@postgres:5432/remnaum",
         }
-        with patch.object(installer, "network_exists", return_value=True):
+        with patch.object(installer, "network_exists", return_value=True), \
+             patch.object(installer, "discover_squads", return_value=[{"uuid": "11111111-1111-4111-8111-111111111111", "name": "Basic"}]), \
+             patch.object(installer, "local_panel_for_url", return_value=None):
             cfg = installer.config_for_install(existing, "panel", None, 18080)
         self.assertEqual(cfg["REMNAUM_PROXY_NETWORK"], "remnawave-network")
         self.assertEqual(cfg["APP_SECRET_KEY"], existing["APP_SECRET_KEY"])
@@ -100,7 +102,9 @@ class InstallerTests(unittest.TestCase):
             "DATABASE_URL": "postgresql+asyncpg://remnaum:keep-this-db-password@postgres:5432/remnaum",
         }
         with patch.object(installer, "network_exists", return_value=False), \
-             patch.object(installer, "identify_telegram_bot", return_value=None):
+             patch.object(installer, "identify_telegram_bot", return_value=None), \
+             patch.object(installer, "discover_squads", return_value=[{"uuid": "11111111-1111-4111-8111-111111111111", "name": "Basic"}]), \
+             patch.object(installer, "local_panel_for_url", return_value=None):
             with patch.object(installer, "prompt", return_value="test_bot") as ask:
                 cfg = installer.config_for_install(old, "panel", "none", 18080)
         ask.assert_called_once()
@@ -123,6 +127,8 @@ class InstallerTests(unittest.TestCase):
         }
         with patch.object(installer, "network_exists", return_value=False), \
              patch.object(installer, "identify_telegram_bot", return_value=("real_bot", "Remnaum Shop")), \
+             patch.object(installer, "discover_squads", return_value=[{"uuid": "11111111-1111-4111-8111-111111111111", "name": "Basic"}]), \
+             patch.object(installer, "local_panel_for_url", return_value=None), \
              patch.object(installer, "prompt") as ask:
             cfg = installer.config_for_install(previous, "panel", "none", 18080)
         self.assertEqual(cfg["TELEGRAM_BOT_USERNAME"], "real_bot")
@@ -185,6 +191,37 @@ class InstallerTests(unittest.TestCase):
             }), 0)
         self.assertEqual(runner.call_args_list[0].args[0], ["bash", "update.sh"])
         self.assertEqual(runner.call_args_list[1].args[0], ["docker", "compose", "ps"])
+
+    def test_update_synchronizes_new_panel_groups_once(self):
+        values = {
+            "REMNAWAVE_BASE_URL": "https://panel.myvpn.site",
+            "REMNAWAVE_API_TOKEN": "example-api-token",
+            "REMNAWAVE_ACTIVE_INTERNAL_SQUADS": "11111111-1111-4111-8111-111111111111",
+        }
+        squads = [
+            {"uuid": "11111111-1111-4111-8111-111111111111", "name": "Basic"},
+            {"uuid": "22222222-2222-4222-8222-222222222222", "name": "Premium"},
+        ]
+        with patch.object(installer, "discover_squads", return_value=squads), \
+             patch.object(installer, "write_env") as save:
+            self.assertTrue(installer.sync_squads_after_update(values))
+        save.assert_called_once_with({
+            "REMNAWAVE_ACTIVE_INTERNAL_SQUADS": (
+                "11111111-1111-4111-8111-111111111111,"
+                "22222222-2222-4222-8222-222222222222"
+            )
+        })
+
+    def test_update_preserves_previous_groups_when_panel_unreachable(self):
+        values = {
+            "REMNAWAVE_BASE_URL": "https://panel.myvpn.site",
+            "REMNAWAVE_API_TOKEN": "example-api-token",
+            "REMNAWAVE_ACTIVE_INTERNAL_SQUADS": "11111111-1111-4111-8111-111111111111",
+        }
+        with patch.object(installer, "discover_squads", side_effect=OSError("offline")), \
+             patch.object(installer, "write_env") as save:
+            self.assertFalse(installer.sync_squads_after_update(values))
+        save.assert_not_called()
 
     def test_installer_health_retries_then_succeeds(self):
         from subprocess import CompletedProcess
