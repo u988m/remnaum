@@ -10,7 +10,7 @@ class TelegramStarsPricingTests(unittest.TestCase):
             config.tariff_stars_price_per_day = 2
             config.tariff_stars_price_per_gb = 1
             config.tariff_stars_price_per_device = 10
-            self.assertEqual(calculate_stars_price(30, 50, 3), 120)
+            self.assertEqual(calculate_stars_price(30, 50, 3), 140)
 
     def test_stars_price_must_be_positive(self):
         with patch("app.services.tariffs.settings") as config:
