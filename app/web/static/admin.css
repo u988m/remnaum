@@ -18,3 +18,18 @@ th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflo
 .empty{padding:25px;text-align:center;color:#9eacc0}
 #plan-form input:not([type=checkbox]),#brand-form input:not([type=color]),#payment-settings-view input:not([type=checkbox]),#pricing-view input{width:100%;border:1px solid #34445c;border-radius:9px;background:#0b1018;color:#f4f7fc;padding:11px;margin-top:5px}#plan-form label,#brand-form label{display:block;margin:12px 0;font-size:12px;color:#9eacc0}#plan-form{margin-bottom:16px}
 @media(max-width:700px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.card b{font-size:22px}main{padding:18px 12px 36px}header{margin-bottom:20px}h1{font-size:23px}th,td{padding:10px 7px}}
+
+/* Responsive dashboard controls, comfortable forms and keyboard support. */
+button{cursor:pointer;transition:background .15s ease,transform .15s ease,border-color .15s ease}
+button:not(:disabled):active{transform:scale(.98)}
+button:disabled{cursor:not-allowed;opacity:.5}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #8abaff;outline-offset:2px}
+.section label{display:block;margin:12px 0;color:#b9c7d8}
+.section input:not([type=checkbox]){display:block;width:100%;max-width:600px;border:1px solid #44536a;background:#0e1726;color:#eef3fa;padding:12px;border-radius:10px;font:inherit;margin-top:6px}
+.section input[type=checkbox]{accent-color:#559cff;transform:scale(1.15);margin-right:7px}
+.section form{max-width:680px}
+.toolbar{flex-wrap:wrap}
+nav{overflow-x:auto;align-items:center;padding-bottom:4px}
+nav button.active{box-shadow:0 4px 16px rgba(50,112,200,.22)}
+@media(max-width:550px){main{padding:15px 10px 48px}.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.card{padding:13px}.card b{font-size:22px}.section{padding:13px}nav{gap:6px}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important;animation:none!important}}
