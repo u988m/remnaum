@@ -58,7 +58,16 @@ async def update_tariff_draft(telegram_id: int, username: str | None, field: str
             select(TariffDraft).where(TariffDraft.user_id == user.id)
         )
         if draft is None:
-            draft = TariffDraft(user_id=user.id)
+            initial_days = settings.tariff_min_days
+            initial_traffic = settings.tariff_min_traffic_gb
+            initial_devices = settings.tariff_min_devices
+            draft = TariffDraft(
+                user_id=user.id,
+                duration_days=initial_days,
+                traffic_gb=initial_traffic,
+                device_limit=initial_devices,
+                amount_minor=calculate_price(initial_days, initial_traffic, initial_devices),
+            )
             session.add(draft)
             await session.flush()
 
