@@ -285,6 +285,13 @@ button:disabled{opacity:.45}a{color:var(--tg-theme-link-color,#65a9ff)}.status{f
 <header><div class="brand"><span id="store-name">Remnaum</span><span style="color:var(--tg-theme-button-color,#4b8bea)">.</span></div><div class="tag">VPN STORE</div></header>
 <h1 id="store-tagline">Ваш VPN — ваши правила</h1><div class="muted" id="welcome">Выберите параметры подписки и получите доступ за пару секунд.</div>
 <section class="panel" id="subscription" style="display:none"><h2>Ваша подписка</h2><div class="row"><span class="muted">Статус</span><b id="sub-status">—</b></div><div class="row"><span class="muted">Действует до</span><b id="sub-expiry">—</b></div><div class="grid"><div class="metric"><b id="sub-traffic">—</b><span>ГБ</span></div><div class="metric"><b id="sub-devices">—</b><span>устройств</span></div><div class="metric"><b id="sub-days">—</b><span>дней осталось</span></div></div><a id="sub-link" href="#" target="_blank" style="display:none">Открыть ссылку подключения</a></section>
+<section class="panel" id="connection-guide">
+<h2>📖 Как подключиться</h2>
+<p class="muted">1. Установите клиент, поддерживающий подписку Remnawave, на телефон или компьютер.</p>
+<p class="muted">2. Откройте ссылку подключения выше. Скопируйте или импортируйте её в VPN-клиент.</p>
+<p class="muted">3. Обновите список серверов в клиенте и выберите подключение.</p>
+<p class="muted">Если возникли проблемы, воспользуйтесь контактом поддержки магазина.</p>
+</section>
 <section class="panel" id="account-devices"><h2>📱 Мои устройства</h2><div class="muted" id="account-device-info">Загружаем…</div></section>
 <section class="panel" id="account-purchases"><h2>🧾 Мои покупки</h2><div class="muted" id="account-purchase-info">Загружаем…</div></section>
 <section class="panel" id="account-referrals"><h2>🎁 Пригласить друга</h2><div class="muted" id="account-referral-info">Загружаем…</div><a id="account-referral-link" style="display:none"></a></section>
