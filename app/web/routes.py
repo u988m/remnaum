@@ -623,3 +623,54 @@ async def remnawave_webhook(request: Request, x_remnawave_signature: str | None 
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     # No automatic subscription changes until event reconciliation is implemented.
     return {"ok": True, "event": event["event"]}
+
+
+# Fixed plans share the existing Telegram-authenticated admin dashboard.
+from app.services.plans import list_plans, save_plan, choose_plan
+
+
+class PlanPayload(BaseModel):
+    title: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=2000)
+    duration_days: int = Field(ge=1, le=365)
+    traffic_gb: int = Field(ge=1, le=1000000)
+    device_limit: int = Field(ge=1, le=1000)
+    price_rub_minor: int = Field(ge=0, le=100000000)
+    price_stars: int = Field(ge=1, le=1000000)
+    is_active: bool = True
+    sort_order: int = Field(default=0, ge=0, le=10000)
+
+
+@router.get("/api/v1/plans")
+async def public_fixed_plans():
+    return {"items": await list_plans(active_only=True)}
+
+
+@router.get("/admin/api/plans")
+async def admin_list_fixed_plans(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    return {"items": await list_plans(active_only=False)}
+
+
+@router.post("/admin/api/plans")
+async def admin_create_fixed_plan(
+    data: PlanPayload, x_telegram_init_data: str | None = Header(default=None)
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    try:
+        return await save_plan(data.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.put("/admin/api/plans/{plan_id}")
+async def admin_update_fixed_plan(
+    plan_id: int, data: PlanPayload, x_telegram_init_data: str | None = Header(default=None)
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    if plan_id < 1:
+        raise HTTPException(status_code=422, detail="Invalid plan ID")
+    try:
+        return await save_plan(data.model_dump(), plan_id=plan_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
