@@ -32,7 +32,7 @@ from sqlalchemy import select
 router = Router(name="user")
 
 
-def main_menu() -> InlineKeyboardMarkup:
+def main_menu(user_id: int | None = None) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="💎 Тарифы", callback_data="menu:plans"),
          InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile")],
@@ -47,6 +47,11 @@ def main_menu() -> InlineKeyboardMarkup:
     ]
     if settings.webapp_url:
         rows.append([InlineKeyboardButton(text="🌐 Открыть Mini App", web_app=WebAppInfo(url=settings.webapp_url))])
+    if user_id is not None and user_id in settings.admin_id_set and settings.public_base_url.startswith("https://"):
+        rows.append([InlineKeyboardButton(
+            text="⚙️ Управление магазином",
+            web_app=WebAppInfo(url=settings.public_base_url.rstrip("/") + "/admin"),
+        )])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -116,7 +121,7 @@ async def start_handler(message: Message) -> None:
         f"<b>{escape(profile['name'])}</b>  ·  VPN-магазин\n\n"
         f"{escape(profile['description']) or 'Выберите тариф и подключите свои устройства.'}\n\n"
         "Выберите, что хотите сделать:",
-        reply_markup=main_menu(),
+        reply_markup=main_menu(message.from_user.id),
     )
 
 
@@ -146,7 +151,7 @@ async def home_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
         profile = await get_store_profile()
-        await callback.message.edit_text(f"<b>{escape(profile['name'])}</b>  ·  Главное меню\n\nВыберите раздел:", reply_markup=main_menu())
+        await callback.message.edit_text(f"<b>{escape(profile['name'])}</b>  ·  Главное меню\n\nВыберите раздел:", reply_markup=main_menu(callback.from_user.id))
 
 
 @router.callback_query(F.data == "menu:plans")
