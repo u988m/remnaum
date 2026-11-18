@@ -1015,3 +1015,121 @@ async def admin_update_referrals(
         return await update_referral_settings(data.enabled, data.reward_days)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+# Campaigns are stored in PostgreSQL. No secret or marketing setting is
+# required in the environment file.
+from app.services.trials import (
+    get_trial_settings, update_trial_settings, trial_eligible, claim_trial,
+)
+from app.services.promos import (
+    create_promo, list_promos, set_promo_active, redeem_promo, promo_balance,
+)
+
+
+class TrialSettingsPayload(BaseModel):
+    enabled: bool
+    days: int = Field(ge=1, le=30)
+    traffic_gb: int = Field(ge=1, le=200)
+    device_limit: int = Field(ge=1, le=5)
+
+
+class PromoCreatePayload(BaseModel):
+    code: str = Field(min_length=4, max_length=32)
+    bonus_days: int = Field(ge=1, le=90)
+    max_uses: int = Field(ge=1, le=100000)
+
+
+class PromoStatusPayload(BaseModel):
+    active: bool
+
+
+class PromoRedeemPayload(BaseModel):
+    code: str = Field(min_length=4, max_length=32)
+
+
+@router.get("/admin/api/trial")
+async def admin_get_trial(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    return await get_trial_settings()
+
+
+@router.put("/admin/api/trial")
+async def admin_put_trial(
+    data: TrialSettingsPayload, x_telegram_init_data: str | None = Header(default=None)
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    try:
+        return await update_trial_settings(data.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/admin/api/promos")
+async def admin_get_promos(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    return {"items": await list_promos()}
+
+
+@router.post("/admin/api/promos")
+async def admin_create_promo(
+    data: PromoCreatePayload, x_telegram_init_data: str | None = Header(default=None)
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    try:
+        return await create_promo(data.code, data.bonus_days, data.max_uses)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.put("/admin/api/promos/{promo_id}")
+async def admin_put_promo(
+    promo_id: int, data: PromoStatusPayload,
+    x_telegram_init_data: str | None = Header(default=None),
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    try:
+        return await set_promo_active(promo_id, data.active)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/api/v1/webapp/offers")
+async def webapp_offers(x_telegram_init_data: str | None = Header(default=None)):
+    if not x_telegram_init_data:
+        raise HTTPException(status_code=401, detail="Telegram authentication is required")
+    identity = await _webapp_user(x_telegram_init_data)
+    telegram_id = int(identity["id"])
+    config = await get_trial_settings()
+    return {
+        "trial": {**config, "eligible": await trial_eligible(telegram_id)},
+        "promo_balance": await promo_balance(telegram_id),
+    }
+
+
+@router.post("/api/v1/webapp/trial")
+async def webapp_claim_trial(x_telegram_init_data: str | None = Header(default=None)):
+    if not x_telegram_init_data:
+        raise HTTPException(status_code=401, detail="Telegram authentication is required")
+    identity = await _webapp_user(x_telegram_init_data)
+    try:
+        return await claim_trial(int(identity["id"]))
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Remnawave trial provisioning failed") from exc
+
+
+@router.post("/api/v1/webapp/promos/redeem")
+async def webapp_redeem_promo(
+    data: PromoRedeemPayload,
+    x_telegram_init_data: str | None = Header(default=None),
+):
+    if not x_telegram_init_data:
+        raise HTTPException(status_code=401, detail="Telegram authentication is required")
+    identity = await _webapp_user(x_telegram_init_data)
+    try:
+        reward = await redeem_promo(int(identity["id"]), data.code)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"reward": reward, "balance": await promo_balance(int(identity["id"]))}
