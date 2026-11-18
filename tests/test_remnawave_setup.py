@@ -37,6 +37,10 @@ class RemnawaveSetupTests(unittest.TestCase):
         self.assertEqual(result[0]["uuid"], A)
         fetch.assert_called_once_with("https://panel.myvpn.site/api/internal-squads", "secret")
 
+    def test_empty_squads_is_a_configuration_error(self):
+        with self.assertRaisesRegex(ValueError, "нет внутренних групп"):
+            setup.select_squads([], lambda *args, **kwargs: "1")
+
     def test_unsafe_url_and_invalid_squads_rejected(self):
         for url in ("http://panel.myvpn.site", "https://user:pass@panel.myvpn.site",
                     "https://panel.myvpn.site?access=secret", "https://panel.myvpn.site:444"):
