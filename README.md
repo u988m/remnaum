@@ -4,7 +4,7 @@ Remnaum is a Telegram-first VPN subscription platform built around the Remnawave
 
 ## Current status
 
-**Current milestone: 0.5.0.** Users configure a personal tariff and purchase VPN access with Telegram Stars (XTR) inside the bot. Verified payments trigger Remnawave provisioning. YooKassa, YooMoney wallet and Crypto Pay adapters are implemented for a separate external storefront; they are not offered inside Telegram for this digital service.
+**Current milestone: 0.7.0.** Users configure a personal tariff and purchase VPN access with Telegram Stars (XTR) inside the bot. Verified payments trigger Remnawave provisioning. YooKassa, YooMoney wallet and Crypto Pay adapters are implemented for a separate external storefront; they are not offered inside Telegram for this digital service.
 
 ## Planned modules
 
@@ -14,7 +14,7 @@ Remnaum is a Telegram-first VPN subscription platform built around the Remnawave
 - Subscription service: payment-triggered Remnawave provisioning, renewals, tariff limit updates and stored connection URL.
 - Remnawave adapter: isolated client for creating users, reading user/subscription data, enabling/disabling accounts and extending expiry. API calls use Bearer-token authentication.
 - Admin: role-based access, users, plans, payments, announcements and audit log.
-- Web App: authenticated customer dashboard and subscription management.
+- Web App: Telegram-authenticated customer dashboard, tariff builder, Stars invoice checkout and subscription management.
 - Operations: installer, updater, backups, migrations, health checks and release notes.
 
 ## Architecture
@@ -80,3 +80,8 @@ Every release must update `CHANGELOG.md`, the application version, and a Git tag
 - Verify Telegram Web App init data server-side before trusting user identity.
 - Use role-based admin checks and audit sensitive actions.
 - Restrict and rotate panel/API tokens; do not log secrets.
+
+## Telegram Mini App
+
+Set `WEBAPP_URL` to the public HTTPS URL ending in `/app`, then add the Web App button to your bot menu or use the bot's personal-account button. The Mini App validates Telegram's signed `initData` on every API request, checks its age, and never trusts a client-supplied Telegram ID. It shows the active subscription, configurable tariff dimensions and the current Stars price. Checkout creates a Telegram Stars invoice link and opens it with Telegram's native invoice interface. Configure `TELEGRAM_TERMS_URL` before enabling checkout.
+

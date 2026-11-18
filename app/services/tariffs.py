@@ -136,6 +136,50 @@ async def update_tariff_draft(telegram_id: int, username: str | None, field: str
         return TariffQuote(draft.duration_days, draft.traffic_gb, draft.device_limit, draft.amount_minor, pricing["currency"])
 
 
+async def set_tariff_draft(
+    telegram_id: int,
+    username: str | None,
+    duration_days: int,
+    traffic_gb: int,
+    device_limit: int,
+) -> TariffQuote:
+    values = (duration_days, traffic_gb, device_limit)
+    bounds = (
+        (settings.tariff_min_days, settings.tariff_max_days),
+        (settings.tariff_min_traffic_gb, settings.tariff_max_traffic_gb),
+        (settings.tariff_min_devices, settings.tariff_max_devices),
+    )
+    if any(value < minimum or value > maximum for value, (minimum, maximum) in zip(values, bounds)):
+        raise ValueError("Tariff values are outside configured limits")
+    async with SessionLocal() as session:
+        statement = insert(User).values(telegram_id=telegram_id, username=username)
+        statement = statement.on_conflict_do_update(
+            index_elements=[User.telegram_id],
+            set_={"username": statement.excluded.username},
+        )
+        await session.execute(statement)
+        user = await session.scalar(select(User).where(User.telegram_id == telegram_id).with_for_update())
+        draft = await session.scalar(select(TariffDraft).where(TariffDraft.user_id == user.id).with_for_update())
+        amount = await calculate_store_price(duration_days, traffic_gb, device_limit)
+        if draft is None:
+            draft = TariffDraft(
+                user_id=user.id,
+                duration_days=duration_days,
+                traffic_gb=traffic_gb,
+                device_limit=device_limit,
+                amount_minor=amount,
+            )
+            session.add(draft)
+        else:
+            draft.duration_days = duration_days
+            draft.traffic_gb = traffic_gb
+            draft.device_limit = device_limit
+            draft.amount_minor = amount
+        await session.commit()
+    pricing = await get_store_tariff_pricing()
+    return TariffQuote(duration_days, traffic_gb, device_limit, amount, pricing["currency"])
+
+
 async def get_tariff_draft(telegram_id: int) -> TariffQuote:
     async with SessionLocal() as session:
         draft = await session.scalar(select(TariffDraft).join(User, TariffDraft.user_id == User.id).where(User.telegram_id == telegram_id))

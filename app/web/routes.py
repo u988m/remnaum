@@ -3,10 +3,11 @@ from html import escape
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.bot.runtime import bot, dispatcher
 from app.config import settings
-from app.db.models import Payment
+from app.db.models import Payment, User
 from app.db.session import SessionLocal
 from app.services.payment_providers import get_provider
 from app.services.payment_service import settle_payment
@@ -42,7 +43,7 @@ document.getElementById("save").onclick=async()=>{try{const methods={};ids.forEa
 
 import secrets
 from pydantic import BaseModel, Field
-from app.services.store_settings import get_store_payment_settings, public_payment_settings, update_store_payment_settings
+from app.services.store_settings import get_store_payment_settings, public_payment_settings, update_store_payment_settings, is_payment_method_enabled
 
 
 class PaymentSettingsUpdate(BaseModel):
@@ -91,7 +92,7 @@ async def public_payment_methods():
 
 
 
-from app.services.tariffs import get_store_tariff_pricing, update_store_tariff_pricing
+from app.services.tariffs import get_store_tariff_pricing, update_store_tariff_pricing, set_tariff_draft
 
 class TariffPricingUpdate(BaseModel):
     pricing: dict[str, int | str] = Field(default_factory=dict)
@@ -222,3 +223,186 @@ async def cryptopay_webhook(request: Request):
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Could not process Crypto Pay update") from exc
     return {"ok": True}
+
+
+from datetime import timezone
+
+from fastapi import Header, HTTPException
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from aiogram.types import LabeledPrice
+
+from app.db.models import Subscription, SubscriptionDetails, TermsAcceptance, User
+from app.db.session import SessionLocal
+from app.services.payment_service import accept_current_terms, create_stars_payment_for_user, has_accepted_current_terms
+from app.services.subscriptions import get_user_subscription
+from app.services.tariffs import calculate_store_stars_price, get_store_tariff_pricing, set_tariff_draft
+from app.services.telegram_webapp import validate_telegram_init_data
+from app.config import settings
+from app.bot.runtime import bot
+
+
+async def _webapp_user(init_data: str):
+    try:
+        identity = validate_telegram_init_data(init_data)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    telegram_id = int(identity["id"])
+    async with SessionLocal() as session:
+        statement = pg_insert(User).values(
+            telegram_id=telegram_id,
+            username=identity.get("username"),
+        ).on_conflict_do_update(
+            index_elements=[User.telegram_id],
+            set_={"username": identity.get("username")},
+        )
+        await session.execute(statement)
+        await session.commit()
+    return identity
+
+
+@router.get("/app", response_class=HTMLResponse)
+async def mini_app_page():
+    return HTMLResponse("""<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark"><title>Remnaum</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{color-scheme:dark;font-family:Inter,system-ui,-apple-system,sans-serif;background:var(--tg-theme-bg-color,#0b1018);color:var(--tg-theme-text-color,#f5f7fb)}
+*{box-sizing:border-box}body{margin:0;background:var(--tg-theme-bg-color,#0b1018);color:var(--tg-theme-text-color,#f5f7fb)}
+main{max-width:620px;margin:auto;padding:22px 16px calc(28px + env(safe-area-inset-bottom))}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:26px}
+.brand{font-size:22px;font-weight:800;letter-spacing:-.7px}.tag{font-size:11px;color:var(--tg-theme-hint-color,#91a0b5);border:1px solid var(--tg-theme-section-separator-color,#293548);padding:6px 9px;border-radius:20px}
+h1{font-size:27px;letter-spacing:-.8px;margin:0 0 8px}.muted{color:var(--tg-theme-hint-color,#98a5b7);line-height:1.5}
+.panel{background:var(--tg-theme-secondary-bg-color,#151d29);border:1px solid var(--tg-theme-section-separator-color,#293548);border-radius:18px;padding:18px;margin-top:16px}
+.panel h2{font-size:17px;margin:0 0 14px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.metric{background:var(--tg-theme-bg-color,#0b1018);border-radius:12px;padding:12px 8px;text-align:center}.metric b{display:block;font-size:18px}.metric span{font-size:11px;color:var(--tg-theme-hint-color,#98a5b7)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0}
+select{width:100%;padding:13px;border-radius:11px;border:1px solid var(--tg-theme-section-separator-color,#334155);background:var(--tg-theme-bg-color,#0b1018);color:inherit;font:inherit}
+.price{font-size:25px;font-weight:800;letter-spacing:-.6px}.subprice{font-size:13px;color:var(--tg-theme-hint-color,#98a5b7);margin-top:4px}
+button{width:100%;padding:15px;border:0;border-radius:13px;background:var(--tg-theme-button-color,#4b8bea);color:var(--tg-theme-button-text-color,#fff);font-size:15px;font-weight:750;margin-top:14px}
+button:disabled{opacity:.45}a{color:var(--tg-theme-link-color,#65a9ff)}.status{font-size:13px;line-height:1.5;margin-top:12px;min-height:20px}.check{display:flex;align-items:flex-start;gap:9px;font-size:13px;color:var(--tg-theme-hint-color,#98a5b7);line-height:1.5;margin-top:14px}
+.check input{margin-top:3px}#app{display:none}.loading{text-align:center;padding:60px 20px;color:var(--tg-theme-hint-color,#98a5b7)}
+</style></head><body><main><div id="loading" class="loading">Загружаем ваш магазин…</div><div id="app">
+<header><div class="brand">Remnaum<span style="color:var(--tg-theme-button-color,#4b8bea)">.</span></div><div class="tag">VPN STORE</div></header>
+<h1>Ваш VPN — ваши правила</h1><div class="muted" id="welcome">Выберите параметры подписки и получите доступ за пару секунд.</div>
+<section class="panel" id="subscription" style="display:none"><h2>Ваша подписка</h2><div class="row"><span class="muted">Статус</span><b id="sub-status">—</b></div><div class="row"><span class="muted">Действует до</span><b id="sub-expiry">—</b></div><div class="grid"><div class="metric"><b id="sub-traffic">—</b><span>ГБ</span></div><div class="metric"><b id="sub-devices">—</b><span>устройств</span></div><div class="metric"><b id="sub-days">—</b><span>дней осталось</span></div></div><a id="sub-link" href="#" target="_blank" style="display:none">Открыть ссылку подключения</a></section>
+<section class="panel"><h2>Соберите свой тариф</h2><div class="row"><label for="days">Срок подписки</label><select id="days"><option value="7">7 дней</option><option value="30" selected>30 дней</option><option value="90">90 дней</option><option value="180">180 дней</option><option value="365">365 дней</option></select></div><div class="row"><label for="traffic">Трафик</label><select id="traffic"><option value="10">10 ГБ</option><option value="50">50 ГБ</option><option value="100" selected>100 ГБ</option><option value="250">250 ГБ</option><option value="500">500 ГБ</option><option value="1000">1000 ГБ</option></select></div><div class="row"><label for="devices">Устройства</label><select id="devices"><option value="1" selected>1 устройство</option><option value="2">2 устройства</option><option value="3">3 устройства</option><option value="5">5 устройств</option><option value="10">10 устройств</option></select></div>
+<div style="margin-top:16px"><div class="muted">Стоимость тарифа</div><div class="price" id="rub-price">—</div><div class="subprice" id="stars-price">—</div></div>
+<label class="check"><input id="terms" type="checkbox"><span>Я принимаю <a id="terms-link" href="#" target="_blank">условия оказания услуги</a>.</span></label>
+<button id="buy" disabled>Оплатить Telegram Stars</button><div id="status" class="status"></div></section>
+<div class="muted" style="font-size:12px;text-align:center;margin-top:20px">Безопасная оплата через Telegram Stars · Remnaum</div>
+</div></main>
+<script>
+const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
+let data=null;
+const $=id=>document.getElementById(id);
+function api(path,body){return fetch(path,{method:body?"POST":"GET",headers:{"Content-Type":"application/json","X-Telegram-Init-Data":tg?.initData||""},body:body?JSON.stringify(body):undefined}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.detail||"Ошибка запроса");return d})}
+function limits(){return {days:+$("days").value,traffic:+$("traffic").value,devices:+$("devices").value}}
+function recalc(){if(!data)return;const v=limits(),p=data.pricing;const rub=v.days*p.rub_per_day_minor+v.traffic*p.rub_per_gb_minor+v.devices*p.rub_per_device_minor;const stars=v.days*p.stars_per_day+v.traffic*p.stars_per_gb+v.devices*p.stars_per_device;$("rub-price").textContent=(rub/100).toFixed(2)+" "+p.currency;$("stars-price").textContent=stars+" ⭐ Telegram Stars";$("buy").textContent="Оплатить "+stars+" Stars";$("buy").disabled=!$("terms").checked||!data.stars_enabled||!data.terms_url||stars<1}
+["days","traffic","devices"].forEach(k=>$(k).addEventListener("change",recalc));$("terms").addEventListener("change",recalc);
+$("buy").onclick=async()=>{try{$("buy").disabled=true;$("status").textContent="Создаём счёт…";await api("/api/v1/webapp/terms/accept",{accepted:true});const result=await api("/api/v1/webapp/checkout",limits());if(!tg?.openInvoice)throw Error("Откройте магазин из Telegram, чтобы оплатить счёт");tg.openInvoice(result.invoice_url,(status)=>{$("status").textContent=status==="paid"?"Оплата подтверждена. Обновляем подписку…":status==="cancelled"?"Оплата отменена":"Статус оплаты: "+status;if(status==="paid")setTimeout(()=>location.reload(),1800);else recalc()})}catch(e){$("status").textContent=e.message;recalc()}};
+async function start(){try{if(!tg?.initData)throw Error("Откройте Mini App через кнопку в Telegram");data=await api("/api/v1/webapp/bootstrap");$("loading").style.display="none";$("app").style.display="block";$("welcome").textContent=data.user.first_name?"Здравствуйте, "+data.user.first_name+"! Настройте подписку под себя.":"Выберите параметры подписки.";if(data.terms_url){$("terms-link").href=data.terms_url}else{$("terms-link").textContent="условия не настроены";$("terms-link").removeAttribute("href");$("buy").disabled=true}
+$("days").value=String(data.limits.days_default);$("traffic").value=String(data.limits.traffic_default);$("devices").value=String(data.limits.devices_default);if(data.subscription){const s=data.subscription;$("subscription").style.display="block";$("sub-status").textContent=s.status;$("sub-expiry").textContent=s.expires_at?new Date(s.expires_at).toLocaleString():"—";$("sub-traffic").textContent=s.traffic_gb??"—";$("sub-devices").textContent=s.device_limit??"—";$("sub-days").textContent=s.days_left??"—";if(s.subscription_url){$("sub-link").href=s.subscription_url;$("sub-link").style.display="inline-block"}}
+$("buy").disabled=!data.stars_enabled;recalc()}catch(e){$("loading").textContent=e.message}}
+start();
+</script></body></html>""")
+
+
+@router.get("/api/v1/webapp/bootstrap")
+async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=None)):
+    if not x_telegram_init_data:
+        raise HTTPException(status_code=401, detail="Telegram authentication is required")
+    identity = await _webapp_user(x_telegram_init_data)
+    pricing = await get_store_tariff_pricing()
+    subscription = await get_user_subscription(int(identity["id"]))
+    subscription_data = None
+    if subscription:
+        expiry = subscription.get("expires_at")
+        if expiry and expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        days_left = max(0, (expiry - __import__("datetime").datetime.now(timezone.utc)).days) if expiry else None
+        subscription_data = {
+            "status": subscription["status"],
+            "expires_at": expiry.isoformat() if expiry else None,
+            "traffic_gb": subscription["traffic_gb"],
+            "device_limit": subscription["device_limit"],
+            "subscription_url": subscription["subscription_url"],
+            "days_left": days_left,
+        }
+    return {
+        "user": {"id": identity["id"], "first_name": identity.get("first_name", "")},
+        "pricing": pricing,
+        "stars_enabled": await __import__("app.services.store_settings", fromlist=["is_payment_method_enabled"]).is_payment_method_enabled("telegram_stars"),
+        "terms_url": settings.telegram_terms_url,
+        "limits": {
+            "days_min": settings.tariff_min_days, "days_max": settings.tariff_max_days,
+            "traffic_min": settings.tariff_min_traffic_gb, "traffic_max": settings.tariff_max_traffic_gb,
+            "devices_min": settings.tariff_min_devices, "devices_max": settings.tariff_max_devices,
+            "days_default": min(max(30, settings.tariff_min_days), settings.tariff_max_days),
+            "traffic_default": min(max(100, settings.tariff_min_traffic_gb), settings.tariff_max_traffic_gb),
+            "devices_default": min(max(1, settings.tariff_min_devices), settings.tariff_max_devices),
+        },
+        "subscription": subscription_data,
+    }
+
+
+class WebAppTermsAcceptance(BaseModel):
+    accepted: bool
+
+
+class WebAppCheckout(BaseModel):
+    days: int
+    traffic: int
+    devices: int
+
+
+@router.post("/api/v1/webapp/terms/accept")
+async def webapp_accept_terms(data: WebAppTermsAcceptance, x_telegram_init_data: str | None = Header(default=None)):
+    if not x_telegram_init_data:
+        raise HTTPException(status_code=401, detail="Telegram authentication is required")
+    identity = await _webapp_user(x_telegram_init_data)
+    if not data.accepted:
+        raise HTTPException(status_code=400, detail="Terms acceptance is required")
+    try:
+        await accept_current_terms(int(identity["id"]))
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"accepted": True}
+
+
+@router.post("/api/v1/webapp/checkout")
+async def webapp_create_checkout(data: WebAppCheckout, x_telegram_init_data: str | None = Header(default=None)):
+    if not x_telegram_init_data:
+        raise HTTPException(status_code=401, detail="Telegram authentication is required")
+    identity = await _webapp_user(x_telegram_init_data)
+    if not await has_accepted_current_terms(int(identity["id"])):
+        raise HTTPException(status_code=403, detail="Accept the current terms before checkout")
+    if not await is_payment_method_enabled("telegram_stars"):
+        raise HTTPException(status_code=403, detail="Telegram Stars checkout is disabled")
+    if min(data.days, data.traffic, data.devices) < 1:
+        raise HTTPException(status_code=422, detail="Tariff values must be positive")
+    if not settings.tariff_min_days <= data.days <= settings.tariff_max_days:
+        raise HTTPException(status_code=422, detail="Duration is outside configured limits")
+    if not settings.tariff_min_traffic_gb <= data.traffic <= settings.tariff_max_traffic_gb:
+        raise HTTPException(status_code=422, detail="Traffic is outside configured limits")
+    if not settings.tariff_min_devices <= data.devices <= settings.tariff_max_devices:
+        raise HTTPException(status_code=422, detail="Device count is outside configured limits")
+    await set_tariff_draft(int(identity["id"]), identity.get("username"), data.days, data.traffic, data.devices)
+    payment, stars = await create_stars_payment_for_user(int(identity["id"]))
+    if bot is None:
+        raise HTTPException(status_code=503, detail="Telegram bot is not initialized")
+    try:
+        invoice_url = await bot.create_invoice_link(
+            title="Remnaum VPN",
+            description=f"VPN-подписка: {data.days} дней, {data.traffic} ГБ, {data.devices} устройств",
+            payload=f"remnaum:{payment.id}",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label="Remnaum VPN subscription", amount=stars)],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not create Telegram Stars invoice") from exc
+    return {"payment_id": payment.id, "stars": stars, "invoice_url": invoice_url}
