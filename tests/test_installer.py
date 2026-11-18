@@ -14,7 +14,7 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(installer.valid_domain("webhook.example.net"))
         self.assertTrue(installer.valid_domain("vpn-shop.example.com"))
         for value in ("localhost", "localhost:8080", "127.0.0.1", "bad/domain",
-                      "evil\nkey", "-bad.example.com", "example.com:443"):
+                      "evil\nkey", "-bad.example.com", "example.com:443", "webhook.example.com", "app.example.net"):
             with self.subTest(value=value):
                 self.assertFalse(installer.valid_domain(value))
 
