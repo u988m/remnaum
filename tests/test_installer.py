@@ -154,6 +154,9 @@ class InstallerTests(unittest.TestCase):
              patch.object(installer.shutil, "which", return_value="/usr/bin/git"), \
              patch.object(installer, "run") as runner, \
              patch.object(installer, "wait_for_app_health", return_value=True), \
+             patch.object(installer, "offer_backup_key"), \
+             patch.object(installer, "install_global_command"), \
+             patch.object(installer.backups, "configure_timer", return_value=True), \
              patch.object(installer, "install_update_timer", return_value=True):
             self.assertEqual(installer.perform_update({
                 "DEPLOY_MODE": "panel",
