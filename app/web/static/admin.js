@@ -36,12 +36,34 @@ $("plan-form").onsubmit=async e=>{
     $("status").textContent="Тариф сохранён";await loadPlans();
   }catch(e){$("status").textContent=e.message}
 };
+let previewObjectUrl=null;
+function setPhotoPreview(blob){
+  const container=$("welcome-photo-preview");
+  container.replaceChildren();
+  if(previewObjectUrl)URL.revokeObjectURL(previewObjectUrl);
+  previewObjectUrl=URL.createObjectURL(blob);
+  const image=document.createElement("img");
+  image.alt="Фотография приветствия";
+  image.src=previewObjectUrl;
+  container.append(image);
+}
+async function loadPhotoPreview(){
+  try{
+    const response=await fetch("/admin/api/welcome-photo",{
+      headers:{"X-Telegram-Init-Data":tg?.initData||""},cache:"no-store"
+    });
+    if(response.status===404)return;
+    if(!response.ok)throw Error("Не удалось загрузить превью");
+    setPhotoPreview(await response.blob());
+  }catch(error){$("welcome-photo-status").textContent=error.message}
+}
 async function loadBrand(){
   const d=await adminApi("GET","/admin/api/store-profile");
   $("brand-name").value=d.name;$("brand-tagline").value=d.tagline;$("brand-description").value=d.description;
   $("admin-store-name").textContent=d.name;
   $("welcome-photo-status").textContent=d.welcome_photo_file_id?"Фото приветствия установлено":"Фото не установлено";
   $("welcome-photo-remove").disabled=!d.welcome_photo_file_id;
+  if(d.welcome_photo_file_id)await loadPhotoPreview();
   $("brand-support").value=d.support_contact;$("brand-terms").value=d.terms_url||"";$("brand-color").value=d.accent_color;
 }
 $("brand-form").onsubmit=async e=>{
@@ -67,11 +89,7 @@ $("welcome-photo-input").onchange=async event=>{
     });
     const result=await response.json();
     if(!response.ok)throw Error(result.detail||"Не удалось загрузить фото");
-    const preview=$("welcome-photo-preview");
-    preview.replaceChildren();
-    const img=document.createElement("img");img.alt="Новая фотография приветствия";
-    img.src=URL.createObjectURL(file);img.onload=()=>URL.revokeObjectURL(img.src);
-    preview.append(img);
+    setPhotoPreview(file);
     status.textContent="Фото установлено. Оно появится при следующем /start";
     $("welcome-photo-remove").disabled=false;
   }catch(error){status.textContent=error.message}
@@ -80,6 +98,7 @@ $("welcome-photo-input").onchange=async event=>{
 $("welcome-photo-remove").onclick=async()=>{
   try{
     await adminApi("DELETE","/admin/api/welcome-photo");
+    if(previewObjectUrl){URL.revokeObjectURL(previewObjectUrl);previewObjectUrl=null}
     $("welcome-photo-preview").replaceChildren();
     const mark=document.createElement("span");mark.textContent="R";$("welcome-photo-preview").append(mark);
     $("welcome-photo-status").textContent="Фото удалено";
