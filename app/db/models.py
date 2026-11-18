@@ -121,3 +121,35 @@ class StoreProfile(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     data: Mapped[dict] = mapped_column(JSON, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ReferralSettings(Base):
+    """Owner-controlled referral rewards. Disabled until the owner opts in."""
+    __tablename__ = "referral_settings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    reward_days: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ReferralReward(Base):
+    """One reward per referred customer, granted only after their first fulfilled purchase."""
+    __tablename__ = "referral_rewards"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    inviter_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    invited_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True, nullable=False)
+    source_payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id"), unique=True, nullable=False)
+    days: Mapped[int] = mapped_column(Integer, nullable=False)
+    redeemed_payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id"), index=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RemnawaveEvent(Base):
+    """Deduplicated signed event metadata; avoids storing customer data in raw webhooks."""
+    __tablename__ = "remnawave_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    body_digest: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    event: Mapped[str] = mapped_column(String(128), nullable=False)
+    scope: Mapped[str] = mapped_column(String(48), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="received")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
