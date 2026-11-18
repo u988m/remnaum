@@ -157,40 +157,43 @@ def mode_files(mode: str, network: str = "") -> str:
 
 
 def generate_proxy_snippets(cfg: dict[str, str]) -> None:
-    """Generate examples only. Never edit or restart Remnawave's proxy."""
+    """Write both Docker-proxy and host-proxy examples, without modifying Panel."""
     folder = ROOT / "generated"
     folder.mkdir(mode=0o700, exist_ok=True)
-    domain_list = list(dict.fromkeys([cfg["PUBLIC_DOMAIN"], cfg["WEBAPP_DOMAIN"]]))
-    domains = ", ".join(f"https://{value}" for value in domain_list)
-    upstream = ("remnaum-api:8080" if cfg.get("REMNAUM_PROXY_NETWORK") else
-                f"127.0.0.1:{cfg.get('REMNAUM_LOCAL_PORT', '18080')}")
-    caddy = (f"# Add this site block to your EXISTING Caddyfile (do not replace it).\n"
-             f"{domains} {{\n"
-             f"    encode zstd gzip\n"
-             f"    reverse_proxy http://{upstream}\n"
-             f"}}\n")
-    hostnames = " ".join(domain_list)
-    nginx = (
-        "# Add this server block to the EXISTING Nginx configuration.\n"
-        "# Obtain TLS certificates for these names using your existing certificate method.\n"
-        "server {\n"
-        "    listen 443 ssl;\n"
-        f"    server_name {hostnames};\n"
-        "    ssl_certificate /PATH/TO/fullchain.pem;\n"
-        "    ssl_certificate_key /PATH/TO/privkey.pem;\n"
-        "    location / {\n"
-        f"        proxy_pass http://{upstream};\n"
-        "        proxy_http_version 1.1;\n"
-        "        proxy_set_header Host $host;\n"
-        "        proxy_set_header X-Real-IP $remote_addr;\n"
-        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
-        "        proxy_set_header X-Forwarded-Proto $scheme;\n"
-        "    }\n"
-        "}\n"
-    )
-    (folder / "remnaum.caddy").write_text(caddy, encoding="utf-8")
-    (folder / "remnaum.nginx.conf").write_text(nginx, encoding="utf-8")
-    print("Proxy snippets generated: generated/remnaum.caddy and generated/remnaum.nginx.conf")
+    domains_list = list(dict.fromkeys([cfg["PUBLIC_DOMAIN"], cfg["WEBAPP_DOMAIN"]]))
+    caddy_domains = ", ".join(f"https://{name}" for name in domains_list)
+    nginx_domains = " ".join(domains_list)
+    for variant, upstream in (
+        ("docker", "remnaum-api:8080"),
+        ("host", f"127.0.0.1:{cfg.get('REMNAUM_LOCAL_PORT', '18080')}"),
+    ):
+        caddy = (
+            "# Add this block to the EXISTING Panel Caddyfile; do not replace it.\n"
+            f"{caddy_domains} {{\n"
+            "    encode zstd gzip\n"
+            f"    reverse_proxy http://{upstream}\n"
+            "}\n"
+        )
+        nginx = (
+            "# Add to the EXISTING Nginx configuration; supply valid TLS certs.\n"
+            "server {\n"
+            "    listen 443 ssl;\n"
+            f"    server_name {nginx_domains};\n"
+            "    ssl_certificate /PATH/TO/fullchain.pem;\n"
+            "    ssl_certificate_key /PATH/TO/privkey.pem;\n"
+            "    location / {\n"
+            f"        proxy_pass http://{upstream};\n"
+            "        proxy_http_version 1.1;\n"
+            "        proxy_set_header Host $host;\n"
+            "        proxy_set_header X-Real-IP $remote_addr;\n"
+            "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+            "        proxy_set_header X-Forwarded-Proto $scheme;\n"
+            "    }\n"
+            "}\n"
+        )
+        (folder / f"remnaum.{variant}.caddy").write_text(caddy, encoding="utf-8")
+        (folder / f"remnaum.{variant}.nginx.conf").write_text(nginx, encoding="utf-8")
+    print("Proxy examples generated in generated/ for both Docker and host proxies")
 
 
 def choose_mode(existing: dict[str, str], requested: str | None) -> str:
