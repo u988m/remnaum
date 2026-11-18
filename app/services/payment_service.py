@@ -8,9 +8,13 @@ from app.db.session import SessionLocal
 from app.config import settings
 from app.services.payment_providers import VerifiedPayment, get_provider
 from app.services.tariffs import calculate_stars_price, ensure_tariff_draft
+from app.services.store_settings import get_store_payment_settings
 
 
 async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple[Payment, Any]:
+    methods, credentials = await get_store_payment_settings()
+    if provider_name == "telegram_stars" or not methods.get(provider_name):
+        raise ValueError("This payment method is not enabled for the standalone storefront")
     await ensure_tariff_draft(telegram_id)
     if not settings.remnawave_base_url or not settings.remnawave_api_token:
         raise RuntimeError("Remnawave is not configured; payment checkout is disabled")
@@ -51,7 +55,7 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
         amount = payment.amount
         currency = payment.currency
 
-    provider = get_provider(provider_name)
+    provider = get_provider(provider_name, credentials.get(provider_name))
     try:
         link = await provider.create_payment(
             local_payment_id=payment_id,

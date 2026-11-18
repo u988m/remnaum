@@ -50,6 +50,13 @@ class PaymentSettingsUpdate(BaseModel):
     credentials: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
+async def _configured_provider(name: str):
+    methods, credentials = await get_store_payment_settings()
+    if not methods.get(name):
+        raise HTTPException(status_code=404, detail="Payment provider is disabled")
+    return get_provider(name, credentials.get(name))
+
+
 def _require_admin_token(token: str | None) -> None:
     if not settings.admin_api_token:
         raise HTTPException(status_code=503, detail="ADMIN_API_TOKEN is not configured")
@@ -120,7 +127,11 @@ async def yoomoney_payment_form(payment_id: int):
         if payment is None or payment.status != "pending":
             raise HTTPException(status_code=404, detail="Payment not found or no longer pending")
         amount = f"{payment.amount / 100:.2f}"
-    receiver = escape(settings.yoomoney_receiver, quote=True)
+    methods, credentials = await get_store_payment_settings()
+    if not methods.get("yoomoney"):
+        raise HTTPException(status_code=404, detail="Payment provider is disabled")
+    receiver_value = (credentials.get("yoomoney") or {}).get("receiver") or settings.yoomoney_receiver
+    receiver = escape(receiver_value, quote=True)
     label = escape(f"remnaum-{payment_id}", quote=True)
     html = f"""<!doctype html>
 <html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -141,7 +152,7 @@ async def yoomoney_payment_form(payment_id: int):
 async def yookassa_webhook(request: Request):
     body = await request.body()
     try:
-        verified = await get_provider("yookassa").verify_webhook(body, dict(request.headers))
+        verified = await (await _configured_provider("yookassa")).verify_webhook(body, dict(request.headers))
         await settle_payment(verified, "yookassa")
         await provision_paid_payment(verified.local_payment_id)
     except ValueError as exc:
@@ -155,7 +166,7 @@ async def yookassa_webhook(request: Request):
 async def yoomoney_webhook(request: Request):
     body = await request.body()
     try:
-        verified = await get_provider("yoomoney").verify_webhook(body, dict(request.headers))
+        verified = await (await _configured_provider("yoomoney")).verify_webhook(body, dict(request.headers))
         await settle_payment(verified, "yoomoney")
         await provision_paid_payment(verified.local_payment_id)
     except ValueError as exc:
@@ -169,7 +180,7 @@ async def yoomoney_webhook(request: Request):
 async def cryptopay_webhook(request: Request):
     body = await request.body()
     try:
-        verified = await get_provider("cryptopay").verify_webhook(body, dict(request.headers))
+        verified = await (await _configured_provider("cryptopay")).verify_webhook(body, dict(request.headers))
         await settle_payment(verified, "cryptopay")
         await provision_paid_payment(verified.local_payment_id)
     except ValueError as exc:

@@ -57,9 +57,10 @@ async def update_store_payment_settings(methods: dict[str, bool], credentials: d
             if values:
                 stored[provider] = {str(k): str(v) for k, v in values.items() if v}
         current = (row.methods if row else DEFAULT_METHODS.copy()) | {k: bool(v) for k, v in methods.items()}
-        for provider in PROVIDERS - {"telegram_stars"}:
-            if current.get(provider) and not stored.get(provider):
-                raise ValueError(f"Credentials are required before enabling {provider}")
+        required = {"yookassa": ("shop_id", "secret_key"), "yoomoney": ("receiver", "notification_secret"), "cryptopay": ("api_token",)}
+        for provider, fields in required.items():
+            if current.get(provider) and not all(stored.get(provider, {}).get(field) for field in fields):
+                raise ValueError(f"Complete credentials are required before enabling {provider}")
         if row is None:
             row = StorePaymentSettings(id=1)
             session.add(row)
@@ -72,5 +73,10 @@ async def update_store_payment_settings(methods: dict[str, bool], credentials: d
 def public_payment_settings(methods, credentials):
     return {
         "methods": methods,
-        "configured": {p: (p == "telegram_stars" or bool(credentials.get(p))) for p in PROVIDERS},
+        "configured": {
+            "telegram_stars": True,
+            "yookassa": all(credentials.get("yookassa", {}).get(k) for k in ("shop_id", "secret_key")),
+            "yoomoney": all(credentials.get("yoomoney", {}).get(k) for k in ("receiver", "notification_secret")),
+            "cryptopay": bool(credentials.get("cryptopay", {}).get("api_token")),
+        },
     }

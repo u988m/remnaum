@@ -52,9 +52,10 @@ class PaymentProvider:
 class YooKassaProvider(PaymentProvider):
     name = "yookassa"
 
-    def __init__(self, transport: httpx.AsyncBaseTransport | None = None):
-        self.shop_id = settings.yookassa_shop_id
-        self.secret = settings.yookassa_secret_key
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None, credentials: dict[str, str] | None = None):
+        credentials = credentials or {}
+        self.shop_id = credentials.get("shop_id") or settings.yookassa_shop_id
+        self.secret = credentials.get("secret_key") or settings.yookassa_secret_key
         self.currency = settings.yookassa_currency
         self.transport = transport
 
@@ -123,9 +124,10 @@ class YooKassaProvider(PaymentProvider):
 class YooMoneyProvider(PaymentProvider):
     name = "yoomoney"
 
-    def __init__(self):
-        self.receiver = settings.yoomoney_receiver
-        self.secret = settings.yoomoney_notification_secret
+    def __init__(self, credentials: dict[str, str] | None = None):
+        credentials = credentials or {}
+        self.receiver = credentials.get("receiver") or settings.yoomoney_receiver
+        self.secret = credentials.get("notification_secret") or settings.yoomoney_notification_secret
 
     async def create_payment(
         self, *, local_payment_id: int, amount_minor: int, currency: str, description: str
@@ -170,8 +172,9 @@ class YooMoneyProvider(PaymentProvider):
 class CryptoPayProvider(PaymentProvider):
     name = "cryptopay"
 
-    def __init__(self, transport: httpx.AsyncBaseTransport | None = None):
-        self.token = settings.cryptopay_api_token
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None, credentials: dict[str, str] | None = None):
+        credentials = credentials or {}
+        self.token = credentials.get("api_token") or settings.cryptopay_api_token
         self.assets = [item.strip().upper() for item in settings.cryptopay_accepted_assets.split(",") if item.strip()]
         self.transport = transport
 
@@ -237,13 +240,13 @@ class CryptoPayProvider(PaymentProvider):
         )
 
 
-def get_provider(name: str) -> PaymentProvider:
+def get_provider(name: str, credentials: dict[str, str] | None = None) -> PaymentProvider:
     providers: dict[str, type[PaymentProvider]] = {
         "yookassa": YooKassaProvider,
         "yoomoney": YooMoneyProvider,
         "cryptopay": CryptoPayProvider,
     }
     try:
-        return providers[name]()
+        return providers[name](credentials=credentials)
     except KeyError as exc:
         raise ValueError("Unsupported payment provider") from exc
