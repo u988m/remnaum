@@ -27,7 +27,7 @@ esac
 if [ -f "$DEST/install.sh" ] && [ -f "$DEST/scripts/install.py" ]; then
   echo "Проект найден: $DEST"
   cd "$DEST"
-  exec sh ./install.sh --no-relocate
+  exec sh ./install.sh --no-relocate </dev/tty
 fi
 if [ -e "$DEST" ] && [ "$(ls -A "$DEST")" ]; then
   echo "Каталог уже занят: $DEST. Данные не тронуты." >&2
@@ -61,4 +61,4 @@ fi
 mv "$TEMP/project" "$DEST"
 echo "Проект скачан: $DEST"
 cd "$DEST"
-exec sh ./install.sh --no-relocate
+exec sh ./install.sh --no-relocate </dev/tty
