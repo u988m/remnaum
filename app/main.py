@@ -1,8 +1,10 @@
 import asyncio
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.bot.runtime import bot, dispatcher, setup_bot
 from app.config import settings
@@ -67,6 +69,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title=settings.app_name, version="1.0.0-rc.4", lifespan=lifespan)
 app.include_router(api_router)
 app.include_router(store_router)
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "static"), name="static")
 
 
 @app.get("/health")
