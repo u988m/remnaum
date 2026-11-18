@@ -35,6 +35,27 @@ class RemnawaveClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"username":"tg_12345"', seen["payload"])
         self.assertIn('"telegramId":12345', seen["payload"])
 
+    async def test_resolves_old_uuid_to_numeric_panel_v3_user_id(self):
+        async def unused(): pass
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/api/users/by-username/tg_12345":
+                return httpx.Response(200, json={"response": {"id": 1204, "username": "tg_12345"}})
+            return httpx.Response(200, json={"response": {"devices": []}})
+        client = RemnawaveClient("https://panel.example", "token", httpx.MockTransport(handler))
+        self.assertEqual(await client.resolve_user_id("7e141bf3-cc24-4285-ad98-ac366edacb45",
+                                                     username="tg_12345"), 1204)
+        self.assertEqual(await client.resolve_user_id("1204", username="tg_12345"), 1204)
+        self.assertEqual(await client.resolve_user_id("legacy-uuid"), "legacy-uuid")
+
+    async def test_numeric_user_id_hwid_route_on_panel_3(self):
+        seen = []
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.url.path)
+            return httpx.Response(200, json={"response": {"devices": []}})
+        client = RemnawaveClient("https://panel.example", "token", httpx.MockTransport(handler))
+        await client.get_hwid_devices(1204)
+        self.assertEqual(seen, ["/api/hwid/devices/1204"])
+
     async def test_legacy_uuid_user_updates(self):
         seen = {}
 
