@@ -348,7 +348,7 @@ def scrub_migrated_legacy_payment_keys(path: Path = ENV_PATH) -> bool:
     return True
 
 
-def install_global_command() -> None:
+def install_global_command(destination: Path = Path("/usr/local/bin/remnaum")) -> None:
     """Keep one safe launcher pointing to the actual installation directory."""
     if os.geteuid() != 0:
         return
@@ -356,7 +356,7 @@ def install_global_command() -> None:
     if not re.fullmatch(r"/[A-Za-z0-9_./-]+", location):
         ui.warning("Путь содержит необычные символы; глобальная команда не настроена")
         return
-    path = Path("/usr/local/bin/remnaum")
+    path = destination
     wrapper = (
         "#!/bin/sh\n"
         "set -eu\n"
