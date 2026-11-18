@@ -66,7 +66,7 @@ async def lifespan(_: FastAPI):
         await engine.dispose()
 
 
-app = FastAPI(title=settings.app_name, version="1.0.0-rc.7", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.0.0-rc.8", lifespan=lifespan)
 app.include_router(api_router)
 app.include_router(store_router)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "static"), name="static")
