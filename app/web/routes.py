@@ -288,6 +288,17 @@ button:disabled{opacity:.45}a{color:var(--tg-theme-link-color,#65a9ff)}.status{f
 <section class="panel" id="account-devices"><h2>📱 Мои устройства</h2><div class="muted" id="account-device-info">Загружаем…</div></section>
 <section class="panel" id="account-purchases"><h2>🧾 Мои покупки</h2><div class="muted" id="account-purchase-info">Загружаем…</div></section>
 <section class="panel" id="account-referrals"><h2>🎁 Пригласить друга</h2><div class="muted" id="account-referral-info">Загружаем…</div><a id="account-referral-link" style="display:none"></a></section>
+<section class="panel" id="trial-offer" style="display:none">
+<h2>🎁 Пробный доступ</h2><p class="muted" id="trial-copy"></p>
+<button id="trial-claim" type="button">Получить пробный доступ</button>
+<p class="status" id="trial-status"></p>
+</section>
+<section class="panel" id="promo-offer">
+<h2>🎟 Промокод</h2><p class="muted" id="promo-balance">Ваши бонусные дни появятся здесь</p>
+<input id="promo-input" maxlength="32" placeholder="Введите промокод" autocomplete="off" style="width:100%;padding:14px;background:var(--tg-theme-bg-color,#0b1018);color:inherit;border:1px solid #334155;border-radius:12px">
+<button id="promo-activate" type="button">Активировать код</button>
+<p class="status" id="promo-status"></p>
+</section>
 <section class="panel" id="fixed-plans" style="display:none"><h2>Готовые тарифы</h2><div id="plans-list"></div><p class="muted">Цены готовых тарифов задаёт владелец магазина. Для оплаты примите условия ниже.</p></section>
 <section class="panel"><h2>Соберите свой тариф</h2><div class="row"><label for="days">Срок подписки</label><select id="days"></select></div><div class="row"><label for="traffic">Трафик</label><select id="traffic"></select></div><div class="row"><label for="devices">Устройства</label><select id="devices"></select></div>
 <div style="margin-top:16px"><div class="muted">Стоимость в Telegram</div><div class="price" id="stars-price">—</div></div>
@@ -300,6 +311,32 @@ const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
 let data=null;
 const $=id=>document.getElementById(id);
 function api(path,body){return fetch(path,{method:body?"POST":"GET",headers:{"Content-Type":"application/json","X-Telegram-Init-Data":tg?.initData||""},body:body?JSON.stringify(body):undefined}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.detail||"Ошибка запроса");return d})}
+async function loadOffers(){
+  try{
+    const d=await api("/api/v1/webapp/offers");
+    if(d.trial.enabled&&d.trial.eligible){
+      $("trial-offer").style.display="block";
+      $("trial-copy").textContent=d.trial.days+" дней · "+d.trial.traffic_gb+" ГБ · "+d.trial.device_limit+" устройств";
+    }else{$("trial-offer").style.display="none"}
+    $("promo-balance").textContent="Бонусные дни: "+d.promo_balance.days+" · Активировано кодов: "+d.promo_balance.claimed+". Бонус добавится к следующему оплаченному тарифу.";
+  }catch(e){$("promo-balance").textContent="Бонусы пока недоступны"}
+}
+$("trial-claim").onclick=async()=>{
+  $("trial-claim").disabled=true;
+  try{const d=await api("/api/v1/webapp/trial",{});
+    $("trial-status").textContent="Доступ активирован на "+d.days+" дней";
+    location.reload();
+  }catch(e){$("trial-status").textContent=e.message;$("trial-claim").disabled=false}
+};
+$("promo-activate").onclick=async()=>{
+  const code=$("promo-input").value.trim();
+  $("promo-activate").disabled=true;
+  try{const d=await api("/api/v1/webapp/promos/redeem",{code});
+    $("promo-status").textContent="Готово! Начислено +"+d.reward.bonus_days+" дней.";
+    $("promo-input").value="";await loadOffers();
+  }catch(e){$("promo-status").textContent=e.message}
+  $("promo-activate").disabled=false;
+};
 async function loadAccountPanels(){
   const results=await Promise.allSettled([
     api("/api/v1/webapp/devices"),api("/api/v1/webapp/purchases"),api("/api/v1/webapp/referrals")
@@ -347,7 +384,7 @@ function recalc(){if(!data)return;const v=limits(),p=data.pricing;const stars=v.
 $("buy").onclick=async()=>{try{$("buy").disabled=true;$("status").textContent="Создаём счёт…";await api("/api/v1/webapp/terms/accept",{accepted:true});const result=await api("/api/v1/webapp/checkout",limits());if(!tg?.openInvoice)throw Error("Откройте магазин из Telegram, чтобы оплатить счёт");tg.openInvoice(result.invoice_url,(status)=>{$("status").textContent=status==="paid"?"Оплата подтверждена. Обновляем подписку…":status==="cancelled"?"Оплата отменена":"Статус оплаты: "+status;if(status==="paid")setTimeout(()=>location.reload(),1800);else recalc()})}catch(e){$("status").textContent=e.message;recalc()}};
 async function start(){try{if(!tg?.initData)throw Error("Откройте Mini App через кнопку в Telegram");data=await api("/api/v1/webapp/bootstrap");if(data.profile){$("store-name").textContent=data.profile.name;$("store-tagline").textContent=data.profile.tagline||"Ваш VPN";document.documentElement.style.setProperty("--tg-theme-button-color",data.profile.accent_color)}$("loading").style.display="none";$("app").style.display="block";$("welcome").textContent=data.user.first_name?"Здравствуйте, "+data.user.first_name+"! Настройте подписку под себя.":"Выберите параметры подписки.";if(data.terms_url){$("terms-link").href=data.terms_url}else{$("terms-link").textContent="условия не настроены";$("terms-link").removeAttribute("href");$("buy").disabled=true}
 fillOptions("days",data.limits.days_min,data.limits.days_max,1,data.limits.days_default,"дней");fillOptions("traffic",data.limits.traffic_min,data.limits.traffic_max,1,data.limits.traffic_default,"ГБ");fillOptions("devices",data.limits.devices_min,data.limits.devices_max,1,data.limits.devices_default,"устройств");if(data.subscription){const s=data.subscription;$("subscription").style.display="block";$("sub-status").textContent=s.status;$("sub-expiry").textContent=s.expires_at?new Date(s.expires_at).toLocaleString():"—";$("sub-traffic").textContent=s.traffic_gb??"—";$("sub-devices").textContent=s.device_limit??"—";$("sub-days").textContent=s.days_left??"—";if(s.subscription_url){$("sub-link").href=s.subscription_url;$("sub-link").style.display="inline-block"}}
-$("buy").disabled=!data.stars_enabled;recalc();loadAccountPanels();await loadReadyPlans()}catch(e){$("loading").textContent=e.message}}
+$("buy").disabled=!data.stars_enabled;recalc();loadAccountPanels();loadOffers();await loadReadyPlans()}catch(e){$("loading").textContent=e.message}}
 start();
 </script></body></html>""")
 
@@ -501,7 +538,7 @@ th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflo
 <div class="card"><span>Успешные платежи</span><b id="paid-count">—</b></div>
 <div class="card"><span>Ожидают оплаты</span><b id="pending-count">—</b></div>
 </div>
-<nav><button class="active" data-tab="users">Клиенты</button><button data-tab="payments">Платежи</button><button data-tab="plans">Готовые тарифы</button><button data-tab="brand">Оформление</button><button data-tab="settings">Оплата</button><button data-tab="referrals">Рефералы</button><button data-tab="tariffs">Конструктор</button></nav>
+<nav><button class="active" data-tab="users">Клиенты</button><button data-tab="payments">Платежи</button><button data-tab="plans">Готовые тарифы</button><button data-tab="brand">Оформление</button><button data-tab="settings">Оплата</button><button data-tab="referrals">Рефералы</button><button data-tab="trial">Пробный</button><button data-tab="promos">Промокоды</button><button data-tab="tariffs">Конструктор</button></nav>
 <section class="section" id="users-view"><div class="toolbar"><h2>Клиенты и подписки</h2><button class="action" id="users-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>Telegram ID</th><th>Username</th><th>Подписка</th><th>До</th><th>Регистрация</th><th>Действие</th></tr></thead><tbody id="users-table"></tbody></table></div><div id="customer-detail" class="section" hidden aria-live="polite"><div class="toolbar"><h2 id="customer-title">Карточка клиента</h2><button class="action" id="customer-close">Закрыть</button></div><p class="muted" id="customer-summary"></p><h3>Подписки</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Статус</th><th>Действует до</th><th>Создана</th></tr></thead><tbody id="customer-subscriptions"></tbody></table></div><h3>Платежи</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="customer-payments"></tbody></table></div></div><div class="toolbar" style="margin-top:12px"><button class="action" id="users-prev">Назад</button><span id="users-page" class="muted">Страница 1</span><button class="action" id="users-next">Далее</button></div></section>
 <section class="section" id="payments-view" hidden><div class="toolbar"><h2>История платежей</h2><button class="action" id="payments-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Клиент</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="payments-table"></tbody></table></div><div class="toolbar" style="margin-top:12px"><button class="action" id="payments-prev">Назад</button><span id="payments-page" class="muted">Страница 1</span><button class="action" id="payments-next">Далее</button></div></section>
 <section class="section" id="plans-view" hidden>
@@ -533,6 +570,24 @@ th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflo
 <button class="action primary" type="submit">Сохранить настройки</button>
 </form>
 </section>
+<section class="section" id="trial-view" hidden>
+<h2>Пробный доступ</h2><p class="muted">Однократный пробный тариф до первой подписки. Выдача через Remnawave; без тестовых пользователей при установке.</p>
+<form id="trial-form">
+<label><input id="trial-enabled" type="checkbox"> Включить пробный доступ</label>
+<label>Срок, дней<input id="trial-days" type="number" min="1" max="30" required></label>
+<label>Трафик, ГБ<input id="trial-traffic" type="number" min="1" max="200" required></label>
+<label>Устройства<input id="trial-devices" type="number" min="1" max="5" required></label>
+<button type="submit" class="action primary">Сохранить пробный тариф</button>
+</form></section>
+<section class="section" id="promos-view" hidden>
+<h2>Промокоды на бонусные дни</h2><p class="muted">Код активируется один раз на пользователя. Дни добавляются при следующей успешной покупке.</p>
+<form id="promo-form">
+<label>Код<input id="promo-code" maxlength="32" placeholder="WELCOME2026" required></label>
+<label>Бонусных дней<input id="promo-days" type="number" min="1" max="90" value="7" required></label>
+<label>Максимум активаций<input id="promo-uses" type="number" min="1" max="100000" value="100" required></label>
+<button type="submit" class="action primary">Создать промокод</button>
+</form>
+<div id="promo-admin-list"></div></section>
 <section class="section" id="brand-view" hidden>
 <h2>Оформление магазина</h2>
 <p class="muted">Настройки видны покупателям в боте и Mini App без перезапуска сервиса.</p>
@@ -658,6 +713,34 @@ $("pricing-save").onclick=async()=>{try{
   const pricing={};pricingKeys.forEach(k=>pricing[k]=k==="currency"?$("pricing-"+k).value:+$("pricing-"+k).value);
   await adminApi("PUT","/admin/api/tariff-pricing",{pricing});$("status").textContent="Формула цен сохранена";
 }catch(e){$("status").textContent=e.message}};
+async function loadTrialSettings(){
+  const d=await adminApi("GET","/admin/api/trial");
+  $("trial-enabled").checked=d.enabled;$("trial-days").value=d.days;
+  $("trial-traffic").value=d.traffic_gb;$("trial-devices").value=d.device_limit;
+}
+$("trial-form").onsubmit=async event=>{
+  event.preventDefault();
+  try{await adminApi("PUT","/admin/api/trial",{enabled:$("trial-enabled").checked,days:+$("trial-days").value,traffic_gb:+$("trial-traffic").value,device_limit:+$("trial-devices").value});$("status").textContent="Настройки пробного доступа сохранены"}
+  catch(e){$("status").textContent=e.message}
+};
+async function loadPromos(){
+  const d=await adminApi("GET","/admin/api/promos");
+  $("promo-admin-list").replaceChildren();
+  d.items.forEach(p=>{
+    const line=document.createElement("div");line.className="row";line.style.margin="12px 0";
+    const text=document.createElement("span");text.textContent=p.code+" · +"+p.bonus_days+" дней · "+p.used_count+"/"+p.max_uses;
+    const toggle=document.createElement("button");toggle.type="button";toggle.className="action";
+    toggle.textContent=p.active?"Отключить":"Включить";
+    toggle.onclick=async()=>{try{await adminApi("PUT","/admin/api/promos/"+p.id,{active:!p.active});await loadPromos()}catch(e){$("status").textContent=e.message}};
+    line.append(text,toggle);$("promo-admin-list").append(line);
+  });
+}
+$("promo-form").onsubmit=async event=>{
+  event.preventDefault();
+  try{await adminApi("POST","/admin/api/promos",{code:$("promo-code").value,bonus_days:+$("promo-days").value,max_uses:+$("promo-uses").value});
+      $("promo-code").value="";$("status").textContent="Промокод создан";await loadPromos()}
+  catch(e){$("status").textContent=e.message}
+};
 async function loadReferrals(){
   const d=await adminApi("GET","/admin/api/referrals");
   $("referral-enabled").checked=d.enabled;$("referral-days").value=d.reward_days;
@@ -669,7 +752,7 @@ $("referral-form").onsubmit=async e=>{
   }catch(err){$("status").textContent=err.message}
 };
 async function start(){try{if(!tg?.initData)throw Error("Откройте панель через Telegram Mini App");const d=await api("/admin/api/overview");$("loading").hidden=true;$("dashboard").hidden=false;$("welcome").textContent="Здравствуйте, "+(d.admin_name||"администратор");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments;await loadUsers()}catch(e){$("loading").textContent=e.message}}
-document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const tab=b.dataset.tab;$("users-view").hidden=tab!=="users";$("payments-view").hidden=tab!=="payments";$("plans-view").hidden=tab!=="plans";$("brand-view").hidden=tab!=="brand";$("referrals-view").hidden=tab!=="referrals";$("payment-settings-view").hidden=tab!=="settings";$("pricing-view").hidden=tab!=="tariffs";try{if(tab==="payments")await loadPayments();if(tab==="plans")await loadPlans();if(tab==="brand")await loadBrand();if(tab==="referrals")await loadReferrals();if(tab==="settings")await loadPaymentSettings();if(tab==="tariffs")await loadPricing()}catch(e){$("status").textContent=e.message}}));
+document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const tab=b.dataset.tab;$("users-view").hidden=tab!=="users";$("payments-view").hidden=tab!=="payments";$("plans-view").hidden=tab!=="plans";$("brand-view").hidden=tab!=="brand";$("referrals-view").hidden=tab!=="referrals";$("trial-view").hidden=tab!=="trial";$("promos-view").hidden=tab!=="promos";$("payment-settings-view").hidden=tab!=="settings";$("pricing-view").hidden=tab!=="tariffs";try{if(tab==="payments")await loadPayments();if(tab==="plans")await loadPlans();if(tab==="brand")await loadBrand();if(tab==="referrals")await loadReferrals();if(tab==="trial")await loadTrialSettings();if(tab==="promos")await loadPromos();if(tab==="settings")await loadPaymentSettings();if(tab==="tariffs")await loadPricing()}catch(e){$("status").textContent=e.message}}));
 $("users-refresh").onclick=()=>loadUsers().catch(e=>$("status").textContent=e.message);$("payments-refresh").onclick=()=>loadPayments().catch(e=>$("status").textContent=e.message);
 $("users-prev").onclick=()=>{userOffset=Math.max(0,userOffset-pageSize);loadUsers()};$("users-next").onclick=()=>{userOffset+=pageSize;loadUsers()};
 $("payments-prev").onclick=()=>{paymentOffset=Math.max(0,paymentOffset-pageSize);loadPayments()};$("payments-next").onclick=()=>{paymentOffset+=pageSize;loadPayments()};
