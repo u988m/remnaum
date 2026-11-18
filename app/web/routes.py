@@ -955,7 +955,7 @@ async def webapp_hwid_devices(x_telegram_init_data: str | None = Header(default=
 
 @router.get("/api/v1/webapp/referrals")
 async def webapp_referrals(x_telegram_init_data: str | None = Header(default=None)):
-    from app.services.referrals import referral_code, referral_count
+    from app.services.referrals import referral_code, referral_count, get_referral_settings, reward_balance
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     identity = await _webapp_user(x_telegram_init_data)
@@ -964,5 +964,32 @@ async def webapp_referrals(x_telegram_init_data: str | None = Header(default=Non
     return {
         "link": f"https://t.me/{username}?start={referral_code(telegram_id)}" if username else None,
         "count": await referral_count(telegram_id),
-        "rewards_enabled": False,
+        "rewards_enabled": (await get_referral_settings())["enabled"],
+        "reward": await reward_balance(telegram_id),
     }
+
+
+
+from app.services.referrals import get_referral_settings, update_referral_settings
+
+
+class ReferralSettingsPayload(BaseModel):
+    enabled: bool
+    reward_days: int = Field(ge=1, le=90)
+
+
+@router.get("/admin/api/referrals")
+async def admin_referrals(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    return await get_referral_settings()
+
+
+@router.put("/admin/api/referrals")
+async def admin_update_referrals(
+    data: ReferralSettingsPayload, x_telegram_init_data: str | None = Header(default=None)
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    try:
+        return await update_referral_settings(data.enabled, data.reward_days)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
