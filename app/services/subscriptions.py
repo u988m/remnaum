@@ -170,6 +170,7 @@ async def get_user_subscription(telegram_id: int) -> dict[str, Any] | None:
         subscription, details = row
         return {
             "status": subscription.status,
+            "panel_user_id": subscription.panel_user_id,
             "expires_at": subscription.expires_at,
             "subscription_url": details.subscription_url if details else None,
             "traffic_gb": details.traffic_gb if details else None,
