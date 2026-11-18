@@ -89,6 +89,18 @@ async def start_handler(message: Message) -> None:
     )
 
 
+@router.message(Command("admin"))
+async def admin_command_handler(message: Message) -> None:
+    if message.from_user is None or message.from_user.id not in settings.admin_id_set:
+        await message.answer("Доступ к панели управления запрещён.")
+        return
+    admin_url = f"{settings.public_base_url.rstrip('/')}/admin"
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="⚙️ Открыть панель управления", web_app=WebAppInfo(url=admin_url))
+    ]])
+    await message.answer("Панель управления Remnaum доступна только администраторам.", reply_markup=keyboard)
+
+
 @router.message(Command("help"))
 async def help_handler(message: Message) -> None:
     await message.answer(

@@ -2,16 +2,17 @@ from html import escape
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.bot.runtime import bot, dispatcher
 from app.config import settings
-from app.db.models import Payment, User
+from app.db.models import Payment, Subscription, User
 from app.db.session import SessionLocal
 from app.services.payment_providers import get_provider
 from app.services.payment_service import settle_payment
 from app.services.subscriptions import provision_paid_payment
+from app.services.telegram_webapp import validate_telegram_init_data
 
 router = APIRouter()
 
@@ -407,3 +408,158 @@ async def webapp_create_checkout(data: WebAppCheckout, x_telegram_init_data: str
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Could not create Telegram Stars invoice") from exc
     return {"payment_id": payment.id, "stars": stars, "invoice_url": invoice_url}
+
+
+
+async def _require_telegram_admin(init_data: str | None) -> dict:
+    if not init_data:
+        raise HTTPException(status_code=401, detail="Telegram authentication is required")
+    try:
+        identity = validate_telegram_init_data(init_data)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    telegram_id = int(identity["id"])
+    if telegram_id not in settings.admin_id_set:
+        raise HTTPException(status_code=403, detail="Administrator access denied")
+    return identity
+
+
+@router.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard_page():
+    return HTMLResponse("""<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark"><title>Remnaum — панель управления</title>
+<style>
+:root{font-family:Inter,system-ui,-apple-system,sans-serif;color-scheme:dark;background:#0b1018;color:#f4f7fc}
+*{box-sizing:border-box}body{margin:0;background:#0b1018;color:#f4f7fc}main{max-width:1100px;margin:auto;padding:24px 16px 48px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:26px}.brand{font-size:23px;font-weight:850;letter-spacing:-.8px}
+.tag{font-size:11px;color:#9eacc0;border:1px solid #293548;padding:6px 10px;border-radius:20px}
+h1{font-size:27px;margin:0 0 7px;letter-spacing:-.8px}.muted{color:#9eacc0;line-height:1.5}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}
+.card,.section{background:#151d29;border:1px solid #293548;border-radius:16px;padding:17px}
+.card span{display:block;color:#9eacc0;font-size:12px}.card b{display:block;font-size:26px;margin-top:7px}
+nav{display:flex;gap:8px;margin:22px 0 12px;flex-wrap:wrap}
+nav button,.action{border:1px solid #34445c;background:#182334;color:#e9f0fa;border-radius:10px;padding:10px 14px;font-weight:650}
+nav button.active,.primary{background:#3978d4;border-color:#3978d4;color:white}
+.section{margin-top:12px;overflow:hidden}.section h2{font-size:17px;margin:0 0 14px}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:12px 9px;border-bottom:1px solid #293548;white-space:nowrap}
+th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflow:ellipsis}
+.table-wrap{overflow-x:auto}.status{font-size:13px;min-height:22px;margin-top:12px;color:#9eacc0}
+.pill{display:inline-block;padding:4px 8px;border-radius:20px;background:#24354a;color:#d7e6fb;font-size:11px}
+.empty{padding:25px;text-align:center;color:#9eacc0}
+@media(max-width:700px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.card b{font-size:22px}main{padding:18px 12px 36px}header{margin-bottom:20px}h1{font-size:23px}th,td{padding:10px 7px}}
+</style></head><body><main>
+<header><div class="brand">Remnaum<span style="color:#5b9cff">.</span></div><div class="tag">ADMIN PANEL</div></header>
+<div id="loading" class="section">Проверяем доступ администратора…</div>
+<div id="dashboard" hidden>
+<h1>Панель управления</h1><div class="muted" id="welcome">Обзор вашего магазина</div>
+<div class="cards">
+<div class="card"><span>Всего клиентов</span><b id="users-count">—</b></div>
+<div class="card"><span>Активные подписки</span><b id="active-count">—</b></div>
+<div class="card"><span>Успешные платежи</span><b id="paid-count">—</b></div>
+<div class="card"><span>Ожидают оплаты</span><b id="pending-count">—</b></div>
+</div>
+<nav><button class="active" data-tab="users">Клиенты</button><button data-tab="payments">Платежи</button><button data-tab="settings" onclick="location.href='/admin/payments'">Оплата</button><button data-tab="tariffs" onclick="location.href='/admin/tariffs'">Тарифы</button></nav>
+<section class="section" id="users-view"><div class="toolbar"><h2>Клиенты и подписки</h2><button class="action" id="users-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>Telegram ID</th><th>Username</th><th>Подписка</th><th>До</th><th>Регистрация</th></tr></thead><tbody id="users-table"></tbody></table></div><div class="toolbar" style="margin-top:12px"><button class="action" id="users-prev">Назад</button><span id="users-page" class="muted">Страница 1</span><button class="action" id="users-next">Далее</button></div></section>
+<section class="section" id="payments-view" hidden><div class="toolbar"><h2>История платежей</h2><button class="action" id="payments-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Клиент</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="payments-table"></tbody></table></div><div class="toolbar" style="margin-top:12px"><button class="action" id="payments-prev">Назад</button><span id="payments-page" class="muted">Страница 1</span><button class="action" id="payments-next">Далее</button></div></section>
+<div id="status" class="status"></div>
+</div></main>
+<script>
+const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();const $=id=>document.getElementById(id);let userOffset=0,paymentOffset=0;const pageSize=20;
+async function api(path){const r=await fetch(path,{headers:{"X-Telegram-Init-Data":tg?.initData||""}});const d=await r.json();if(!r.ok)throw Error(d.detail||"Ошибка запроса");return d}
+function cell(value){const td=document.createElement("td");td.textContent=value??"—";return td}
+function row(target,values){const tr=document.createElement("tr");values.forEach(v=>tr.appendChild(cell(v)));$(target).appendChild(tr)}
+async function overview(){const d=await api("/admin/api/overview");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments}
+async function loadUsers(){const d=await api("/admin/api/users?limit="+pageSize+"&offset="+userOffset);$("users-table").replaceChildren();d.items.forEach(u=>row("users-table",[u.telegram_id,u.username?"@"+u.username:"—",u.subscription_status,u.expires_at?new Date(u.expires_at).toLocaleDateString():"—",new Date(u.created_at).toLocaleDateString()]));$("users-page").textContent="Показано "+(d.total?userOffset+1:0)+"–"+Math.min(userOffset+d.items.length,d.total)+" из "+d.total;$("users-prev").disabled=userOffset===0;$("users-next").disabled=userOffset+pageSize>=d.total}
+async function loadPayments(){const d=await api("/admin/api/payments?limit="+pageSize+"&offset="+paymentOffset);$("payments-table").replaceChildren();d.items.forEach(p=>row("payments-table",[p.id,p.telegram_id,p.provider,p.amount+" "+p.currency,p.status,new Date(p.created_at).toLocaleString()]));$("payments-page").textContent="Показано "+(d.total?paymentOffset+1:0)+"–"+Math.min(paymentOffset+d.items.length,d.total)+" из "+d.total;$("payments-prev").disabled=paymentOffset===0;$("payments-next").disabled=paymentOffset+pageSize>=d.total}
+async function start(){try{if(!tg?.initData)throw Error("Откройте панель через Telegram Mini App");const d=await api("/admin/api/overview");$("loading").hidden=true;$("dashboard").hidden=false;$("welcome").textContent="Здравствуйте, "+(d.admin_name||"администратор");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments;await loadUsers()}catch(e){$("loading").textContent=e.message}}
+document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const users=b.dataset.tab==="users";$("users-view").hidden=!users;$("payments-view").hidden=users;if(!users&&b.dataset.tab==="payments")try{await loadPayments()}catch(e){$("status").textContent=e.message}}));
+$("users-refresh").onclick=()=>loadUsers().catch(e=>$("status").textContent=e.message);$("payments-refresh").onclick=()=>loadPayments().catch(e=>$("status").textContent=e.message);
+$("users-prev").onclick=()=>{userOffset=Math.max(0,userOffset-pageSize);loadUsers()};$("users-next").onclick=()=>{userOffset+=pageSize;loadUsers()};
+$("payments-prev").onclick=()=>{paymentOffset=Math.max(0,paymentOffset-pageSize);loadPayments()};$("payments-next").onclick=()=>{paymentOffset+=pageSize;loadPayments()};
+start();
+</script></body></html>""")
+
+
+@router.get("/admin/api/overview")
+async def admin_overview(x_telegram_init_data: str | None = Header(default=None)):
+    identity = await _require_telegram_admin(x_telegram_init_data)
+    async with SessionLocal() as session:
+        users = await session.scalar(select(func.count(User.id))) or 0
+        active = await session.scalar(select(func.count(Subscription.id)).where(Subscription.status == "active")) or 0
+        succeeded = await session.scalar(select(func.count(Payment.id)).where(Payment.status == "succeeded")) or 0
+        pending = await session.scalar(select(func.count(Payment.id)).where(Payment.status == "pending")) or 0
+    return {
+        "admin_name": identity.get("first_name", ""),
+        "users": users,
+        "active_subscriptions": active,
+        "successful_payments": succeeded,
+        "pending_payments": pending,
+    }
+
+
+@router.get("/admin/api/users")
+async def admin_users(
+    limit: int = 20,
+    offset: int = 0,
+    x_telegram_init_data: str | None = Header(default=None),
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    if limit < 1 or limit > 100 or offset < 0:
+        raise HTTPException(status_code=422, detail="Invalid pagination")
+    latest_subscription = (
+        select(Subscription.user_id, func.max(Subscription.id).label("subscription_id"))
+        .group_by(Subscription.user_id)
+        .subquery()
+    )
+    async with SessionLocal() as session:
+        total = await session.scalar(select(func.count(User.id))) or 0
+        result = await session.execute(
+            select(User, Subscription)
+            .outerjoin(latest_subscription, latest_subscription.c.user_id == User.id)
+            .outerjoin(Subscription, Subscription.id == latest_subscription.c.subscription_id)
+            .order_by(User.created_at.desc(), User.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        items = []
+        for user, subscription in result.all():
+            items.append({
+                "telegram_id": user.telegram_id,
+                "username": user.username,
+                "created_at": user.created_at.isoformat(),
+                "subscription_status": subscription.status if subscription else "нет подписки",
+                "expires_at": subscription.expires_at.isoformat() if subscription and subscription.expires_at else None,
+            })
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/admin/api/payments")
+async def admin_payments(
+    limit: int = 20,
+    offset: int = 0,
+    x_telegram_init_data: str | None = Header(default=None),
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    if limit < 1 or limit > 100 or offset < 0:
+        raise HTTPException(status_code=422, detail="Invalid pagination")
+    async with SessionLocal() as session:
+        total = await session.scalar(select(func.count(Payment.id))) or 0
+        result = await session.execute(
+            select(Payment, User.telegram_id)
+            .join(User, User.id == Payment.user_id)
+            .order_by(Payment.created_at.desc(), Payment.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        items = [{
+            "id": payment.id,
+            "telegram_id": telegram_id,
+            "provider": payment.provider,
+            "amount": payment.amount,
+            "currency": payment.currency,
+            "status": payment.status,
+            "created_at": payment.created_at.isoformat(),
+        } for payment, telegram_id in result.all()]
+    return {"items": items, "total": total, "limit": limit, "offset": offset}

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0 — Administrator dashboard
+
+- Added Telegram-authenticated administrator dashboard at `/admin`.
+- Restricted dashboard APIs to Telegram IDs configured in `ADMIN_IDS`.
+- Added store overview metrics, paginated customer/subscription list and payment history.
+- Added `/admin` bot command with a Telegram Mini App launch button for authorized administrators.
+- Kept payment credentials and customer payment data behind separate administrator authentication checks.
+
+
 ## 0.6.0 — Payment settings foundation
 
 - Added per-installation payment-method settings with Telegram Stars enabled by default.
