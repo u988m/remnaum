@@ -9,6 +9,7 @@ from app.config import settings
 from app.services.payment_providers import VerifiedPayment, get_provider
 from app.services.tariffs import calculate_store_stars_price, ensure_tariff_draft
 from app.services.store_settings import get_store_payment_settings
+from app.services.plans import selected_plan_for_user
 
 
 async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple[Payment, Any]:
@@ -29,7 +30,16 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
         )
         if draft is None:
             raise ValueError("Configure your tariff before paying")
-        if quote.amount_minor <= 0:
+        plan = await selected_plan_for_user(session, user.id)
+        if plan is not None:
+            if not plan.is_active or (
+                draft.duration_days, draft.traffic_gb, draft.device_limit
+            ) != (plan.duration_days, plan.traffic_gb, plan.device_limit):
+                raise ValueError("Selected plan has changed; select it again")
+            amount_minor = plan.price_rub_minor
+        else:
+            amount_minor = quote.amount_minor
+        if amount_minor <= 0:
             raise ValueError("Tariff amount must be greater than zero")
 
         if provider_name == "yoomoney" and quote.currency.upper() != "RUB":
@@ -37,7 +47,7 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
         payment = Payment(
             user_id=user.id,
             provider=provider_name,
-            amount=quote.amount_minor,
+            amount=amount_minor,
             currency=quote.currency,
             status="pending",
             payload=json.dumps({
@@ -46,6 +56,7 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
                     "traffic_gb": draft.traffic_gb,
                     "device_limit": draft.device_limit,
                 },
+                "plan_id": plan.id if plan is not None else None,
             }),
         )
         session.add(payment)
@@ -169,7 +180,15 @@ async def create_stars_payment_for_user(telegram_id: int) -> tuple[Payment, int]
         draft = await session.scalar(select(TariffDraft).where(TariffDraft.user_id == user.id))
         if draft is None:
             raise ValueError("Configure your tariff before paying")
-        stars = await calculate_store_stars_price(draft.duration_days, draft.traffic_gb, draft.device_limit)
+        plan = await selected_plan_for_user(session, user.id)
+        if plan is not None:
+            if not plan.is_active or (
+                draft.duration_days, draft.traffic_gb, draft.device_limit
+            ) != (plan.duration_days, plan.traffic_gb, plan.device_limit):
+                raise ValueError("Selected plan has changed; select it again")
+            stars = plan.price_stars
+        else:
+            stars = await calculate_store_stars_price(draft.duration_days, draft.traffic_gb, draft.device_limit)
         payment = Payment(
             user_id=user.id,
             provider="telegram_stars",
@@ -182,6 +201,7 @@ async def create_stars_payment_for_user(telegram_id: int) -> tuple[Payment, int]
                     "traffic_gb": draft.traffic_gb,
                     "device_limit": draft.device_limit,
                 },
+                "plan_id": plan.id if plan is not None else None,
                 "terms_version": settings.telegram_terms_version,
             }),
         )
