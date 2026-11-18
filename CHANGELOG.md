@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.0-rc.6 — Automated Remnawave setup and full disaster recovery
+
+- Auto-detect local Remnawave Panel URL and enumerate internal squads from the authenticated API, with an explicit fallback only if discovery is unavailable.
+- Safely synchronize local Panel outgoing webhook, preserving other webhook destinations and existing signing secrets, with a backup and service-only restart; require a healthy public HTTPS Remnaum endpoint before enabling.
+- New interactive Remnaum CLI with ANSI menu and visible Docker progress; install, update and full backup/restore actions.
+- Register `remnaum` as a global command, callable from any directory; root privileges requested when needed.
+- Generate the PostgreSQL password by default; accept a custom strong password when requested.
+- Encrypted complete backups: PostgreSQL custom dump, Redis RDB, app source and Git metadata, .env, data, settings and deployment paths. HMAC authenticity check; keys stored outside application-mounted data.
+- Optional scheduled hourly or daily backups, retention control, encrypted Telegram Bot API delivery to a user-configured chat, without sharing the recovery secret.
+- Restore from the menu with archive validation and confirmation; create a safety copy before replacing an installed shop, restore original folder when it is empty, and wait for a healthy API.
+- Integration CI validates actual backup, database mutation and restoration in all three deployment configurations.
+
+
 ## 1.0.0-rc.5 — Automated setup, update notices, checkout and modern frontend
 
 - GitHub update checker on VPS with a six-hour systemd timer, deduplicated Telegram administrator notifications and [Remnaum news](https://t.me/remnaum/4) button. Uses existing Git credentials or public GitHub API.
