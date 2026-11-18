@@ -793,6 +793,12 @@ def config_for_install(existing: dict[str, str], mode: str,
     for key, label, hidden in required:
         if not cfg.get(key):
             cfg[key] = prompt(label, hidden=hidden)
+    # Validate the Panel address and avoid proxy hostname collisions before
+    # contacting a remote API or asking for squad UUIDs.
+    panel_url = urlsplit(cfg.get("REMNAWAVE_BASE_URL", ""))
+    panel_api_url(cfg.get("REMNAWAVE_BASE_URL", ""))
+    if any(name == panel_url.hostname for name in (cfg["PUBLIC_DOMAIN"], cfg["WEBAPP_DOMAIN"])):
+        raise ValueError("Panel and Remnaum must have separate public domains")
     # Always re-discover squads, even when a previous installation already
     # saved IDs: newly created Panel squads must be available to new customers.
     # Existing IDs are retained when the Panel API is temporarily unavailable.
@@ -832,10 +838,6 @@ def config_for_install(existing: dict[str, str], mode: str,
         raise ValueError("Bot username must use 5-32 ASCII letters, digits or underscores")
     if not re.fullmatch(r"[0-9]+(?:,[0-9]+)*", cfg.get("ADMIN_IDS", "")):
         raise ValueError("ADMIN_IDS must be comma-separated Telegram numeric IDs")
-    panel_url = urlsplit(cfg.get("REMNAWAVE_BASE_URL", ""))
-    panel_api_url(cfg.get("REMNAWAVE_BASE_URL", ""))
-    if any(name == panel_url.hostname for name in (cfg["PUBLIC_DOMAIN"], cfg["WEBAPP_DOMAIN"])):
-        raise ValueError("Do not reuse the Panel's domain for the Remnaum bot/Mini App")
     if cfg.get("TELEGRAM_TERMS_URL") and not cfg["TELEGRAM_TERMS_URL"].startswith("https://"):
         raise ValueError("Terms URL must use HTTPS")
     for required in ("TELEGRAM_BOT_TOKEN", "REMNAWAVE_API_TOKEN",
