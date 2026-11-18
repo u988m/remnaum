@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0-rc.1 — Public installation testing candidate
+
+- Interactive installation for webhook and Mini App domains, BotFather token, Telegram admin IDs and Remnawave Panel API credentials.
+- Automatic HTTPS via Caddy and internal Nginx proxy with isolated PostgreSQL and Redis persistent volumes.
+- Signed Remnawave webhook receiver (acknowledgment only; reconciliation pending).
+- Fixed tariff plan catalog with separate RUB and Stars prices alongside custom tariff builder.
+- Telegram bot menus: devices, purchase history, referral links/count, ready plan selection, configurable welcome branding and support.
+- Telegram Mini App fixed-plan Stars checkout, configurable branding, subscription management.
+- Unified Telegram-authenticated admin payment/pricing settings, ready-plan editor, customer details, store profile.
+- Automatic PostgreSQL backup before updates and clean-install smoke tests in CI.
+- MIT license, deployment instructions and Awesome Remnawave submission notes.
+- Known blockers: Alembic migrations, automatic remote panel webhook configuration, referral rewards and true live-payment validation.
+
+
 ## 0.8.0 — Administrator dashboard
 
 - Added Telegram-authenticated administrator dashboard at `/admin`.
