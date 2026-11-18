@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import os
 import pwd
 import re
@@ -226,6 +227,76 @@ def generate_proxy_snippets(cfg: dict[str, str]) -> None:
         (folder / f"remnaum.{variant}.caddy").write_text(caddy, encoding="utf-8")
         (folder / f"remnaum.{variant}.nginx.conf").write_text(nginx, encoding="utf-8")
     print("Proxy examples generated in generated/ for both Docker and host proxies")
+
+
+def caddy_site_block(cfg: dict[str, str]) -> str:
+    domains = list(dict.fromkeys([cfg["PUBLIC_DOMAIN"], cfg["WEBAPP_DOMAIN"]]))
+    if not all(valid_domain(domain) for domain in domains):
+        raise ValueError("Проверьте домены Caddy")
+    return (
+        "\n# Remnaum: автоматически добавленный магазин VPN\n"
+        + ", ".join("https://" + domain for domain in domains) + " {\n"
+        "    encode zstd gzip\n"
+        "    reverse_proxy http://remnaum-api:8080\n"
+        "}\n"
+    )
+
+
+def offer_panel_caddy_autoconfig(cfg: dict[str, str]) -> bool:
+    """Only touch the documented, unmodified Caddy bind mount with owner approval.
+
+    Saves an original backup, validates the *live* config and rolls back failed
+    Caddy reconfiguration. Other proxies are left intact.
+    """
+    if cfg.get("REMNAUM_PROXY_NETWORK") != "remnawave-network":
+        return False
+    caddyfile = Path("/opt/remnawave/caddy/Caddyfile")
+    if not caddyfile.is_file() or not shutil.which("docker"):
+        return False
+    try:
+        result = subprocess.check_output(
+            ["docker", "inspect", "caddy"], text=True,
+            stderr=subprocess.DEVNULL, timeout=10,
+        )
+        container = json.loads(result)[0]
+    except (ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return False
+    mounts = container.get("Mounts", [])
+    if not (container.get("State", {}).get("Running")
+            and "remnawave-network" in container.get("NetworkSettings", {}).get("Networks", {})
+            and any(m.get("Destination") == "/etc/caddy/Caddyfile"
+                    and Path(m.get("Source", "/")).resolve() == caddyfile.resolve()
+                    and m.get("RW") is True for m in mounts)):
+        return False
+    previous = caddyfile.read_bytes()
+    domains = [cfg["PUBLIC_DOMAIN"], cfg["WEBAPP_DOMAIN"]]
+    if any(domain.encode() in previous for domain in domains):
+        print("В текущем Caddyfile уже найдены домены магазина; проверьте конфигурацию вручную.")
+        return False
+    answer = prompt("Добавить домены в существующий Caddy Remnawave с резервной копией? (Д/н)", default="Д")
+    if answer.lower() not in ("д", "да", "y", "yes"):
+        return False
+    import datetime
+    backup = caddyfile.with_name("Caddyfile.remnaum.bak." + datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
+    shutil.copy2(caddyfile, backup)
+    # Write in place so Docker's bind mount keeps pointing to the correct inode.
+    append = caddy_site_block(cfg).encode()
+    try:
+        with caddyfile.open("wb") as handle:
+            handle.write(previous.rstrip() + b"\n" + append)
+            handle.flush()
+            os.fsync(handle.fileno())
+        run(["docker", "exec", "caddy", "caddy", "validate", "--config", "/etc/caddy/Caddyfile"])
+        run(["docker", "exec", "caddy", "caddy", "reload", "--config", "/etc/caddy/Caddyfile"])
+    except (OSError, subprocess.CalledProcessError):
+        with caddyfile.open("wb") as handle:
+            handle.write(previous)
+            handle.flush()
+            os.fsync(handle.fileno())
+        run(["docker", "exec", "caddy", "caddy", "reload", "--config", "/etc/caddy/Caddyfile"], check=False)
+        raise RuntimeError("Caddy отклонил новые домены. Исходная конфигурация восстановлена.")
+    print(f"Прокси Remnawave настроен автоматически; копия: {backup}")
+    return True
 
 
 LEGACY_PAYMENT_KEYS = {
@@ -583,6 +654,9 @@ def main() -> int:
     run(["docker", "compose", "up", "-d", "--build"])
     if not wait_for_app_health():
         raise RuntimeError("API не отвечает. Проверьте docker compose logs --tail=100 app")
+    if mode == "panel":
+        if not offer_panel_caddy_autoconfig(cfg):
+            print("Если прокси не настроен автоматически, используйте примеры в generated/.")
     install_update_timer()
     print("\nRemnaum запущен. Тестовые данные не создавались.")
     print("Telegram webhook: " + cfg["TELEGRAM_WEBHOOK_URL"])
