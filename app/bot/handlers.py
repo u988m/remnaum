@@ -5,7 +5,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message, PreCheckoutQuery, WebAppInfo
 
 from app.config import settings
-from app.services.tariffs import TariffQuote, get_tariff_draft, update_tariff_draft
+from app.services.tariffs import TariffQuote, get_tariff_draft, update_tariff_draft, calculate_store_stars_price
 from app.services.payment_service import (
     accept_current_terms,
     create_stars_payment_for_user,
@@ -15,7 +15,6 @@ from app.services.payment_service import (
 )
 from app.services.payment_providers import VerifiedPayment
 from app.services.payment_service import settle_payment
-from app.services.tariffs import calculate_stars_price
 from app.services.subscriptions import get_user_subscription, provision_paid_payment
 from app.services.users import get_or_create_user
 from app.services.store_settings import is_payment_method_enabled
@@ -60,8 +59,8 @@ def tariff_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def tariff_text(quote: TariffQuote) -> str:
-    stars = calculate_stars_price(quote.duration_days, quote.traffic_gb, quote.device_limit)
+async def tariff_text(quote: TariffQuote) -> str:
+    stars = await calculate_store_stars_price(quote.duration_days, quote.traffic_gb, quote.device_limit)
     return (
         "📦 <b>Конструктор тарифа</b>\n\n"
         f"Срок: <b>{quote.duration_days} дней</b>\n"
@@ -75,7 +74,7 @@ def tariff_text(quote: TariffQuote) -> str:
 async def show_tariff(callback: CallbackQuery, quote: TariffQuote | None = None) -> None:
     if callback.message:
         selected = quote or await get_tariff_draft(callback.from_user.id)
-        await callback.message.edit_text(tariff_text(selected), reply_markup=tariff_keyboard())
+        await callback.message.edit_text(await tariff_text(selected), reply_markup=tariff_keyboard())
 
 
 @router.message(CommandStart())
@@ -160,7 +159,7 @@ async def payment_choose_handler(callback: CallbackQuery) -> None:
 
 async def show_stars_checkout(callback: CallbackQuery) -> None:
     quote = await get_tariff_draft(callback.from_user.id)
-    stars = calculate_stars_price(quote.duration_days, quote.traffic_gb, quote.device_limit)
+    stars = await calculate_store_stars_price(quote.duration_days, quote.traffic_gb, quote.device_limit)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"⭐ Оплатить {stars} Stars", callback_data="payment:create:stars")],
         [InlineKeyboardButton(text="⬅️ Назад к тарифу", callback_data="menu:plans")],

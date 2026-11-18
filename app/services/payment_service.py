@@ -7,7 +7,7 @@ from app.db.models import Payment, TariffDraft, TermsAcceptance, User
 from app.db.session import SessionLocal
 from app.config import settings
 from app.services.payment_providers import VerifiedPayment, get_provider
-from app.services.tariffs import calculate_stars_price, ensure_tariff_draft
+from app.services.tariffs import calculate_store_stars_price, ensure_tariff_draft
 from app.services.store_settings import get_store_payment_settings
 
 
@@ -15,7 +15,7 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
     methods, credentials = await get_store_payment_settings()
     if provider_name == "telegram_stars" or not methods.get(provider_name):
         raise ValueError("This payment method is not enabled for the standalone storefront")
-    await ensure_tariff_draft(telegram_id)
+    quote = await ensure_tariff_draft(telegram_id)
     if not settings.remnawave_base_url or not settings.remnawave_api_token:
         raise RuntimeError("Remnawave is not configured; payment checkout is disabled")
     if not settings.remnawave_internal_squad_ids:
@@ -37,8 +37,8 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
         payment = Payment(
             user_id=user.id,
             provider=provider_name,
-            amount=draft.amount_minor,
-            currency=_tariff_currency(),
+            amount=quote.amount_minor,
+            currency=quote.currency,
             status="pending",
             payload=json.dumps({
                 "tariff": {
@@ -169,7 +169,7 @@ async def create_stars_payment_for_user(telegram_id: int) -> tuple[Payment, int]
         draft = await session.scalar(select(TariffDraft).where(TariffDraft.user_id == user.id))
         if draft is None:
             raise ValueError("Configure your tariff before paying")
-        stars = calculate_stars_price(draft.duration_days, draft.traffic_gb, draft.device_limit)
+        stars = await calculate_store_stars_price(draft.duration_days, draft.traffic_gb, draft.device_limit)
         payment = Payment(
             user_id=user.id,
             provider="telegram_stars",

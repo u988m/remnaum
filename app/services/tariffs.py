@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.config import settings
-from app.db.models import TariffDraft, User
+from app.db.models import StoreTariffSettings, TariffDraft, User
 from app.db.session import SessionLocal
 
 
@@ -17,6 +17,16 @@ class TariffQuote:
     currency: str
 
 
+DEFAULT_PRICING = {
+    "rub_per_day_minor": settings.tariff_price_per_day_minor,
+    "rub_per_gb_minor": settings.tariff_price_per_gb_minor,
+    "rub_per_device_minor": settings.tariff_price_per_device_minor,
+    "stars_per_day": settings.tariff_stars_price_per_day,
+    "stars_per_gb": settings.tariff_stars_price_per_gb,
+    "stars_per_device": settings.tariff_stars_price_per_device,
+    "currency": settings.tariff_currency.upper(),
+}
+PRICING_FIELDS = set(DEFAULT_PRICING)
 FIELDS = {
     "days": ("tariff_min_days", "tariff_max_days", "duration_days"),
     "traffic": ("tariff_min_traffic_gb", "tariff_max_traffic_gb", "traffic_gb"),
@@ -24,14 +34,65 @@ FIELDS = {
 }
 
 
+async def get_store_tariff_pricing() -> dict:
+    async with SessionLocal() as session:
+        row = await session.get(StoreTariffSettings, 1)
+        return DEFAULT_PRICING.copy() if row is None else DEFAULT_PRICING | {
+            key: row.pricing.get(key, value) for key, value in DEFAULT_PRICING.items()
+        }
+
+
+async def update_store_tariff_pricing(pricing: dict) -> dict:
+    unknown = set(pricing) - PRICING_FIELDS
+    if unknown:
+        raise ValueError("Unknown tariff pricing field")
+    current = await get_store_tariff_pricing()
+    for key, value in pricing.items():
+        if key == "currency":
+            code = str(value).upper()
+            if len(code) < 3 or len(code) > 8 or not code.isalpha():
+                raise ValueError("Currency must be a 3-8 letter code")
+            current[key] = code
+        else:
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{key} must be a non-negative integer")
+            current[key] = value
+    async with SessionLocal() as session:
+        row = await session.get(StoreTariffSettings, 1)
+        if row is None:
+            row = StoreTariffSettings(id=1, pricing=current)
+            session.add(row)
+        else:
+            row.pricing = current
+        await session.commit()
+    return current
+
+
 def calculate_price(duration_days: int, traffic_gb: int, device_limit: int) -> int:
-    if duration_days < 1 or traffic_gb < 1 or device_limit < 1:
+    if min(duration_days, traffic_gb, device_limit) < 1:
         raise ValueError("Tariff values must be positive")
     return (
         duration_days * settings.tariff_price_per_day_minor
         + traffic_gb * settings.tariff_price_per_gb_minor
         + device_limit * settings.tariff_price_per_device_minor
     )
+
+
+async def calculate_store_price(duration_days: int, traffic_gb: int, device_limit: int) -> int:
+    pricing = await get_store_tariff_pricing()
+    if min(duration_days, traffic_gb, device_limit) < 1:
+        raise ValueError("Tariff values must be positive")
+    return duration_days * pricing["rub_per_day_minor"] + traffic_gb * pricing["rub_per_gb_minor"] + device_limit * pricing["rub_per_device_minor"]
+
+
+async def calculate_store_stars_price(duration_days: int, traffic_gb: int, device_limit: int) -> int:
+    pricing = await get_store_tariff_pricing()
+    if min(duration_days, traffic_gb, device_limit) < 1:
+        raise ValueError("Tariff values must be positive")
+    amount = duration_days * pricing["stars_per_day"] + traffic_gb * pricing["stars_per_gb"] + device_limit * pricing["stars_per_device"]
+    if amount < 1:
+        raise ValueError("Telegram Stars price must be greater than zero")
+    return amount
 
 
 def format_price(amount_minor: int, currency: str | None = None) -> str:
@@ -43,90 +104,36 @@ async def update_tariff_draft(telegram_id: int, username: str | None, field: str
     if field not in FIELDS:
         raise ValueError("Unknown tariff field")
     min_setting, max_setting, model_field = FIELDS[field]
-
     async with SessionLocal() as session:
         user_insert = insert(User).values(telegram_id=telegram_id, username=username)
-        user_insert = user_insert.on_conflict_do_update(
-            index_elements=[User.telegram_id],
-            set_={"username": user_insert.excluded.username},
-        )
+        user_insert = user_insert.on_conflict_do_update(index_elements=[User.telegram_id], set_={"username": user_insert.excluded.username})
         await session.execute(user_insert)
-        user = await session.scalar(
-            select(User).where(User.telegram_id == telegram_id).with_for_update()
-        )
-        draft = await session.scalar(
-            select(TariffDraft).where(TariffDraft.user_id == user.id)
-        )
+        user = await session.scalar(select(User).where(User.telegram_id == telegram_id).with_for_update())
+        draft = await session.scalar(select(TariffDraft).where(TariffDraft.user_id == user.id))
         if draft is None:
-            initial_days = settings.tariff_min_days
-            initial_traffic = settings.tariff_min_traffic_gb
-            initial_devices = settings.tariff_min_devices
-            draft = TariffDraft(
-                user_id=user.id,
-                duration_days=initial_days,
-                traffic_gb=initial_traffic,
-                device_limit=initial_devices,
-                amount_minor=calculate_price(initial_days, initial_traffic, initial_devices),
-            )
+            days, traffic, devices = settings.tariff_min_days, settings.tariff_min_traffic_gb, settings.tariff_min_devices
+            draft = TariffDraft(user_id=user.id, duration_days=days, traffic_gb=traffic, device_limit=devices, amount_minor=0)
             session.add(draft)
             await session.flush()
-
-        minimum = getattr(settings, min_setting)
-        maximum = getattr(settings, max_setting)
-        current = getattr(draft, model_field)
-        setattr(draft, model_field, max(minimum, min(maximum, current + delta)))
-        draft.amount_minor = calculate_price(
-            draft.duration_days, draft.traffic_gb, draft.device_limit
-        )
+        minimum, maximum = getattr(settings, min_setting), getattr(settings, max_setting)
+        setattr(draft, model_field, max(minimum, min(maximum, getattr(draft, model_field) + delta)))
+        draft.amount_minor = await calculate_store_price(draft.duration_days, draft.traffic_gb, draft.device_limit)
         await session.commit()
-        return TariffQuote(
-            duration_days=draft.duration_days,
-            traffic_gb=draft.traffic_gb,
-            device_limit=draft.device_limit,
-            amount_minor=draft.amount_minor,
-            currency=settings.tariff_currency,
-        )
+        pricing = await get_store_tariff_pricing()
+        return TariffQuote(draft.duration_days, draft.traffic_gb, draft.device_limit, draft.amount_minor, pricing["currency"])
 
 
 async def get_tariff_draft(telegram_id: int) -> TariffQuote:
     async with SessionLocal() as session:
-        draft = await session.scalar(
-            select(TariffDraft)
-            .join(User, TariffDraft.user_id == User.id)
-            .where(User.telegram_id == telegram_id)
-        )
+        draft = await session.scalar(select(TariffDraft).join(User, TariffDraft.user_id == User.id).where(User.telegram_id == telegram_id))
         if draft is None:
-            return TariffQuote(
-                duration_days=settings.tariff_min_days,
-                traffic_gb=settings.tariff_min_traffic_gb,
-                device_limit=settings.tariff_min_devices,
-                amount_minor=calculate_price(
-                    settings.tariff_min_days,
-                    settings.tariff_min_traffic_gb,
-                    settings.tariff_min_devices,
-                ),
-                currency=settings.tariff_currency,
-            )
-        return TariffQuote(
-            duration_days=draft.duration_days,
-            traffic_gb=draft.traffic_gb,
-            device_limit=draft.device_limit,
-            amount_minor=draft.amount_minor,
-            currency=settings.tariff_currency,
-        )
-
-
-def calculate_stars_price(duration_days: int, traffic_gb: int, device_limit: int) -> int:
-    if min(duration_days, traffic_gb, device_limit) < 1:
-        raise ValueError("Tariff values must be positive")
-    amount = (
-        duration_days * settings.tariff_stars_price_per_day
-        + traffic_gb * settings.tariff_stars_price_per_gb
-        + device_limit * settings.tariff_stars_price_per_device
-    )
-    if amount < 1:
-        raise ValueError("Telegram Stars price must be greater than zero")
-    return amount
+            days, traffic, devices = settings.tariff_min_days, settings.tariff_min_traffic_gb, settings.tariff_min_devices
+            amount = await calculate_store_price(days, traffic, devices)
+        else:
+            days, traffic, devices = draft.duration_days, draft.traffic_gb, draft.device_limit
+            amount = await calculate_store_price(days, traffic, devices)
+        pricing = await get_store_tariff_pricing()
+        return TariffQuote(days, traffic, devices, amount, pricing["currency"])
 
 
 async def ensure_tariff_draft(telegram_id: int) -> TariffQuote:
@@ -134,26 +141,14 @@ async def ensure_tariff_draft(telegram_id: int) -> TariffQuote:
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
         if user is None:
             raise ValueError("Telegram user is not registered")
-        draft = await session.scalar(
-            select(TariffDraft).where(TariffDraft.user_id == user.id).with_for_update()
-        )
+        draft = await session.scalar(select(TariffDraft).where(TariffDraft.user_id == user.id).with_for_update())
         if draft is None:
-            days = settings.tariff_min_days
-            traffic = settings.tariff_min_traffic_gb
-            devices = settings.tariff_min_devices
-            draft = TariffDraft(
-                user_id=user.id,
-                duration_days=days,
-                traffic_gb=traffic,
-                device_limit=devices,
-                amount_minor=calculate_price(days, traffic, devices),
-            )
+            days, traffic, devices = settings.tariff_min_days, settings.tariff_min_traffic_gb, settings.tariff_min_devices
+            amount = await calculate_store_price(days, traffic, devices)
+            draft = TariffDraft(user_id=user.id, duration_days=days, traffic_gb=traffic, device_limit=devices, amount_minor=amount)
             session.add(draft)
             await session.commit()
-        return TariffQuote(
-            duration_days=draft.duration_days,
-            traffic_gb=draft.traffic_gb,
-            device_limit=draft.device_limit,
-            amount_minor=draft.amount_minor,
-            currency=settings.tariff_currency,
-        )
+        else:
+            amount = await calculate_store_price(draft.duration_days, draft.traffic_gb, draft.device_limit)
+        pricing = await get_store_tariff_pricing()
+        return TariffQuote(draft.duration_days, draft.traffic_gb, draft.device_limit, amount, pricing["currency"])

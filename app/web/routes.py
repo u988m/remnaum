@@ -91,6 +91,40 @@ async def public_payment_methods():
 
 
 
+from app.services.tariffs import get_store_tariff_pricing, update_store_tariff_pricing
+
+class TariffPricingUpdate(BaseModel):
+    pricing: dict[str, int | str] = Field(default_factory=dict)
+
+
+@router.get("/admin/tariffs")
+async def admin_tariffs_page():
+    return HTMLResponse("""<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Remnaum — тарифы</title><body style="font:16px system-ui;max-width:760px;margin:32px auto;padding:0 16px;background:#10131a;color:#f4f6fb"><h1>Цены тарифов</h1><p>Настройте формулу стоимости отдельно для рублей и Telegram Stars.</p><label>Ключ администратора <input id="token" type="password"></label><div id="fields"></div><button id="load">Загрузить</button> <button id="save">Сохранить</button><p id="status"></p><script>
+const keys=["rub_per_day_minor","rub_per_gb_minor","rub_per_device_minor","stars_per_day","stars_per_gb","stars_per_device","currency"];
+const labels={rub_per_day_minor:"Рубли: за день (копейки)",rub_per_gb_minor:"Рубли: за 1 ГБ (копейки)",rub_per_device_minor:"Рубли: за устройство (копейки)",stars_per_day:"Stars: за день",stars_per_gb:"Stars: за 1 ГБ",stars_per_device:"Stars: за устройство",currency:"Валюта внешнего магазина"};
+const fields=document.getElementById("fields");keys.forEach(k=>{const l=document.createElement("label");l.style.display="block";l.style.margin="12px 0";l.textContent=labels[k];const i=document.createElement("input");i.id=k;i.type=k==="currency"?"text":"number";i.min="0";i.style.display="block";i.style.padding="9px";l.appendChild(i);fields.appendChild(l)});
+async function api(method,body){const r=await fetch("/admin/api/tariff-pricing",{method,headers:{"X-Admin-Token":document.getElementById("token").value,"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(d.detail||"Ошибка запроса");return d}
+function fill(d){keys.forEach(k=>document.getElementById(k).value=d[k])}
+document.getElementById("load").onclick=async()=>{try{fill(await api("GET"));document.getElementById("status").textContent="Цены загружены"}catch(e){document.getElementById("status").textContent=e.message}};
+document.getElementById("save").onclick=async()=>{try{const pricing={};keys.forEach(k=>pricing[k]=k==="currency"?document.getElementById(k).value:Number(document.getElementById(k).value));fill(await api("PUT",{pricing}));document.getElementById("status").textContent="Цены сохранены"}catch(e){document.getElementById("status").textContent=e.message}};
+</script></body></html>""")
+
+
+@router.get("/admin/api/tariff-pricing")
+async def admin_get_tariff_pricing(x_admin_token: str | None = Header(default=None)):
+    _require_admin_token(x_admin_token)
+    return await get_store_tariff_pricing()
+
+
+@router.put("/admin/api/tariff-pricing")
+async def admin_update_tariff_pricing(data: TariffPricingUpdate, x_admin_token: str | None = Header(default=None)):
+    _require_admin_token(x_admin_token)
+    try:
+        return await update_store_tariff_pricing(data.pricing)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/telegram/webhook")
 async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: str | None = Header(default=None)):
     if not settings.telegram_use_webhook:
