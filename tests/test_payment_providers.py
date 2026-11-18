@@ -11,11 +11,22 @@ from app.services.payment_providers import CryptoPayProvider, YooKassaProvider, 
 
 
 class PaymentProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_providers_never_consume_legacy_env_credentials(self):
+        with patch("app.services.payment_providers.settings") as config:
+            config.yookassa_shop_id = "old-shop"
+            config.yookassa_secret_key = "old-secret"
+            config.yoomoney_receiver = "old-wallet"
+            config.yoomoney_notification_secret = "old-wallet-secret"
+            config.cryptopay_api_token = "old-crypto-secret"
+            self.assertFalse(YooKassaProvider().secret)
+            self.assertFalse(YooMoneyProvider().secret)
+            self.assertFalse(CryptoPayProvider().token)
+
     async def test_yoomoney_notification_signature_and_reference(self):
         with patch("app.services.payment_providers.settings") as config:
             config.yoomoney_receiver = "410000000000"
             config.yoomoney_notification_secret = "wallet-secret"
-            provider = YooMoneyProvider()
+            provider = YooMoneyProvider(credentials={"receiver": "410000000000", "notification_secret": "wallet-secret"})
             fields = {
                 "notification_type": "card-incoming",
                 "operation_id": "operation-123",
@@ -57,7 +68,7 @@ class PaymentProviderTests(unittest.IsolatedAsyncioTestCase):
         with patch("app.services.payment_providers.settings") as config:
             config.cryptopay_api_token = token
             config.cryptopay_accepted_assets = "USDT,TON"
-            provider = CryptoPayProvider()
+            provider = CryptoPayProvider(credentials={"api_token": token})
             result = await provider.verify_webhook(body, {"crypto-pay-api-signature": signature})
         self.assertEqual(result.local_payment_id, 7)
         self.assertEqual(result.provider_payment_id, "991")
@@ -80,7 +91,7 @@ class PaymentProviderTests(unittest.IsolatedAsyncioTestCase):
             config.yookassa_secret_key = "secret"
             config.yookassa_currency = "RUB"
             config.public_base_url = "https://remnaum.example"
-            provider = YooKassaProvider(httpx.MockTransport(handler))
+            provider = YooKassaProvider(httpx.MockTransport(handler), credentials={"shop_id": "shop", "secret_key": "secret"})
             link = await provider.create_payment(
                 local_payment_id=9,
                 amount_minor=19900,
