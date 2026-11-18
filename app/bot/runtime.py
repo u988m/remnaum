@@ -4,6 +4,7 @@ from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from app.config import settings
+from app.services.bot_identity import remember_bot
 from app.bot.handlers import router
 
 bot = Bot(settings.telegram_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML)) if settings.telegram_bot_token else None
@@ -12,6 +13,12 @@ dispatcher = Dispatcher()
 async def setup_bot() -> None:
     dispatcher.include_router(router)
     if bot is not None:
+        try:
+            identity = await bot.get_me()
+            remember_bot(identity.username, identity.first_name)
+            logging.getLogger(__name__).info("BotFather identity discovered: @%s", identity.username)
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Bot identity lookup failed: %s", type(exc).__name__)
         try:
             await bot.set_my_commands([
             BotCommand(command="start", description="Главное меню"),
