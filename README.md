@@ -43,7 +43,10 @@ See [`.env.example`](.env.example). Keep secrets in `.env`; never commit it.
 - Set `REMNAWAVE_BASE_URL` to the panel root URL (without `/api`) and `REMNAWAVE_API_TOKEN` to the panel API token. Set `REMNAWAVE_ACTIVE_INTERNAL_SQUADS` to the comma-separated internal squad UUIDs assigned to new users.
 - Set `SUPPORT_CONTACT` to the text or contact link shown in the support section.
 - Configure `TARIFF_MIN_*`, `TARIFF_MAX_*`, `TARIFF_PRICE_PER_*` and `TARIFF_CURRENCY` to control the custom tariff builder. Prices are stored in minor currency units (for EUR, cents).
-- Set `TARIFF_CURRENCY=RUB` for the Russian payment methods. YooKassa requires `YOOKASSA_SHOP_ID` and `YOOKASSA_SECRET_KEY`; set the webhook URL to `/webhooks/payments/yookassa` and subscribe to `payment.succeeded`.\n- YooMoney wallet checkout requires `YOOMONEY_RECEIVER` and `YOOMONEY_NOTIFICATION_SECRET`; configure its HTTP notification URL as `/webhooks/payments/yoomoney`. This uses the wallet collection/Quickpay flow, not the YooKassa merchant API.\n- Crypto Pay requires `CRYPTOPAY_API_TOKEN`; configure its Crypto Pay app webhook URL as `/webhooks/payments/cryptopay`. Supported invoice assets are configurable with `CRYPTOPAY_ACCEPTED_ASSETS`.\n- Set `PUBLIC_BASE_URL` to the public HTTPS origin so payment redirects and hosted YooMoney checkout work. Keep all provider credentials in `.env`.
+- Set `TARIFF_CURRENCY=RUB` for the Russian payment methods. YooKassa requires `YOOKASSA_SHOP_ID` and `YOOKASSA_SECRET_KEY`; set the webhook URL to `/webhooks/payments/yookassa` and subscribe to `payment.succeeded`.
+- YooMoney wallet checkout requires `YOOMONEY_RECEIVER` and `YOOMONEY_NOTIFICATION_SECRET`; configure its HTTP notification URL as `/webhooks/payments/yoomoney`. This uses the wallet collection/Quickpay flow, not the YooKassa merchant API.
+- Crypto Pay requires `CRYPTOPAY_API_TOKEN`; configure its Crypto Pay app webhook URL as `/webhooks/payments/cryptopay`. Supported invoice assets are configurable with `CRYPTOPAY_ACCEPTED_ASSETS`.
+- Set `PUBLIC_BASE_URL` to the public HTTPS origin so payment redirects and hosted YooMoney checkout work. Keep all provider credentials in `.env`.
 
 ## Operations
 
