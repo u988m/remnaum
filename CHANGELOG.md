@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0-rc.2 — Two installation topologies
+
+- Add `sudo sh install.sh` wizard for standalone VPS or co-hosted Remnawave Panel.
+- Co-hosted Panel mode never binds public 80/443. Optional shared `remnawave-network` alias `remnaum-api:8080` and host-only port `127.0.0.1:18080`.
+- Standalone mode owns 80/443 with Caddy and Nginx and checks port conflicts.
+- Generate sample site blocks for existing Docker-based or host-native Caddy/Nginx; never overwrite Panel files.
+- Split Docker Compose core and topology-specific overlays, preserving existing volumes and secrets on re-install.
+- Add installer validation tests and CI for standalone, local Panel and shared-network Panel topologies.
+
+
 ## 1.0.0-rc.1 — Public installation testing candidate
 
 - Interactive installation for webhook and Mini App domains, BotFather token, Telegram admin IDs and Remnawave Panel API credentials.
