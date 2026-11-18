@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 
 import httpx
 
@@ -79,7 +79,7 @@ class YooKassaProvider(PaymentProvider):
         result = await self._request(
             "POST",
             "payments",
-            headers={"Idempotence-Key": str(uuid.uuid4())},
+            headers={"Idempotence-Key": str(uuid.uuid5(uuid.NAMESPACE_URL, f"remnaum-payment-{local_payment_id}"))},
             json={
                 "amount": {"value": _major_amount(amount_minor), "currency": currency.upper()},
                 "capture": True,
