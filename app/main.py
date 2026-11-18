@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app.config import settings
@@ -6,6 +7,7 @@ from app.bot.runtime import bot, dispatcher, setup_bot
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    polling_task = None
     if settings.telegram_bot_token:
         await setup_bot()
         if settings.telegram_use_webhook and settings.telegram_webhook_url:
@@ -15,8 +17,14 @@ async def lifespan(_: FastAPI):
                 drop_pending_updates=False,
             )
         elif not settings.telegram_use_webhook:
-            await dispatcher.start_polling(bot)
+            polling_task = asyncio.create_task(dispatcher.start_polling(bot))
     yield
+    if polling_task:
+        polling_task.cancel()
+        try:
+            await polling_task
+        except asyncio.CancelledError:
+            pass
     if bot:
         await bot.session.close()
 
