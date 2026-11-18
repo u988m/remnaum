@@ -610,3 +610,16 @@ async def admin_user_detail(
             "created_at": payment.created_at.isoformat(),
         } for payment in payments],
     }
+
+
+@router.post("/webhooks/remnawave")
+async def remnawave_webhook(request: Request, x_remnawave_signature: str | None = Header(default=None)):
+    from app.services.remnawave_webhooks import verify_remnawave_webhook
+
+    body = await request.body()
+    try:
+        event = verify_remnawave_webhook(body, x_remnawave_signature, settings.remnawave_webhook_secret)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    # No automatic subscription changes until event reconciliation is implemented.
+    return {"ok": True, "event": event["event"]}
