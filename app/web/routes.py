@@ -671,6 +671,33 @@ async def admin_upload_welcome_photo(
     return {"ok": True, "has_photo": True}
 
 
+@router.get("/admin/api/welcome-photo")
+async def admin_preview_welcome_photo(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    profile = await get_store_profile()
+    file_id = profile.get("welcome_photo_file_id")
+    if not file_id:
+        raise HTTPException(status_code=404, detail="Приветственное фото не настроено")
+    if not bot:
+        raise HTTPException(status_code=503, detail="Telegram bot не настроен")
+    from io import BytesIO
+    from fastapi.responses import Response
+    try:
+        remote = await bot.get_file(file_id)
+        output = BytesIO()
+        await bot.download_file(remote.file_path, destination=output)
+        payload = output.getvalue()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Не удалось получить изображение из Telegram") from exc
+    if len(payload) > 6 * 1024 * 1024 or not payload:
+        raise HTTPException(status_code=502, detail="Некорректный размер фотографии")
+    return Response(
+        content=payload,
+        media_type="image/png" if payload.startswith(b"\x89PNG") else "image/jpeg",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 @router.delete("/admin/api/welcome-photo")
 async def admin_delete_welcome_photo(x_telegram_init_data: str | None = Header(default=None)):
     await _require_telegram_admin(x_telegram_init_data)
