@@ -62,17 +62,52 @@ async function loadAccountPanels(){
     api("/api/v1/webapp/devices"),api("/api/v1/webapp/purchases"),api("/api/v1/webapp/referrals")
   ]);
   if(results[0].status==="fulfilled"){
-    const d=results[0].value;const labels=d.items.map(x=>x.name);
-    $("account-device-info").textContent="Лимит: "+(d.limit??"—")+" · "+(labels.length?labels.join(" · "):"Подключённых устройств пока нет");
+    const d=results[0].value;
+    const box=$("account-device-info");box.replaceChildren();
+    const headline=document.createElement("p");headline.className="muted";
+    headline.textContent="Зарегистрировано: "+d.items.length+" / "+(d.limit??"—");
+    box.append(headline);
+    if(!d.items.length){const empty=document.createElement("p");empty.className="muted";empty.textContent="Подключённых устройств пока нет.";box.append(empty)}
+    else{
+      const list=document.createElement("div");list.className="record-list";
+      d.items.forEach((device,index)=>{
+        const record=document.createElement("div");record.className="record-card";
+        const title=document.createElement("strong");title.textContent="📱 "+(device.name||"Устройство "+(index+1));
+        const details=document.createElement("span");details.className="record-meta";details.textContent=device.platform||"Подключено к подписке";
+        record.append(title,details);list.append(record);
+      });box.append(list);
+    }
   }else $("account-device-info").textContent="Информация об устройствах временно недоступна";
   if(results[1].status==="fulfilled"){
-    const d=results[1].value;
-    $("account-purchase-info").textContent=d.items.length?d.items.map(x=>"#"+x.id+" · "+(x.currency==="XTR"?x.amount+" ⭐":(x.amount/100).toFixed(2)+" "+x.currency)+" · "+x.status).join(" | "):"Покупок пока нет";
+    const d=results[1].value,box=$("account-purchase-info");box.replaceChildren();
+    if(!d.items.length){box.textContent="Покупок пока нет."}
+    else{
+      const list=document.createElement("div");list.className="record-list";
+      d.items.forEach(payment=>{
+        const record=document.createElement("div");record.className="record-card";
+        const top=document.createElement("div");top.className="record-heading";
+        const title=document.createElement("strong");title.textContent="Заказ №"+payment.id;
+        const status=document.createElement("span");status.className="record-badge";
+        const statuses={succeeded:"Оплачен",pending:"Ожидает",failed:"Не оплачен",cancelled:"Отменён"};
+        status.textContent=statuses[payment.status]||payment.status;
+        status.dataset.status=payment.status;top.append(title,status);
+        const details=document.createElement("span");details.className="record-meta";
+        details.textContent=(payment.currency==="XTR"?payment.amount+" ⭐":(payment.amount/100).toFixed(2)+" "+payment.currency)+" · "+payment.provider;
+        record.append(top,details);list.append(record);
+      });box.append(list);
+    }
   }else $("account-purchase-info").textContent="История покупок временно недоступна";
   if(results[2].status==="fulfilled"){
     const d=results[2].value;
     $("account-referral-info").textContent="Приглашено: "+d.count+" · Бонусных дней: "+(d.reward?.days||0)+" · Начислено: "+(d.reward?.earned||0)+(d.rewards_enabled?" · Бонусы применятся при следующем продлении.":" · Программа пока отключена.");
-    if(d.link){$("account-referral-link").href=d.link;$("account-referral-link").textContent=d.link;$("account-referral-link").style.display="block";$("copy-referral").hidden=false}
+    if(d.link){
+      $("account-referral-link").href=d.link;
+      $("account-referral-link").textContent=d.link;
+      $("account-referral-link").style.display="block";
+      $("copy-referral").hidden=false;
+      $("share-referral").href="https://t.me/share/url?url="+encodeURIComponent(d.link)+"&text="+encodeURIComponent("Приглашаю тебя в мой VPN-магазин!");
+      $("share-referral").hidden=false;
+    }
   }else $("account-referral-info").textContent="Реферальная информация временно недоступна";
 }
 function fillOptions(id,min,max,step,selected,label){const el=$(id);el.replaceChildren();const chosen=Math.min(max,Math.max(min,selected));const values=[];for(let n=min;n<=max;n+=step)values.push(n);if(!values.includes(chosen))values.push(chosen);values.sort((a,b)=>a-b);values.forEach(n=>{const o=document.createElement("option");o.value=String(n);o.textContent=n+" "+label;el.appendChild(o)});el.value=String(chosen)}
