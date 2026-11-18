@@ -29,7 +29,8 @@ jobs:
           fi
       - name: Validate scripts, installer and Compose isolation
         run: |
-          sh -n install.sh
+          sh -n install.sh bootstrap.sh
+          python3 -m py_compile scripts/install.py scripts/check_updates.py
           bash -n update.sh backup.sh
           python3 -m py_compile scripts/install.py
           python3 -m unittest discover -s tests -p 'test_installer.py' -v
@@ -101,12 +102,18 @@ jobs:
                   return exc
           assert request('/store').status == 200
           assert request('/app').status == 200
+          assert request('/static/miniapp.js').status == 200
+          assert request('/static/miniapp.css').status == 200
+          assert request('/static/admin.js').status == 200
+          assert request('/static/store.css').status == 200
           assert request('/api/v1/store/catalog').status == 200
           assert request('/api/v1/store/me').status == 401
           assert request('/admin/api/referrals').status == 401
           assert request('/admin/api/trial').status == 401
           assert request('/admin/api/promos').status == 401
           assert request('/api/v1/webapp/offers').status == 401
+          assert request('/api/v1/webapp/external/checkout', 'POST').status == 401
+          assert request('/api/v1/webapp/plans/external/checkout', 'POST').status == 401
           assert request('/api/v1/webapp/trial', 'POST').status == 401
           assert request('/webhooks/remnawave', 'POST', 'webhook.example.com').status == 401
           print('Public storefront/miniapp and unauthenticated protected routes verified')
