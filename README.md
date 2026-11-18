@@ -48,6 +48,12 @@ See [`.env.example`](.env.example). Keep secrets in `.env`; never commit it.
 - Crypto Pay requires `CRYPTOPAY_API_TOKEN`; configure its Crypto Pay app webhook URL as `/webhooks/payments/cryptopay`. Supported invoice assets are configurable with `CRYPTOPAY_ACCEPTED_ASSETS`.
 - Set `PUBLIC_BASE_URL` to the public HTTPS origin so payment redirects and hosted YooMoney checkout work. Keep all provider credentials in `.env`.
 
+## Admin payment settings
+
+Open `/admin/payments` over HTTPS. Set `ADMIN_API_TOKEN` in `.env`, enter it in the admin page, and configure provider credentials and enablement. Credentials are encrypted at rest using a key derived from `APP_SECRET_KEY`; keep that key stable across restarts and backups. Public endpoints expose enabled/configured flags only, never secrets. Telegram Stars are enabled by default and can be disabled. Third-party provider credentials are stored for the standalone storefront integration; they are not offered in Telegram bot or Mini App checkout for digital VPN access.
+
+The admin page currently manages payment-method settings. The full visual tariff constructor and standalone external checkout are subsequent milestones.
+
 ## Operations
 
 ```bash
