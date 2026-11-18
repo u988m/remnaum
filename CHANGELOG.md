@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.0-rc.7 — Branded Telegram welcome and redesigned owner interface
+
+- Telegram /start has a compact, symmetric two-column menu. Owners get an additional admin-only button and customers do not see it.
+- Owner can upload or remove a JPG/PNG welcome image (up to 5 MB) from the authenticated admin dashboard. The bot sends it above the regular menu, preserving text-message callback navigation. The stored image remains visible as a preview after refreshing the admin.
+- Telegram bot username is detected from the Bot API on startup; the admin shows the current Telegram display name and username and lets the owner use that name for the store.
+- Brand name and description continue to come from PostgreSQL and update in the bot, Mini App and owner dashboard.
+- Mini App re-organized into four functional sections: Home, Plans, Account and Bonuses; modern responsive mobile navigation, cleaner connection instructions and existing payment controls preserved.
+- Owner dashboard reorganized visually: balanced navigation, responsive layout, onboarding-photo controls, improved forms and tables.
+- Added unit and integration tests for brand metadata, menu controls, owner-only upload/delete and frontend page/JS consistency.
+
+
 ## 1.0.0-rc.6 — Automated Remnawave setup and full disaster recovery
 
 - Auto-detect local Remnawave Panel URL and enumerate internal squads from the authenticated API, with an explicit fallback only if discovery is unavailable.
