@@ -15,7 +15,7 @@ class PaymentSettingsTests(unittest.TestCase):
         self.assertFalse(DEFAULT_METHODS["yookassa"])
 
     def test_public_settings_never_expose_credentials(self):
-        result = public_payment_settings(DEFAULT_METHODS, {"yookassa": {"secret_key": "hidden"}})
+        result = public_payment_settings(DEFAULT_METHODS, {"yookassa": {"shop_id": "shop", "secret_key": "hidden"}})
         self.assertNotIn("credentials", result)
         self.assertTrue(result["configured"]["yookassa"])
 
