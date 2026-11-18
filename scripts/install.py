@@ -563,11 +563,12 @@ def perform_update(existing: dict[str, str]) -> int:
         raise RuntimeError("Docker Compose недоступен.")
     if not shutil.which("git"):
         raise RuntimeError("Для обновления необходим git.")
-    print("\n[1/3] Резервная копия базы и обновление кода")
+    ui.section(1, 3, "Создание резервной копии и загрузка обновлений")
+    offer_backup_key()
     run(["bash", "update.sh"])
-    print("[2/3] Проверка контейнеров")
+    ui.section(2, 3, "Проверка контейнеров")
     run(["docker", "compose", "ps"])
-    print("[3/3] Проверка приложения")
+    ui.section(3, 3, "Проверка приложения")
     if not wait_for_app_health():
         raise RuntimeError("API не отвечает. Проверьте docker compose logs --tail=100 app")
     scrub_migrated_legacy_payment_keys()
