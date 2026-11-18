@@ -7,10 +7,11 @@ from app.db.models import Payment, TariffDraft, TermsAcceptance, User
 from app.db.session import SessionLocal
 from app.config import settings
 from app.services.payment_providers import VerifiedPayment, get_provider
-from app.services.tariffs import calculate_stars_price
+from app.services.tariffs import calculate_stars_price, ensure_tariff_draft
 
 
 async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple[Payment, Any]:
+    await ensure_tariff_draft(telegram_id)
     if not settings.remnawave_base_url or not settings.remnawave_api_token:
         raise RuntimeError("Remnawave is not configured; payment checkout is disabled")
     if not settings.remnawave_internal_squad_ids:
@@ -147,6 +148,7 @@ async def accept_current_terms(telegram_id: int) -> None:
 
 
 async def create_stars_payment_for_user(telegram_id: int) -> tuple[Payment, int]:
+    await ensure_tariff_draft(telegram_id)
     if not settings.telegram_terms_url:
         raise RuntimeError("Configure TELEGRAM_TERMS_URL before enabling sales")
     if not await has_accepted_current_terms(telegram_id):
