@@ -58,7 +58,7 @@ def main_menu(*, is_admin: bool = False) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(
             text="✨ Открыть магазин", web_app=WebAppInfo(url=settings.webapp_url),
         )])
-    if is_admin:
+    if is_admin and settings.webapp_url.startswith("https://"):
         rows.append([InlineKeyboardButton(
             text="⚙️ Управление магазином", web_app=WebAppInfo(url=_admin_webapp_url()),
         )])
@@ -363,13 +363,14 @@ async def stars_payment_create_handler(callback: CallbackQuery) -> None:
             await callback.message.answer(escape(str(exc)))
         return
     if callback.message:
+        profile = await get_store_profile()
         await callback.message.answer_invoice(
-            title="Remnaum VPN",
+            title=profile["name"][:50] + " VPN",
             description="VPN-подписка с выбранными вами параметрами.",
             payload=f"remnaum:{payment.id}",
             provider_token="",
             currency="XTR",
-            prices=[LabeledPrice(label="Remnaum VPN subscription", amount=stars)],
+            prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
         )
 
 
@@ -425,7 +426,7 @@ async def terms_handler(message: Message) -> None:
     terms_url = await get_terms_url()
     if terms_url:
         await message.answer(
-            f"Условия Remnaum: <a href=\"{escape(terms_url, quote=True)}\">прочитать</a>"
+            f"Условия магазина: <a href=\"{escape(terms_url, quote=True)}\">прочитать</a>"
         )
     else:
         await message.answer("Условия ещё не опубликованы.")
