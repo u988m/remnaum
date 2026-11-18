@@ -31,6 +31,14 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('id="brand-terms"', admin)
         self.assertIn('href="/static/miniapp.css"', mini)
         self.assertIn('src="/static/admin.js"', admin)
+        self.assertIn("telegram-web-app.js", admin)
+        self.assertIn('id="brand-photo-upload"', admin)
+        self.assertIn('id="bot-identity"', admin)
+        for panel in ('shop', 'vpn', 'bonuses', 'account'):
+            self.assertIn(f'id="page-{panel}"', mini)
+            self.assertIn(f'data-page="{panel}"', mini)
+        self.assertIn('id="hero-image"', mini)
+        self.assertIn('id="copy-referral"', mini)
 
     async def test_storefront_and_miniapp_have_valid_javascript(self):
         if not shutil.which("node"):
