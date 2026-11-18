@@ -1,5 +1,5 @@
 """Fixed price plans: a second purchase mode alongside the flexible tariff builder."""
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.dialects.postgresql import insert
 from app.db.models import TariffPlan, SelectedPlan, TariffDraft, User
 from app.db.session import SessionLocal
@@ -91,3 +91,26 @@ async def selected_plan_for_user(session, user_id: int) -> TariffPlan | None:
         select(TariffPlan).join(SelectedPlan, SelectedPlan.plan_id == TariffPlan.id)
         .where(SelectedPlan.user_id == user_id)
     )
+
+
+async def clear_selected_plan(telegram_id: int) -> None:
+    async with SessionLocal() as session:
+        user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+        if user:
+            await session.execute(delete(SelectedPlan).where(SelectedPlan.user_id == user.id))
+            await session.commit()
+
+
+async def selected_stars_price(telegram_id: int, quote: TariffQuote) -> int | None:
+    async with SessionLocal() as session:
+        user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+        if not user:
+            return None
+        plan = await selected_plan_for_user(session, user.id)
+        if not plan:
+            return None
+        if not plan.is_active or (
+            quote.duration_days, quote.traffic_gb, quote.device_limit
+        ) != (plan.duration_days, plan.traffic_gb, plan.device_limit):
+            raise ValueError("Selected plan changed; select again")
+        return plan.price_stars
