@@ -10,6 +10,7 @@ from app.db.models import Payment
 from app.db.session import SessionLocal
 from app.services.payment_providers import get_provider
 from app.services.payment_service import settle_payment
+from app.services.subscriptions import provision_paid_payment
 
 router = APIRouter()
 
@@ -73,6 +74,7 @@ async def yookassa_webhook(request: Request):
     try:
         verified = await get_provider("yookassa").verify_webhook(body, dict(request.headers))
         await settle_payment(verified, "yookassa")
+        await provision_paid_payment(verified.local_payment_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -86,6 +88,7 @@ async def yoomoney_webhook(request: Request):
     try:
         verified = await get_provider("yoomoney").verify_webhook(body, dict(request.headers))
         await settle_payment(verified, "yoomoney")
+        await provision_paid_payment(verified.local_payment_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -99,6 +102,7 @@ async def cryptopay_webhook(request: Request):
     try:
         verified = await get_provider("cryptopay").verify_webhook(body, dict(request.headers))
         await settle_payment(verified, "cryptopay")
+        await provision_paid_payment(verified.local_payment_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
