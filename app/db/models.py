@@ -92,3 +92,24 @@ class Referral(Base):
     inviter_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
     invited_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TariffPlan(Base):
+    """Operator-managed fixed plan; independent RUB and Telegram Stars prices."""
+    __tablename__ = "tariff_plans"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(80), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    traffic_gb: Mapped[int] = mapped_column(Integer, nullable=False)
+    device_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    price_rub_minor: Mapped[int] = mapped_column(Integer, nullable=False)
+    price_stars: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class SelectedPlan(Base):
+    __tablename__ = "selected_plans"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("tariff_plans.id"), nullable=False)
