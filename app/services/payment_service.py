@@ -29,10 +29,10 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
         )
         if draft is None:
             raise ValueError("Configure your tariff before paying")
-        if draft.amount_minor <= 0:
+        if quote.amount_minor <= 0:
             raise ValueError("Tariff amount must be greater than zero")
 
-        if provider_name == "yoomoney" and _tariff_currency().upper() != "RUB":
+        if provider_name == "yoomoney" and quote.currency.upper() != "RUB":
             raise ValueError("Set TARIFF_CURRENCY=RUB to enable YooMoney wallet payments")
         payment = Payment(
             user_id=user.id,
