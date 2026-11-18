@@ -205,7 +205,7 @@ def _manifest() -> dict:
     }
 
 
-def create_backup(*, scheduled: bool = False, send: bool | None = None) -> Path:
+def create_backup(*, scheduled: bool = False, send: bool | None = None, protected: Path | None = None) -> Path:
     if not (ROOT / ".env").exists():
         raise RuntimeError("Remnaum ещё не настроен: .env не найден")
     with _lock():
@@ -237,7 +237,7 @@ def create_backup(*, scheduled: bool = False, send: bool | None = None) -> Path:
                 archive.add(directory / "redis.rdb", arcname="redis.rdb")
                 _collect_source(archive)
             pack_encrypted(raw_archive, out, password)
-        remove_old_archives(settings["keep"])
+        remove_old_archives(settings["keep"], protected=protected)
         print(f"✓ Полная зашифрованная копия: {out}")
         deliver = settings["telegram"] if send is None else send
         if deliver:
@@ -248,10 +248,11 @@ def create_backup(*, scheduled: bool = False, send: bool | None = None) -> Path:
         return out
 
 
-def remove_old_archives(keep: int) -> None:
+def remove_old_archives(keep: int, *, protected: Path | None = None) -> None:
     files = sorted(BACKUPS.glob("remnaum-full-*.rmb"), reverse=True)
+    saved = {protected.resolve()} if protected else set()
     for item in files[keep:]:
-        if item.is_file() and not item.is_symlink():
+        if item.resolve() not in saved and item.is_file() and not item.is_symlink():
             item.unlink()
 
 
