@@ -25,6 +25,16 @@ bash backup.sh
 echo "Получаем последнюю версию..."
 git_user fetch --tags origin
 git_user pull --ff-only origin main
+echo "Синхронизируем все Internal Squads Remnawave..."
+# New code is loaded AFTER git pull: this also works when the old installer
+# invokes update.sh from a running Python process.
+python3 - <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path.cwd() / "scripts"))
+from install import read_env, refresh_all_remnawave_squads
+refresh_all_remnawave_squads(read_env())
+PY
 echo "Пересобираем и запускаем контейнеры..."
 docker compose config --quiet
 docker compose up -d --build
