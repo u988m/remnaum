@@ -4,7 +4,7 @@
 
 Remnaum combines a Telegram bot, Telegram Mini App, admin dashboard, pricing engine and Remnawave Panel integration in one deployable service. One installation runs one independent store; the database is empty on first deployment.
 
-> **Release status: 1.0.0 release candidate.** Suitable for installation testing. Do not treat as production-audited until real Telegram Stars payments, Remnawave provisioning and deployment on a public HTTPS domain have been validated end to end.
+> **Release status: 1.0.0-rc.2 release candidate.** Suitable for installation testing. Do not treat as production-audited until real Telegram Stars payments, Remnawave provisioning and deployment on a public HTTPS domain have been validated end to end.
 
 ## Features
 
@@ -15,7 +15,7 @@ Remnaum combines a Telegram bot, Telegram Mini App, admin dashboard, pricing eng
 | Owner dashboard | Telegram-signed admin access, metrics, customers and payment history, customer detail, fixed-plan CRUD, pricing and payment settings, branding |
 | Remnawave | Provision or extend VPN access after a verified payment; read subscription URL and HWID devices; verify signed outgoing panel webhooks |
 | Billing | Telegram Stars in Telegram; YooKassa, YooMoney and Crypto Pay adapters for use by a **separate** future external storefront |
-| Operations | Guided install, Caddy automatic HTTPS, internal Nginx, Docker Compose, persistent PostgreSQL/Redis, backup script, smoke-test CI |
+| Operations | Two deployment modes: reuse Panel's existing proxy without port conflicts, or use Caddy automatic HTTPS on separate VPS; persistent PostgreSQL/Redis and backup scripts |
 | Referrals | Individual deep links and referral attribution/count; **no rewards or payouts yet** |
 | Branding | Store name, short description, accent color and support contact editable in the admin dashboard |
 
@@ -31,27 +31,32 @@ Remnaum combines a Telegram bot, Telegram Mini App, admin dashboard, pricing eng
 - **🌐 Mini App** — subscription overview and checkout
 - **⚙️ /admin** — owner-only settings
 
-## First installation
-
-Requirements: Linux Ubuntu/Debian VPS, Docker access, public A/AAAA DNS records, ports 80 and 443, Telegram bot token and Remnawave Panel API token.
+## Installation: with an existing Panel or on a separate VPS
 
 ```bash
 git clone https://github.com/u988m/remnaum.git
 cd remnaum
-sudo bash install.sh
+sudo sh install.sh
 ```
 
-The installer requests your webhook domain, Mini App domain, certificate email, bot username/token, Telegram admin IDs, Remnawave URL/token, and squad IDs. It creates `.env` with restrictive permissions. Caddy obtains TLS certificates and Nginx privately forwards requests to FastAPI.
+Select your environment:
 
-- Telegram updates: `https://WEBHOOK_DOMAIN/telegram/webhook`
-- Remnawave outgoing events: `https://WEBHOOK_DOMAIN/webhooks/remnawave`
-- Telegram Mini App: `https://WEBAPP_DOMAIN/app`
-- Admin dashboard: `https://WEBAPP_DOMAIN/admin`
+| Mode | Where | External ports | HTTPS |
+| --- | --- | --- | --- |
+| `panel` | Same host as Remnawave Panel | **No Remnaum 80/443 listeners**; app available at `127.0.0.1:18080` and optionally via `remnawave-api:8080` on the Panel's existing Docker network | Reuse existing Panel Caddy/Nginx |
+| `standalone` | Independent Ubuntu/Debian VPS | Caddy binds 80/443 only | Automatic Caddy TLS |
+
+The installer collects Telegram BotFather token, admin Telegram IDs, Remnawave API URL/token, squad IDs and separate public webhook/Mini App hostnames. It does not import or seed customer/payment data. Docker/Compose can be installed automatically on a standalone host; on a Panel host existing Docker is used unchanged.
+
+On the Panel host, install with `sudo sh install.sh --mode panel`; a proxy site block is generated in `generated/`. Add the correct block to the **existing** Caddy/Nginx configuration and reload that proxy after validation. On a separate VPS, `sudo sh install.sh --mode standalone` starts its own Caddy. Neither mode alters Remnawave configuration.
+
+- Telegram webhook: `https://WEBHOOK_DOMAIN/telegram/webhook`
+- Signed Remnawave events: `https://WEBHOOK_DOMAIN/webhooks/remnawave`
+- Mini App: `https://WEBAPP_DOMAIN/app`
+- Owner admin: `https://WEBAPP_DOMAIN/admin`
 - Health: `https://WEBAPP_DOMAIN/health`
 
-**The Remnawave panel's outbound webhook settings must be configured separately** with the generated `REMNAWAVE_WEBHOOK_SECRET`; see [installation guide](docs/INSTALL.md). The installer does not change your panel server remotely.
-
-Configure the Mini App URL in @BotFather. On app startup the bot also registers the private-chat menu button and command list.
+Configure outgoing webhook settings on the Remnawave Panel separately. Register the Mini App URL in BotFather. **Read [the full two-mode installation guide](docs/INSTALL.md)** before attempting co-hosting.
 
 ### Data safety
 
@@ -77,7 +82,7 @@ All in-bot and Telegram Mini App digital subscription payments use Telegram Star
 - Python 3, FastAPI, Aiogram 3
 - PostgreSQL as source of truth; Redis for infrastructure support
 - Async SQLAlchemy models and isolated Remnawave/payment adapters
-- Caddy (public HTTPS) → Nginx (internal proxy) → FastAPI (internal)
+- Standalone: Caddy (public HTTPS) → Nginx (private) → FastAPI; Panel host: existing reverse proxy → remnaum-api:8080 (shared Docker network) or host loopback 127.0.0.1:18080
 - Telegram-signed admin and Mini App API authentication
 - HMAC verification of Remnawave and provider webhook signatures
 
