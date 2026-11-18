@@ -122,6 +122,7 @@ class RemnawaveSetupTests(unittest.TestCase):
             root, env = self._panel(temp)
             with patch.object(installer, "network_exists", return_value=False), \
                  patch.object(installer, "local_panel_for_url", return_value=env), \
+                 patch.object(installer, "discover_squads", return_value=[{"uuid": A, "name": "Default"}]), \
                  patch.object(installer, "prompt") as prompt:
                 config = installer.config_for_install(existing, "panel", "none", 18080)
             self.assertEqual(config["REMNAWAVE_WEBHOOK_SECRET"], SECRET)
@@ -143,6 +144,7 @@ class RemnawaveSetupTests(unittest.TestCase):
             with patch.object(installer, "network_exists", return_value=False), \
                  patch.object(installer, "discover_local_panel", return_value=env), \
                  patch.object(installer, "local_panel_for_url", return_value=env), \
+                 patch.object(installer, "discover_squads", return_value=[{"uuid": A, "name": "Default"}]), \
                  patch.object(installer, "prompt") as prompt:
                 config = installer.config_for_install(existing, "panel", "none", 18080)
             self.assertEqual(config["REMNAWAVE_BASE_URL"], "https://panel.myvpn.site")
