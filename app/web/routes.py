@@ -289,8 +289,8 @@ button:disabled{opacity:.45}a{color:var(--tg-theme-link-color,#65a9ff)}.status{f
 <header><div class="brand">Remnaum<span style="color:var(--tg-theme-button-color,#4b8bea)">.</span></div><div class="tag">VPN STORE</div></header>
 <h1>Ваш VPN — ваши правила</h1><div class="muted" id="welcome">Выберите параметры подписки и получите доступ за пару секунд.</div>
 <section class="panel" id="subscription" style="display:none"><h2>Ваша подписка</h2><div class="row"><span class="muted">Статус</span><b id="sub-status">—</b></div><div class="row"><span class="muted">Действует до</span><b id="sub-expiry">—</b></div><div class="grid"><div class="metric"><b id="sub-traffic">—</b><span>ГБ</span></div><div class="metric"><b id="sub-devices">—</b><span>устройств</span></div><div class="metric"><b id="sub-days">—</b><span>дней осталось</span></div></div><a id="sub-link" href="#" target="_blank" style="display:none">Открыть ссылку подключения</a></section>
-<section class="panel"><h2>Соберите свой тариф</h2><div class="row"><label for="days">Срок подписки</label><select id="days"><option value="7">7 дней</option><option value="30" selected>30 дней</option><option value="90">90 дней</option><option value="180">180 дней</option><option value="365">365 дней</option></select></div><div class="row"><label for="traffic">Трафик</label><select id="traffic"><option value="10">10 ГБ</option><option value="50">50 ГБ</option><option value="100" selected>100 ГБ</option><option value="250">250 ГБ</option><option value="500">500 ГБ</option><option value="1000">1000 ГБ</option></select></div><div class="row"><label for="devices">Устройства</label><select id="devices"><option value="1" selected>1 устройство</option><option value="2">2 устройства</option><option value="3">3 устройства</option><option value="5">5 устройств</option><option value="10">10 устройств</option></select></div>
-<div style="margin-top:16px"><div class="muted">Стоимость тарифа</div><div class="price" id="rub-price">—</div><div class="subprice" id="stars-price">—</div></div>
+<section class="panel"><h2>Соберите свой тариф</h2><div class="row"><label for="days">Срок подписки</label><select id="days"></select></div><div class="row"><label for="traffic">Трафик</label><select id="traffic"></select></div><div class="row"><label for="devices">Устройства</label><select id="devices"></select></div>
+<div style="margin-top:16px"><div class="muted">Стоимость в Telegram</div><div class="price" id="stars-price">—</div></div>
 <label class="check"><input id="terms" type="checkbox"><span>Я принимаю <a id="terms-link" href="#" target="_blank">условия оказания услуги</a>.</span></label>
 <button id="buy" disabled>Оплатить Telegram Stars</button><div id="status" class="status"></div></section>
 <div class="muted" style="font-size:12px;text-align:center;margin-top:20px">Безопасная оплата через Telegram Stars · Remnaum</div>
@@ -300,12 +300,12 @@ const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
 let data=null;
 const $=id=>document.getElementById(id);
 function api(path,body){return fetch(path,{method:body?"POST":"GET",headers:{"Content-Type":"application/json","X-Telegram-Init-Data":tg?.initData||""},body:body?JSON.stringify(body):undefined}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.detail||"Ошибка запроса");return d})}
-function limits(){return {days:+$("days").value,traffic:+$("traffic").value,devices:+$("devices").value}}
-function recalc(){if(!data)return;const v=limits(),p=data.pricing;const rub=v.days*p.rub_per_day_minor+v.traffic*p.rub_per_gb_minor+v.devices*p.rub_per_device_minor;const stars=v.days*p.stars_per_day+v.traffic*p.stars_per_gb+v.devices*p.stars_per_device;$("rub-price").textContent=(rub/100).toFixed(2)+" "+p.currency;$("stars-price").textContent=stars+" ⭐ Telegram Stars";$("buy").textContent="Оплатить "+stars+" Stars";$("buy").disabled=!$("terms").checked||!data.stars_enabled||!data.terms_url||stars<1}
+function fillOptions(id,min,max,step,selected,label){const el=$(id);el.replaceChildren();const chosen=Math.min(max,Math.max(min,selected));const values=[];for(let n=min;n<=max;n+=step)values.push(n);if(!values.includes(chosen))values.push(chosen);values.sort((a,b)=>a-b);values.forEach(n=>{const o=document.createElement("option");o.value=String(n);o.textContent=n+" "+label;el.appendChild(o)});el.value=String(chosen)}\nfunction limits(){return {days:+$("days").value,traffic:+$("traffic").value,devices:+$("devices").value}}
+function recalc(){if(!data)return;const v=limits(),p=data.pricing;const stars=v.days*p.stars_per_day+v.traffic*p.stars_per_gb+v.devices*p.stars_per_device;$("stars-price").textContent=stars+" ⭐";$("buy").textContent="Оплатить "+stars+" Stars";$("buy").disabled=!$("terms").checked||!data.stars_enabled||!data.terms_url||stars<1}
 ["days","traffic","devices"].forEach(k=>$(k).addEventListener("change",recalc));$("terms").addEventListener("change",recalc);
 $("buy").onclick=async()=>{try{$("buy").disabled=true;$("status").textContent="Создаём счёт…";await api("/api/v1/webapp/terms/accept",{accepted:true});const result=await api("/api/v1/webapp/checkout",limits());if(!tg?.openInvoice)throw Error("Откройте магазин из Telegram, чтобы оплатить счёт");tg.openInvoice(result.invoice_url,(status)=>{$("status").textContent=status==="paid"?"Оплата подтверждена. Обновляем подписку…":status==="cancelled"?"Оплата отменена":"Статус оплаты: "+status;if(status==="paid")setTimeout(()=>location.reload(),1800);else recalc()})}catch(e){$("status").textContent=e.message;recalc()}};
 async function start(){try{if(!tg?.initData)throw Error("Откройте Mini App через кнопку в Telegram");data=await api("/api/v1/webapp/bootstrap");$("loading").style.display="none";$("app").style.display="block";$("welcome").textContent=data.user.first_name?"Здравствуйте, "+data.user.first_name+"! Настройте подписку под себя.":"Выберите параметры подписки.";if(data.terms_url){$("terms-link").href=data.terms_url}else{$("terms-link").textContent="условия не настроены";$("terms-link").removeAttribute("href");$("buy").disabled=true}
-$("days").value=String(data.limits.days_default);$("traffic").value=String(data.limits.traffic_default);$("devices").value=String(data.limits.devices_default);if(data.subscription){const s=data.subscription;$("subscription").style.display="block";$("sub-status").textContent=s.status;$("sub-expiry").textContent=s.expires_at?new Date(s.expires_at).toLocaleString():"—";$("sub-traffic").textContent=s.traffic_gb??"—";$("sub-devices").textContent=s.device_limit??"—";$("sub-days").textContent=s.days_left??"—";if(s.subscription_url){$("sub-link").href=s.subscription_url;$("sub-link").style.display="inline-block"}}
+fillOptions("days",data.limits.days_min,data.limits.days_max,1,data.limits.days_default,"дней");fillOptions("traffic",data.limits.traffic_min,data.limits.traffic_max,1,data.limits.traffic_default,"ГБ");fillOptions("devices",data.limits.devices_min,data.limits.devices_max,1,data.limits.devices_default,"устройств");if(data.subscription){const s=data.subscription;$("subscription").style.display="block";$("sub-status").textContent=s.status;$("sub-expiry").textContent=s.expires_at?new Date(s.expires_at).toLocaleString():"—";$("sub-traffic").textContent=s.traffic_gb??"—";$("sub-devices").textContent=s.device_limit??"—";$("sub-days").textContent=s.days_left??"—";if(s.subscription_url){$("sub-link").href=s.subscription_url;$("sub-link").style.display="inline-block"}}
 $("buy").disabled=!data.stars_enabled;recalc()}catch(e){$("loading").textContent=e.message}}
 start();
 </script></body></html>""")
@@ -323,7 +323,7 @@ async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=Non
         expiry = subscription.get("expires_at")
         if expiry and expiry.tzinfo is None:
             expiry = expiry.replace(tzinfo=timezone.utc)
-        days_left = max(0, (expiry - __import__("datetime").datetime.now(timezone.utc)).days) if expiry else None
+        days_left = max(0, (expiry - datetime.now(timezone.utc)).days) if expiry else None
         subscription_data = {
             "status": subscription["status"],
             "expires_at": expiry.isoformat() if expiry else None,
@@ -334,8 +334,8 @@ async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=Non
         }
     return {
         "user": {"id": identity["id"], "first_name": identity.get("first_name", "")},
-        "pricing": pricing,
-        "stars_enabled": await __import__("app.services.store_settings", fromlist=["is_payment_method_enabled"]).is_payment_method_enabled("telegram_stars"),
+        "pricing": {key: value for key, value in pricing.items() if key.startswith("stars_")},
+        "stars_enabled": await is_payment_method_enabled("telegram_stars"),
         "terms_url": settings.telegram_terms_url,
         "limits": {
             "days_min": settings.tariff_min_days, "days_max": settings.tariff_max_days,
