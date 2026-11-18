@@ -211,7 +211,7 @@ def scrub_migrated_legacy_payment_keys(path: Path = ENV_PATH) -> bool:
         return False
     verification = run(
         ["docker", "compose", "exec", "-T", "app",
-         "python", "scripts/verify_legacy_credentials.py"],
+         "python", "-m", "scripts.verify_legacy_credentials"],
         check=False, quiet=True,
     )
     if verification.returncode != 0:
