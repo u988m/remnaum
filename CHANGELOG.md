@@ -2,6 +2,24 @@
 
 All notable project changes are documented here.
 
+## [0.5.0] - 2026-11-18
+
+### Added
+- Telegram Stars (XTR) invoices, pre-checkout ownership/amount validation and successful-payment processing.
+- Separate configurable Stars pricing for duration, traffic and device count.
+- Terms-of-service acceptance versioning, `/terms` and `/paysupport`.
+- YooKassa, YooMoney wallet and Telegram Crypto Pay provider adapters with webhook verification.
+- Persistent payment snapshots and payment-triggered Remnawave provisioning.
+- Idempotent Remnawave subscription updates, including traffic/device limits and connection URL storage.
+- Telegram subscription status and connection-link screen.
+- Tests for payment provider signatures, Stars pricing and API requests.
+
+### Notes
+- Telegram bot checkout uses Stars only because VPN access is a digital service sold inside Telegram. Third-party providers are not exposed in bot or Mini App checkout.
+- YooKassa, YooMoney and Crypto Pay adapters are reserved for a future standalone external storefront.
+- Configure `TELEGRAM_TERMS_URL`, `TELEGRAM_TERMS_VERSION`, `REMNAWAVE_ACTIVE_INTERNAL_SQUADS` and Stars pricing values before enabling checkout.
+- Live compatibility with the user's Remnawave Panel 3.4.10 and real payment accounts remains unverified.
+
 ## [0.4.0] - 2026-11-18
 
 ### Added
