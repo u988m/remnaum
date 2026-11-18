@@ -167,8 +167,8 @@ async def accept_current_terms(telegram_id: int) -> None:
 
 async def create_stars_payment_for_user(telegram_id: int) -> tuple[Payment, int]:
     await ensure_tariff_draft(telegram_id)
-    if not settings.telegram_terms_url:
-        raise RuntimeError("Configure TELEGRAM_TERMS_URL before enabling sales")
+    if not await get_terms_url():
+        raise RuntimeError("Publish the terms URL in the admin branding settings before enabling sales")
     if not await has_accepted_current_terms(telegram_id):
         raise ValueError("The user has not accepted the current terms")
     if not settings.remnawave_base_url or not settings.remnawave_api_token:
