@@ -61,5 +61,34 @@ class RemnawaveClientTests(unittest.IsolatedAsyncioTestCase):
             await client.extend_user(42, 0)
 
 
+    async def test_update_user_sends_numeric_id_and_limits(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"] = request.method
+            seen["path"] = request.url.path
+            seen["payload"] = request.read().decode()
+            return httpx.Response(200, json={"response": {"id": 42}})
+
+        client = RemnawaveClient(
+            "https://panel.example",
+            "test-token",
+            httpx.MockTransport(handler),
+        )
+        await client.update_user(
+            42,
+            traffic_limit_bytes=1073741824,
+            hwid_device_limit=3,
+            expire_at=datetime(2027, 1, 1, tzinfo=timezone.utc),
+            description="remnaum-payment:12",
+        )
+        self.assertEqual(seen["method"], "PATCH")
+        self.assertEqual(seen["path"], "/api/users")
+        self.assertIn('"id":42', seen["payload"])
+        self.assertIn('"trafficLimitBytes":1073741824', seen["payload"])
+        self.assertIn('"hwidDeviceLimit":3', seen["payload"])
+        self.assertIn('"status":"ACTIVE"', seen["payload"])
+
+
 if __name__ == "__main__":
     unittest.main()
