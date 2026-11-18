@@ -1,104 +1,307 @@
-# Remnaum
+<div align="center">
 
-**Self-hosted VPN storefront constructor for [Remnawave](https://github.com/remnawave/panel)**
+# 🚀 Remnaum
 
-Remnaum combines a Telegram bot, Telegram Mini App, admin dashboard, pricing engine and Remnawave Panel integration in one deployable service. One installation runs one independent store; the database is empty on first deployment.
+**Конструктор VPN-магазинов на базе Remnawave**
 
-> **Release status: 1.0.0-rc.2 release candidate.** Suitable for installation testing. Do not treat as production-audited until real Telegram Stars payments, Remnawave provisioning and deployment on a public HTTPS domain have been validated end to end.
+Telegram-бот · Telegram Mini App · Панель администратора · Оплата Telegram Stars · Готовые и гибкие тарифы
 
-## Features
+[![Версия](https://img.shields.io/badge/версия-1.0.0--rc.2-blue)](https://github.com/u988m/remnaum)
+[![Лицензия MIT](https://img.shields.io/badge/лицензия-MIT-green)](LICENSE)
+[![Remnawave](https://img.shields.io/badge/интеграция-Remnawave-6d5dfc)](https://github.com/remnawave/panel)
 
-| Component | What it does |
+**[📖 Установка](#-установка) · [⚙️ Настройка](#-после-установки) · [🛠️ Решение-проблем](#-частые-проблемы) · [💬 Сообщество](#-обратная-связь)**
+
+</div>
+
+> [!IMPORTANT]
+> **Текущая версия — 1.0.0-rc.2 (для тестирования).** Автоматические тесты не заменяют проверку реальной оплаты Telegram Stars, выдачи подписки через Remnawave и HTTPS на вашем сервере. Не используйте сборку для коммерческих продаж без собственного тестирования.
+
+## ✨ Что такое Remnaum?
+
+**Remnaum** — самостоятельный магазин VPN-подписок, который подключается к уже установленной панели **Remnawave** через API. Покупатель оформляет подписку в Telegram, а владелец управляет тарифами, клиентами и оформлением через административную панель.
+
+**Что уже доступно:**
+
+| Раздел | Возможности |
 | --- | --- |
-| Telegram bot | Start/menu, profile, fixed plans and flexible tariff builder, Stars invoices, subscription status, device list, last 10 purchases, referrals and support |
-| Mini App | Telegram-authorized customer view, active subscription, choose a fixed or custom tariff, accept terms and pay with Stars |
-| Owner dashboard | Telegram-signed admin access, metrics, customers and payment history, customer detail, fixed-plan CRUD, pricing and payment settings, branding |
-| Remnawave | Provision or extend VPN access after a verified payment; read subscription URL and HWID devices; verify signed outgoing panel webhooks |
-| Billing | Telegram Stars in Telegram; YooKassa, YooMoney and Crypto Pay adapters for use by a **separate** future external storefront |
-| Operations | Two deployment modes: reuse Panel's existing proxy without port conflicts, or use Caddy automatic HTTPS on separate VPS; persistent PostgreSQL/Redis and backup scripts |
-| Referrals | Individual deep links and referral attribution/count; **no rewards or payouts yet** |
-| Branding | Store name, short description, accent color and support contact editable in the admin dashboard |
+| 🤖 Telegram-бот | Главное меню, готовые тарифы и конструктор, подписки, ссылка подключения, устройства, история покупок, поддержка |
+| 📱 Mini App | Личный кабинет, тарифы, оформление заказа через Telegram Stars, история покупок, список устройств и реферальная ссылка |
+| 🛡️ Админка | Статистика, клиенты, платежи, готовые тарифы, настройки цен, способы оплаты, оформление магазина |
+| 🔗 Remnawave | Создание/продление доступа после подтверждённой оплаты, чтение данных подписки и HWID-устройств, приём подписанных событий |
+| 🎨 Брендинг | Название магазина, описание, основной цвет и контакт поддержки |
+| 🎁 Рефералы | Персональная ссылка и учёт приглашённых (автоматические бонусы пока не реализованы) |
+| 🐳 Развёртывание | Два способа установки, Docker Compose, PostgreSQL, Redis, HTTPS, резервные копии |
 
-### Telegram menu
+**Внутри Telegram цифровые подписки оплачиваются через Telegram Stars.** Адаптеры YooKassa, YooMoney и Crypto Pay предусмотрены для внешнего веб-магазина; полноценная отдельная витрина с внешней оплатой ещё разрабатывается.
 
-- **📦 Тарифы** — fixed plans and custom tariff builder
-- **👤 Профиль** — Telegram account details
-- **🔐 Подписка** — status, expiry, limits and connection link
-- **📱 Устройства** — hardware-bound devices reported by Remnawave
-- **🧾 Мои покупки** — latest 10 payment statuses
-- **🎁 Пригласить друга** — unique deep link and referral count
-- **🆘 Поддержка** — owner-provided contact
-- **🌐 Mini App** — subscription overview and checkout
-- **⚙️ /admin** — owner-only settings
+---
 
-## Installation: with an existing Panel or on a separate VPS
+## 🚀 Установка
 
-```bash
+### 1. Что подготовить заранее
+
+- **Сервер Ubuntu или Debian**, доступ через SSH с правами \`sudo\`, установленный **Python 3**. Для установки рядом с Remnawave должен уже работать Docker с Compose v2.
+- **Работающая панель Remnawave** (на этом или другом сервере), её HTTPS-адрес, API-токен и UUID внутренних групп (internal squads).
+- **Telegram-бот** из [@BotFather](https://t.me/BotFather): имя пользователя без \`@\` и токен. Также нужен числовой **Telegram ID администратора**.
+- **Домен/поддомен для вебхуков** и **домен/поддомен для Mini App**. Их можно объединить в один домен, но **нельзя использовать домен существующей панели Remnawave**.
+- DNS-записи \`A\` (и \`AAAA\`, только если IPv6 реально работает), указывающие на сервер с Remnaum. Для вебхуков и Mini App необходим рабочий **HTTPS**.
+- Публичный URL условий продажи цифровой подписки — до начала приёма реальных платежей.
+
+Например, если панель открывается на \`panel.example.org\`, то для магазина можно использовать \`bot.example.org\` (вебхуки) и \`app.example.org\` (Mini App). Это **примеры**, вместо них укажите собственные домены.
+
+> [!WARNING]
+> **Тестируете на двух серверах одновременно?** Используйте **два разных Telegram-бота и два разных токена**. У одного Telegram-бота только один активный адрес webhook: установки с одинаковым токеном будут мешать друг другу.
+
+### 2. Скачайте проект
+
+Подключитесь к серверу по SSH и выполните:
+
+\`\`\`bash
 git clone https://github.com/u988m/remnaum.git
 cd remnaum
-sudo sh install.sh
-```
+\`\`\`
 
-Select your environment:
+Репозиторий может быть приватным — тогда GitHub попросит авторизацию. Не публикуйте токены доступа или содержимое \`.env\`.
 
-| Mode | Where | External ports | HTTPS |
-| --- | --- | --- | --- |
-| `panel` | Same host as Remnawave Panel | **No Remnaum 80/443 listeners**; app available at `127.0.0.1:18080` and optionally via `remnawave-api:8080` on the Panel's existing Docker network | Reuse existing Panel Caddy/Nginx |
-| `standalone` | Independent Ubuntu/Debian VPS | Caddy binds 80/443 only | Automatic Caddy TLS |
+### 3. Выберите способ установки
 
-The installer collects Telegram BotFather token, admin Telegram IDs, Remnawave API URL/token, squad IDs and separate public webhook/Mini App hostnames. It does not import or seed customer/payment data. Docker/Compose can be installed automatically on a standalone host; on a Panel host existing Docker is used unchanged.
+| | **На сервере с Remnawave** | **На отдельном сервере** |
+| --- | --- | --- |
+| Режим | \`panel\` | \`standalone\` |
+| Порты 80/443 | **Не занимает** | Использует Caddy |
+| HTTPS | Через **существующий** Caddy/Nginx панели | Caddy получает сертификаты |
+| Адрес приложения | \`127.0.0.1:18080\` и/или \`remnaum-api:8080\` | Внутри Docker на \`8080\` |
+| Где Remnawave | На этом же сервере | На другом сервере по HTTPS API |
+| База | Собственная PostgreSQL, не база панели | Собственная PostgreSQL |
 
-On the Panel host, install with `sudo sh install.sh --mode panel`; a proxy site block is generated in `generated/`. Add the correct block to the **existing** Caddy/Nginx configuration and reload that proxy after validation. On a separate VPS, `sudo sh install.sh --mode standalone` starts its own Caddy. Neither mode alters Remnawave configuration.
+#### 🅰️ Вариант A: Remnaum рядом с панелью Remnawave
 
-- Telegram webhook: `https://WEBHOOK_DOMAIN/telegram/webhook`
-- Signed Remnawave events: `https://WEBHOOK_DOMAIN/webhooks/remnawave`
-- Mini App: `https://WEBAPP_DOMAIN/app`
-- Owner admin: `https://WEBAPP_DOMAIN/admin`
-- Health: `https://WEBAPP_DOMAIN/health`
+\`\`\`bash
+sudo sh install.sh --mode panel
+\`\`\`
 
-Configure outgoing webhook settings on the Remnawave Panel separately. Register the Mini App URL in BotFather. **Read [the full two-mode installation guide](docs/INSTALL.md)** before attempting co-hosting.
+Установщик **не трогает публичные порты 80/443**, не заменяет Docker панели и не перезаписывает её Caddy/Nginx. Он создаёт собственные контейнеры и открывает приложение только на \`127.0.0.1:18080\` (доступно с самого сервера).
 
-### Data safety
+Проверьте:
 
-New installations contain **zero fake customers, subscriptions, orders and revenue**. Only schema and default configuration are created. Existing PostgreSQL and Redis Docker volumes persist across restarts and updates. Do not use `docker compose down -v` against a live store.
-
-```bash
-bash backup.sh
-bash update.sh
+\`\`\`bash
 docker compose ps
+curl http://127.0.0.1:18080/health
+\`\`\`
+
+**Чтобы Telegram увидел бот и Mini App по HTTPS, обязательно подключите новые домены к существующему прокси панели.** После установки появится папка \`generated/\` с примерами:
+
+| Ваш прокси | Пример конфигурации |
+| --- | --- |
+| Caddy в Docker, общая сеть с Remnaum | \`generated/remnaum.docker.caddy\` |
+| Nginx в Docker, общая сеть с Remnaum | \`generated/remnaum.docker.nginx.conf\` |
+| Caddy на самом сервере | \`generated/remnaum.host.caddy\` |
+| Nginx на самом сервере | \`generated/remnaum.host.nginx.conf\` |
+
+Если существующий Caddy работает в Docker и подключён к сети \`remnawave-network\`, пример добавляемого блока:
+
+\`\`\`caddyfile
+https://bot.example.org, https://app.example.org {
+    encode zstd gzip
+    reverse_proxy http://remnaum-api:8080
+}
+\`\`\`
+
+**Не заменяйте весь существующий Caddyfile этим блоком:** добавьте отдельный сайт для доменов бота. Сначала проверьте итоговую конфигурацию, затем перезагрузите только ваш прокси согласно способу установки панели.
+
+Если у прокси другая Docker-сеть, узнайте её название (\`docker network ls\`) и запустите:
+
+\`\`\`bash
+sudo sh install.sh --mode panel --proxy-network ИМЯ_СУЩЕСТВУЮЩЕЙ_СЕТИ
+\`\`\`
+
+Если Caddy/Nginx работает **не в Docker, а прямо на хосте**, используйте \`generated/remnaum.host.caddy\` или \`generated/remnaum.host.nginx.conf\` с адресом \`127.0.0.1:18080\`. Для такого случая доступен параметр \`--proxy-network none\`.
+
+> [!NOTE]
+> Если локальный \`/health\` работает, но публичный домен не открывается, проблема обычно в DNS, TLS-сертификате либо отсутствии маршрута в существующем прокси. Remnaum не редактирует прокси Remnawave автоматически — это сделано, чтобы не сломать работающую панель.
+
+#### 🅱️ Вариант B: Remnaum на отдельном VPS без панели
+
+\`\`\`bash
+sudo sh install.sh --mode standalone
+\`\`\`
+
+В этом режиме Remnaum разворачивает собственные **Caddy → Nginx → FastAPI**, PostgreSQL и Redis. Установщик при необходимости установит Docker Engine и Compose на поддерживаемой Ubuntu/Debian.
+
+Убедитесь, что:
+
+1. DNS обоих доменов указывает **на этот VPS**;
+2. порты **80/TCP, 443/TCP** открыты в сетевом экране и не заняты другим сервисом (при использовании HTTP/3 также нужен 443/UDP);
+3. у панели Remnawave на другом сервере доступен HTTPS API.
+
+Caddy настроит TLS после того, как DNS и доступ к портам начнут работать. **Установщик не останавливает сервисы, занявшие 80/443**: он сообщит о конфликте.
+
+Проверка:
+
+\`\`\`bash
+docker compose ps
+docker compose logs --tail=100 caddy
+curl https://ВАШ_ДОМЕН_MINIAPP/health
+\`\`\`
+
+### 4. Какие вопросы задаёт установщик?
+
+| Вопрос | Что вводить |
+| --- | --- |
+| Домен вебхуков | \`bot.ваш-домен.ru\`, **без** \`https://\` |
+| Домен Mini App | \`app.ваш-домен.ru\`, **без** \`https://\` |
+| Email для Caddy | Рабочий email (в режиме \`standalone\`) |
+| Имя Telegram-бота | \`MyVpnBot\`, без \`@\` |
+| Telegram Bot Token | Токен, полученный в BotFather |
+| Telegram admin IDs | Числовой ID владельца; несколько ID через запятую |
+| Remnawave Panel URL | Например, \`https://panel.ваш-домен.ru\` |
+| Remnawave API Token | Токен API панели |
+| Internal squad UUIDs | UUID доступных внутренних групп панели |
+| Условия и поддержка | Публичная ссылка на условия и контакт поддержки |
+
+Значения сохраняются в закрытом файле \`.env\`. Сгенерированные секреты и пароль PostgreSQL нельзя терять.
+
+---
+
+## ⚙️ После установки
+
+### 1. Проверьте адреса магазина
+
+| Для чего | Адрес |
+| --- | --- |
+| Telegram webhook | \`https://ДОМЕН_ВЕБХУКОВ/telegram/webhook\` |
+| События Remnawave | \`https://ДОМЕН_ВЕБХУКОВ/webhooks/remnawave\` |
+| Mini App | \`https://ДОМЕН_MINIAPP/app\` |
+| Панель администратора | \`https://ДОМЕН_MINIAPP/admin\` |
+| Проверка работы | \`https://ДОМЕН_MINIAPP/health\` |
+
+Убедитесь, что публичный \`/health\` отвечает успешно. Если HTTPS ещё не работает, проверять оплату рано.
+
+### 2. Настройте Mini App в Telegram
+
+Откройте [@BotFather](https://t.me/BotFather), выберите своего бота и настройте **Menu Button / Main Mini App**, указав адрес \`https://ДОМЕН_MINIAPP/app\`. Если BotFather запрашивает домен, используйте **именно домен Mini App**.
+
+При запуске приложение также пытается зарегистрировать команды и кнопку меню через Telegram Bot API. Для входа в админку откройте бота под аккаунтом с ID из \`ADMIN_IDS\`, отправьте \`/admin\` и откройте панель из Telegram.
+
+### 3. Подключите события Remnawave
+
+**API-токен панели** и **секрет исходящих вебхуков панели** — разные вещи. Установщик создаёт \`REMNAWAVE_WEBHOOK_SECRET\` в \`.env\`; в конфигурации вашей версии Remnawave нужно задать тот же секрет и URL:
+
+\`\`\`dotenv
+WEBHOOK_ENABLED=true
+WEBHOOK_URL=https://ВАШ_ДОМЕН_ВЕБХУКОВ/webhooks/remnawave
+WEBHOOK_SECRET_HEADER=СЕКРЕТ_ИЗ_REMNAUM_ENV
+\`\`\`
+
+Проверьте имена параметров в документации **вашей версии Remnawave** и примените настройки её штатным способом. **Установщик Remnaum не изменяет чужую панель автоматически.** Пока обработчик Remnaum проверяет подпись и принимает события, но ещё не синхронизирует по ним все изменения состояния подписок.
+
+### 4. Настройте магазин в админке
+
+Укажите название, описание, цвет и контакт поддержки, создайте готовые тарифы, настройте цены конструктора и проверьте доступные способы оплаты. Покупки цифровых подписок внутри Telegram должны проходить через **Telegram Stars**.
+
+---
+
+## 🧰 Полезные команды
+
+Выполняйте из каталога \`remnaum\` на нужном сервере:
+
+\`\`\`bash
+# Состояние контейнеров
+docker compose ps
+
+# Логи приложения
+docker compose logs --tail=100 app
+
+# Логи в реальном времени
 docker compose logs -f app
-```
 
-Backups contain PostgreSQL data. Store your `.env` (particularly `APP_SECRET_KEY`) separately and securely to recover encrypted payment settings.
+# Резервная копия PostgreSQL
+bash backup.sh
 
-## Configuration and payment requirements
+# Обновление (с созданием резервной копии)
+bash update.sh
 
-Secrets must never be committed. Review [`.env.example`](.env.example) and [docs/INSTALL.md](docs/INSTALL.md). `ADMIN_IDS` lists authorized Telegram numeric IDs. Login to admin APIs uses verified Telegram Mini App initData, not a manually copied admin API token.
+# Перезапуск приложения
+docker compose restart app
+\`\`\`
 
-All in-bot and Telegram Mini App digital subscription payments use Telegram Stars (XTR) in accordance with Telegram's bot platform rules. External payment adapters do **not** authorize payment buttons for the same digital goods inside Telegram.
+Файл \`.env\` и пароль шифрования \`APP_SECRET_KEY\` храните в защищённом месте **отдельно от резервной копии базы данных**.
 
-## Architecture
+> [!CAUTION]
+> **Никогда не выполняйте \`docker compose down -v\` для действующего магазина:** эта команда удаляет Docker volumes вместе с базой. Повторная установка и обновления рассчитаны на сохранение уже существующих данных.
 
-- Python 3, FastAPI, Aiogram 3
-- PostgreSQL as source of truth; Redis for infrastructure support
-- Async SQLAlchemy models and isolated Remnawave/payment adapters
-- Standalone: Caddy (public HTTPS) → Nginx (private) → FastAPI; Panel host: existing reverse proxy → remnaum-api:8080 (shared Docker network) or host loopback 127.0.0.1:18080
-- Telegram-signed admin and Mini App API authentication
-- HMAC verification of Remnawave and provider webhook signatures
+### 🗃️ Пустая база при первой установке
 
-## Known release-candidate limitations
+На **новой** установке нет тестовых покупателей, платежей, заказов, подписок и искусственной выручки. Структура БД и системные параметры могут создаваться автоматически. При перезапуске или обновлении существующие данные сохраняются.
 
-- **Alembic versioned migrations are not yet wired**; current schema bootstrap uses `create_all`. Test upgrades against a backup.
-- Automatic configuration of outbound webhook settings on the remote Remnawave server is not implemented; configure it in the panel.
-- Remnawave webhook payloads are authenticated and acknowledged but are **not yet reconciled** into local subscription status.
-- Fixed plans and custom tariffs are supported; automatic recurring billing and referral bonuses are not implemented.
-- External web shop checkout is not yet a complete standalone purchasing interface.
-- HWID device deletion is not enabled from the bot.
-- A clean Docker smoke test does not replace real payment/provisioning tests. No claim of production readiness is made.
-- Public GitHub visibility and Awesome Remnawave submission require separate publication/review steps.
+---
 
-## Open source / Awesome Remnawave
+## 🛠️ Частые проблемы
 
-Remnaum is licensed under [MIT](LICENSE). After the repository is made public and a production smoke test passes, the project can be proposed for [Awesome Remnawave](https://github.com/remnawave/panel/blob/main/docs/awesome-remnawave.mdx). See [submission notes](docs/AWESOME_REMNAWAVE.md).
+<details>
+<summary><b>Домен Mini App или webhook не открывается</b></summary>
 
-Contributions, feedback, bug reports and PRs are welcome.
+Проверьте DNS, HTTPS, действительность сертификата и маршрут в Caddy/Nginx. В режиме \`panel\` сначала проверьте \`curl http://127.0.0.1:18080/health\`, потом публичный домен. В режиме \`standalone\` просмотрите \`docker compose logs --tail=100 caddy\`.
+
+</details>
+
+<details>
+<summary><b>Ошибка: порт 80 или 443 уже занят</b></summary>
+
+На сервере с Remnawave выбирайте \`--mode panel\` и используйте существующий прокси. Не останавливайте прокси панели ради установки бота. Режим \`standalone\` предполагает свободные публичные 80/443.
+
+</details>
+
+<details>
+<summary><b>Бот отвечает, но нет подключения VPN</b></summary>
+
+Проверьте API URL и API-токен Remnawave, внутренние группы, доступность панели и логи \`docker compose logs --tail=100 app\`. Отдельно проверьте подтверждение платежа. Не публикуйте токены в сообщениях об ошибке.
+
+</details>
+
+<details>
+<summary><b>Telegram Mini App не открывается или админка запрещает вход</b></summary>
+
+Проверьте HTTPS и URL Mini App в BotFather. Административный интерфейс открывайте **из Telegram** под аккаунтом с разрешённым числовым ID. Прямой переход в браузере не предоставляет Telegram initData для административных API.
+
+</details>
+
+<details>
+<summary><b>После переустановки остались клиенты</b></summary>
+
+Это нормальное поведение: Docker volumes сохраняются специально для защиты реальных данных. Пустая БД гарантируется для **новой установки**, а не для повторного запуска поверх существующей.
+
+</details>
+
+---
+
+## 🏗️ Технологии
+
+**FastAPI**, **Aiogram 3**, **PostgreSQL**, **Redis**, **SQLAlchemy**, **Docker Compose**, **Caddy** и **Nginx**. Интеграция с Remnawave — через API.
+
+**Что пока в разработке:** версионированные миграции Alembic, начисление реферальных вознаграждений, завершённый внешний веб-магазин, удаление HWID-устройств, согласование событий панели с локальным состоянием и полный end-to-end аудит реальных платежей. Это тестовая версия **1.0.0-rc.2**, а не заявление о production-ready.
+
+## 💬 Обратная связь
+
+Нашли ошибку, хотите новую функцию или нужна помощь с установкой?
+
+| Обращение | Куда писать |
+| --- | --- |
+| 🐛 **Ошибки и баг-репорты** | [Сообщить об ошибке](https://t.me/remnaum/3) |
+| 💡 **Предложения и идеи** | [Предложить улучшение](https://t.me/remnaum/5) |
+| 🆘 **Помощь и вопросы** | [Получить помощь](https://t.me/remnaum/6) |
+
+При обращении об ошибке желательно указать режим установки (\`panel\` или \`standalone\`), версию, шаги воспроизведения и **логи без секретов**.
+
+## 📄 Лицензия и сообщество
+
+Проект распространяется по лицензии [MIT](LICENSE) и ориентирован на экосистему [Remnawave](https://github.com/remnawave/panel). Для включения в [Awesome Remnawave](https://github.com/remnawave/panel/blob/main/docs/awesome-remnawave.mdx) репозиторий должен быть публичным; текущий статус публикации проверяйте на GitHub.
+
+<div align="center">
+
+**Remnaum — ваш магазин VPN, ваши настройки.**
+
+[📖 Подробная инструкция](docs/INSTALL.md) · [🐛 Баги](https://t.me/remnaum/3) · [💡 Предложения](https://t.me/remnaum/5) · [🆘 Помощь](https://t.me/remnaum/6)
+
+</div>
