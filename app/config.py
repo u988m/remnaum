@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,16 +28,27 @@ class Settings(BaseSettings):
     public_base_url: str = "http://localhost:8080"
     webapp_url: str = ""
     support_contact: str = ""
-    tariff_min_days: int = 7
-    tariff_max_days: int = 365
-    tariff_min_traffic_gb: int = 10
-    tariff_max_traffic_gb: int = 1000
-    tariff_min_devices: int = 1
-    tariff_max_devices: int = 10
-    tariff_price_per_day_minor: int = 5
-    tariff_price_per_gb_minor: int = 2
-    tariff_price_per_device_minor: int = 100
-    tariff_currency: str = "EUR"
+    tariff_min_days: int = Field(default=7, ge=1)
+    tariff_max_days: int = Field(default=365, ge=1)
+    tariff_min_traffic_gb: int = Field(default=10, ge=1)
+    tariff_max_traffic_gb: int = Field(default=1000, ge=1)
+    tariff_min_devices: int = Field(default=1, ge=1)
+    tariff_max_devices: int = Field(default=10, ge=1)
+    tariff_price_per_day_minor: int = Field(default=5, ge=0)
+    tariff_price_per_gb_minor: int = Field(default=2, ge=0)
+    tariff_price_per_device_minor: int = Field(default=100, ge=0)
+    tariff_currency: str = Field(default="EUR", min_length=3, max_length=8)
+
+    @model_validator(mode="after")
+    def validate_tariff_ranges(self):
+        ranges = (
+            (self.tariff_min_days, self.tariff_max_days),
+            (self.tariff_min_traffic_gb, self.tariff_max_traffic_gb),
+            (self.tariff_min_devices, self.tariff_max_devices),
+        )
+        if any(minimum > maximum for minimum, maximum in ranges):
+            raise ValueError("Tariff minimum values must not exceed maximum values")
+        return self
 
     @property
     def admin_id_set(self) -> set[int]:
