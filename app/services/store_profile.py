@@ -12,6 +12,7 @@ DEFAULT_PROFILE = {
     "accent_color": "#4b8bea",
     "support_contact": settings.support_contact,
     "terms_url": settings.telegram_terms_url,
+    "welcome_photo_file_id": "",
 }
 
 
@@ -19,10 +20,13 @@ def validate_profile(data: dict) -> dict:
     if set(data) - set(DEFAULT_PROFILE):
         raise ValueError("Unknown store profile field")
     next_values = DEFAULT_PROFILE | data
-    for key in ("name", "tagline", "description", "support_contact", "terms_url"):
+    for key in ("name", "tagline", "description", "support_contact", "terms_url", "welcome_photo_file_id"):
         value = next_values[key]
         if not isinstance(value, str) or len(value) > (80 if key == "name" else 300):
             raise ValueError(f"Invalid {key}")
+    file_id = next_values["welcome_photo_file_id"]
+    if file_id and (len(file_id) > 256 or not re.fullmatch(r"[A-Za-z0-9_-]+", file_id)):
+        raise ValueError("Invalid Telegram welcome photo file ID")
     terms_url = next_values["terms_url"]
     if terms_url and (not terms_url.startswith("https://") or len(terms_url) > 300):
         raise ValueError("Terms URL must be a public HTTPS address")
