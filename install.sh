@@ -84,7 +84,7 @@ if ! grep -q '^PUBLIC_DOMAIN=' .env; then
   ask acme_email "TLS certificate email"
   [[ "$public_domain" =~ ^[a-zA-Z0-9.-]+$ && "$public_domain" == *.* ]] || exit 1
   [[ "$webapp_domain" =~ ^[a-zA-Z0-9.-]+$ && "$webapp_domain" == *.* ]] || exit 1
-  printf 'PUBLIC_DOMAIN=%s\\nWEBAPP_DOMAIN=%s\\nACME_EMAIL=%s\\n' "$public_domain" "$webapp_domain" "$acme_email" >> .env
+  printf 'PUBLIC_DOMAIN=%s\nWEBAPP_DOMAIN=%s\nACME_EMAIL=%s\n' "$public_domain" "$webapp_domain" "$acme_email" >> .env
   sed -i "s|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=https://$webapp_domain|" .env
   sed -i "s|^WEBAPP_URL=.*|WEBAPP_URL=https://$webapp_domain/app|" .env
   sed -i "s|^TELEGRAM_WEBHOOK_URL=.*|TELEGRAM_WEBHOOK_URL=https://$public_domain/telegram/webhook|" .env
