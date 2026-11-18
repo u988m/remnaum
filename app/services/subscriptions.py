@@ -93,6 +93,7 @@ async def provision_paid_payment(payment_id: int) -> bool:
             if not panel_user.get("id"):
                 panel_user = _unwrap(await panel.get_user_by_username(username))
             panel_user_id = int(panel_user["id"])
+            panel_user = _unwrap(await panel.get_user(panel_user_id))
 
         expire_value = panel_user.get("expireAt")
         expires_at = (
