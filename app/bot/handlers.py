@@ -5,7 +5,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message, PreCheckoutQuery, WebAppInfo
 
 from app.config import settings
-from app.services.tariffs import TariffQuote, format_price, get_tariff_draft, update_tariff_draft
+from app.services.tariffs import TariffQuote, get_tariff_draft, update_tariff_draft
 from app.services.payment_service import (
     accept_current_terms,
     create_stars_payment_for_user,
@@ -60,16 +60,15 @@ def tariff_keyboard() -> InlineKeyboardMarkup:
 
 
 def tariff_text(quote: TariffQuote) -> str:
+    stars = calculate_stars_price(quote.duration_days, quote.traffic_gb, quote.device_limit)
     return (
-        "📦 <b>Конструктор тарифа</b>\n\n"
-        f"Срок: <b>{quote.duration_days} дней</b>\n"
-        f"Трафик: <b>{quote.traffic_gb} ГБ</b>\n"
-        f"Устройства: <b>{quote.device_limit}</b>\n\n"
-        f"Итоговая стоимость: <b>{escape(format_price(quote.amount_minor, quote.currency))}</b>\n\n"
-        "Настройте параметры кнопками ниже. Значения ограничены доступным диапазоном. "
-        "После выбора тарифа можно перейти к оплате."
+        "📦 <b>Конструктор тарифа</b>\\n\\n"
+        f"Срок: <b>{quote.duration_days} дней</b>\\n"
+        f"Трафик: <b>{quote.traffic_gb} ГБ</b>\\n"
+        f"Устройства: <b>{quote.device_limit}</b>\\n\\n"
+        f"Стоимость: <b>{stars} ⭐</b>\\n\\n"
+        "Настройте параметры кнопками ниже. Значения ограничены доступным диапазоном."
     )
-
 
 async def show_tariff(callback: CallbackQuery, quote: TariffQuote | None = None) -> None:
     if callback.message:
