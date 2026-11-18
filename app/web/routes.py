@@ -422,6 +422,9 @@ async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=Non
         "profile": await get_store_profile(),
         "pricing": {key: value for key, value in pricing.items() if key.startswith("stars_")},
         "stars_enabled": await is_payment_method_enabled("telegram_stars"),
+        "payment_methods": (lambda m, c: {
+            key: bool(m.get(key) and c.get(key)) for key in ("telegram_stars", "yookassa", "yoomoney", "cryptopay")
+        })(*await _webapp_enabled_methods()),
         "terms_url": await get_terms_url(),
         "limits": {
             "days_min": settings.tariff_min_days, "days_max": settings.tariff_max_days,
@@ -1223,3 +1226,75 @@ async def webapp_redeem_promo(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"reward": reward, "balance": await promo_balance(int(identity["id"]))}
+
+
+# Shared checkout for the Telegram-authenticated Mini App.
+# The provider controls enabled state and encrypted credentials in PostgreSQL.
+from urllib.parse import urlsplit
+from app.services.payment_service import create_payment_for_user
+from app.services.store_settings import get_store_payment_settings, public_payment_settings
+
+
+class WebAppExternalCheckout(WebAppCheckout):
+    provider: str
+
+
+class WebAppPlanExternalCheckout(WebAppFixedPlanCheckout):
+    provider: str
+
+
+def _validate_external_provider(name: str) -> None:
+    if name not in ("yookassa", "yoomoney", "cryptopay"):
+        raise HTTPException(status_code=422, detail="Unknown external provider")
+
+
+async def _external_checkout(telegram_id: int, provider: str):
+    try:
+        payment, link = await create_payment_for_user(telegram_id, provider)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if urlsplit(link.url).scheme != "https":
+        raise HTTPException(status_code=502, detail="Payment provider returned a non-HTTPS link")
+    return {"payment_id": payment.id, "provider": provider, "url": link.url}
+
+
+@router.post("/api/v1/webapp/external/checkout")
+async def webapp_external_checkout(
+    data: WebAppExternalCheckout, x_telegram_init_data: str | None = Header(default=None),
+):
+    if not x_telegram_init_data:
+        raise HTTPException(status_code=401, detail="Telegram authentication is required")
+    identity = await _webapp_user(x_telegram_init_data)
+    _validate_external_provider(data.provider)
+    telegram_id = int(identity["id"])
+    if not await has_accepted_current_terms(telegram_id):
+        raise HTTPException(status_code=403, detail="Accept the current terms before checkout")
+    if not (settings.tariff_min_days <= data.days <= settings.tariff_max_days
+            and settings.tariff_min_traffic_gb <= data.traffic <= settings.tariff_max_traffic_gb
+            and settings.tariff_min_devices <= data.devices <= settings.tariff_max_devices):
+        raise HTTPException(status_code=422, detail="Tariff values outside allowed range")
+    await set_tariff_draft(telegram_id, identity.get("username"), data.days, data.traffic, data.devices)
+    return await _external_checkout(telegram_id, data.provider)
+
+
+@router.post("/api/v1/webapp/plans/external/checkout")
+async def webapp_external_plan_checkout(
+    data: WebAppPlanExternalCheckout, x_telegram_init_data: str | None = Header(default=None),
+):
+    if not x_telegram_init_data:
+        raise HTTPException(status_code=401, detail="Telegram authentication is required")
+    identity = await _webapp_user(x_telegram_init_data)
+    _validate_external_provider(data.provider)
+    telegram_id = int(identity["id"])
+    if not await has_accepted_current_terms(telegram_id):
+        raise HTTPException(status_code=403, detail="Accept the current terms before checkout")
+    try:
+        await choose_plan(telegram_id, data.plan_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await _external_checkout(telegram_id, data.provider)
+
+
+async def _webapp_enabled_methods():
+    methods, credentials = await get_store_payment_settings()
+    return methods, public_payment_settings(methods, credentials)["configured"]
