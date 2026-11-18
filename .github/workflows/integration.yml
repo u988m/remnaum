@@ -169,9 +169,9 @@ jobs:
           PY
       - name: Verify encrypted full backup and restore PostgreSQL and Redis
         run: |
-          sudo mkdir -p data
-          printf '%s\\n' 'ci-test-only-recovery-key-not-for-production-12345' | sudo tee data/backup.key >/dev/null
-          sudo chmod 600 data/backup.key
+          sudo mkdir -p backups
+          printf '%s\\n' 'ci-test-only-recovery-key-not-for-production-12345' | sudo tee backups/.recovery-key >/dev/null
+          sudo chmod 600 backups/.recovery-key
           sudo python3 scripts/backup_manager.py create
           ARCHIVE="$(sudo find backups -maxdepth 1 -name 'remnaum-full-*.rmb' | sort | tail -1)"
           sudo test -s "$ARCHIVE"
