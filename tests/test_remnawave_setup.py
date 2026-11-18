@@ -180,6 +180,26 @@ class RemnawaveSetupTests(unittest.TestCase):
             self.assertFalse(setup.public_webhook_ready(WEBHOOK))
         self.assertFalse(setup.public_webhook_ready("http://hook.myvpn.site/webhooks/remnawave"))
 
+    def test_failed_panel_apply_rolls_back_old_env(self):
+        from subprocess import CalledProcessError, CompletedProcess
+        with tempfile.TemporaryDirectory() as temp:
+            root, env = self._panel(temp)
+            old = env.read_text()
+            def fake_run(command):
+                if command[-1] == "--quiet":
+                    raise CalledProcessError(1, command)
+                return CompletedProcess(command, 0)
+            with patch.object(setup.subprocess, "run", return_value=CompletedProcess(
+                ["docker", "compose"], 0, stdout="remnawave\n",
+            )):
+                with self.assertRaises(CalledProcessError):
+                    setup.apply_local_panel_webhook(
+                        env, WEBHOOK, SECRET, lambda _, default: "Д",
+                        run_panel_command=fake_run,
+                    )
+            self.assertEqual(env.read_text(), old)
+            self.assertTrue(list(root.glob(".env.remnaum-backup-*")))
+
     def test_webhook_reconfiguration_requires_explicit_consent(self):
         with tempfile.TemporaryDirectory() as temp:
             root, env = self._panel(temp)
