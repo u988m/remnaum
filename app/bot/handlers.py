@@ -362,7 +362,7 @@ async def devices_handler(callback: CallbackQuery) -> None:
             "Список HWID-устройств появится после подключения API управления устройствами."
         )
     if callback.message:
-        await callback.message.edit_text(message.replace("\\\\n", "\\n"), reply_markup=back_menu())
+        await callback.message.edit_text(message.replace(chr(92) + "n", chr(10)), reply_markup=back_menu())
 
 
 @router.callback_query(F.data == "menu:purchases")
@@ -381,7 +381,7 @@ async def purchases_handler(callback: CallbackQuery) -> None:
         amount = f"{p.amount} ⭐" if p.currency == "XTR" else f"{p.amount / 100:.2f} {escape(p.currency)}"
         lines.append(f"#{p.id} · {escape(p.provider)} · {amount} · {escape(p.status)}")
     if callback.message:
-        await callback.message.edit_text("\\n".join(lines), reply_markup=back_menu())
+        await callback.message.edit_text(chr(10).join(lines), reply_markup=back_menu())
 
 
 @router.callback_query(F.data == "menu:referral")
@@ -399,4 +399,4 @@ async def referral_handler(callback: CallbackQuery) -> None:
             "Реферальные вознаграждения пока не подключены."
         )
     if callback.message:
-        await callback.message.edit_text(text.replace("\\\\n", "\\n"), reply_markup=back_menu())
+        await callback.message.edit_text(text.replace(chr(92) + "n", chr(10)), reply_markup=back_menu())
