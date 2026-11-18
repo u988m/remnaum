@@ -122,6 +122,27 @@ class RemnawaveClient:
         return await self.request("GET", f"/api/subscriptions/{endpoint}/{user_id}")
 
 
+    async def resolve_user_id(
+        self, stored_id: int | str, *, username: str | None = None
+    ) -> int | str:
+        """Resolve legacy UUID subscriptions to numeric IDs used by Panel 3.x.
+
+        Remnawave 2.x accepts UUID for older APIs. Username lookup has remained
+        stable in both 2.x and 3.x; never look up another customer's identity.
+        """
+        if str(stored_id).isdigit():
+            return int(stored_id)
+        if not username:
+            return stored_id
+        result = await self.get_user_by_username(username)
+        user = result.get("response", result) if isinstance(result, dict) else {}
+        if isinstance(user, dict):
+            value = user.get("id")
+            if isinstance(value, int) and value > 0:
+                return value
+        return stored_id
+
+
     async def get_hwid_devices(self, user_id: int | str) -> Any:
         """List hardware-bound devices for a user (Panel 3.x)."""
         return await self.request("GET", f"/api/hwid/devices/{user_id}")
