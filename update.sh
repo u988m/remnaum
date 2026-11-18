@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 cd "$(dirname "$0")"
-[[ -f .env ]] || { echo ".env not found. Run ./install.sh first."; exit 1; }
+[[ -f .env ]] || { echo ".env not found. Run sudo bash install.sh first." >&2; exit 1; }
 branch="$(git branch --show-current)"
-[[ -n "$branch" ]] || { echo "Detached HEAD; refusing automatic update."; exit 1; }
+[[ -n "$branch" ]] || { echo "Detached HEAD; refusing automatic update." >&2; exit 1; }
+./backup.sh
 git fetch --tags origin
 git pull --ff-only origin "$branch"
+docker compose config --quiet
 docker compose up -d --build
-docker image prune -f
-echo "Remnaum updated on branch $branch."
+echo "Updated Remnaum on branch $branch. Data volumes were preserved."
