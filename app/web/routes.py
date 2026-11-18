@@ -628,9 +628,60 @@ class StoreProfilePayload(BaseModel):
     terms_url: str = Field(default="", max_length=300)
 
 
+@router.post("/admin/api/welcome-photo")
+async def admin_upload_welcome_photo(
+    request: Request,
+    x_telegram_init_data: str | None = Header(default=None),
+):
+    identity = await _require_telegram_admin(x_telegram_init_data)
+    media_type = request.headers.get("content-type", "").split(";", 1)[0].lower()
+    if media_type not in {"image/jpeg", "image/png"}:
+        raise HTTPException(status_code=415, detail="Нужен JPG или PNG")
+    maximum = 5 * 1024 * 1024
+    chunks = bytearray()
+    async for part in request.stream():
+        chunks.extend(part)
+        if len(chunks) > maximum:
+            raise HTTPException(status_code=413, detail="Фото должно быть меньше 5 МБ")
+    image = bytes(chunks)
+    if not (
+        image.startswith(b"\\xff\\xd8\\xff")
+        or image.startswith(b"\\x89PNG\\r\\n\\x1a\\n")
+    ):
+        raise HTTPException(status_code=422, detail="Файл не похож на изображение")
+    if not bot:
+        raise HTTPException(status_code=503, detail="Telegram bot не настроен")
+    from aiogram.types import BufferedInputFile
+    try:
+        sent = await bot.send_photo(
+            chat_id=int(identity["id"]),
+            photo=BufferedInputFile(
+                image, filename="welcome.jpg" if media_type == "image/jpeg" else "welcome.png"
+            ),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Telegram не принял фото") from exc
+    if not sent.photo:
+        raise HTTPException(status_code=502, detail="Telegram не вернул идентификатор фото")
+    await update_store_profile({"welcome_photo_file_id": sent.photo[-1].file_id})
+    try:
+        await bot.delete_message(int(identity["id"]), sent.message_id)
+    except Exception:
+        pass
+    return {"ok": True, "has_photo": True}
+
+
+@router.delete("/admin/api/welcome-photo")
+async def admin_delete_welcome_photo(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    await update_store_profile({"welcome_photo_file_id": ""})
+    return {"ok": True, "has_photo": False}
+
+
 @router.get("/api/v1/store-profile")
 async def public_store_profile():
-    return await get_store_profile()
+    profile = await get_store_profile()
+    return {k: v for k, v in profile.items() if k != "welcome_photo_file_id"}
 
 
 @router.get("/admin/api/store-profile")
