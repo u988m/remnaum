@@ -566,12 +566,15 @@ def config_for_install(existing: dict[str, str], mode: str,
         print("\\n🔎 Получаем внутренние группы Remnawave через API...")
         try:
             squads = discover_squads(cfg["REMNAWAVE_BASE_URL"], cfg["REMNAWAVE_API_TOKEN"])
-            cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"] = select_squads(squads, prompt)
-        except (OSError, ValueError) as exc:
-            # Do not print exception details from upstream (they might contain credentials).
+        except (OSError, ValueError):
+            # Never print full HTTP errors: endpoints might include user credentials.
             print("Не удалось получить группы автоматически. Проверьте API-токен и доступность панели.")
             manual = prompt("UUID внутренней группы (резервный вариант, через запятую)")
             cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"] = validate_uuid_list(manual)
+        else:
+            # A successful API response with zero squads is not an outage.
+            # Do not encourage entering an unrelated UUID.
+            cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"] = select_squads(squads, prompt)
     # On a shared host reuse the already configured secret so other Panel
     # webhook consumers are not disconnected or made incompatible.
     panel_env = local_panel_for_url(cfg["REMNAWAVE_BASE_URL"]) if mode == "panel" else None
