@@ -1,0 +1,46 @@
+name: Integration smoke
+on:
+  push:
+    branches: ["main", "feat/payment-settings-constructor"]
+  pull_request:
+
+jobs:
+  clean-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare isolated installation config
+        run: |
+          cp .env.example .env
+          chmod 600 .env
+      - name: Validate shell and proxy configuration
+        run: |
+          bash -n install.sh update.sh backup.sh
+          docker compose config --quiet
+          docker compose run --rm --no-deps --entrypoint caddy caddy validate --config /etc/caddy/Caddyfile
+      - name: Start empty database and API
+        run: docker compose up -d --build postgres redis app
+      - name: Validate Nginx with running API DNS
+        run: docker compose run --rm --no-deps --entrypoint nginx nginx -t
+      - name: Verify health and clean data
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose exec -T app python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8080/health').status)" >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          docker compose exec -T postgres psql -U remnaum -d remnaum -Atc "SELECT 'users:' || COUNT(*) FROM users;"
+          test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM users;')" = "0"
+          test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM payments;')" = "0"
+          test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM subscriptions;')" = "0"
+      - name: Verify restart does not seed data
+        run: |
+          docker compose restart app
+          sleep 5
+          test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM users;')" = "0"
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
+      - name: Stop
+        if: always()
+        run: docker compose down
