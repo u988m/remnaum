@@ -4,6 +4,7 @@ This is for a separate HTTPS website, never for the in-Telegram Mini App.
 """
 from __future__ import annotations
 import base64
+import binascii
 import hashlib
 import hmac
 import time
@@ -51,7 +52,7 @@ def verify_store_session(cookie: str | None, secret: str, now: int | None = None
         telegram_id_raw, expiry_raw, signature = raw.split(":")
         telegram_id = int(telegram_id_raw)
         expiry = int(expiry_raw)
-    except (ValueError, UnicodeError) as exc:
+    except (ValueError, UnicodeError, binascii.Error) as exc:
         raise ValueError("Invalid session") from exc
     current = int(now if now is not None else time.time())
     if telegram_id < 1 or not current <= expiry <= current + 12 * 3600:
