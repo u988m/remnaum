@@ -123,7 +123,10 @@ async def admin_update_tariff_pricing(data: TariffPricingUpdate, x_telegram_init
 async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: str | None = Header(default=None)):
     if not settings.telegram_use_webhook:
         raise HTTPException(status_code=404, detail="Webhook mode is disabled")
-    if settings.telegram_webhook_secret and x_telegram_bot_api_secret_token != settings.telegram_webhook_secret:
+    import hmac
+    if not settings.telegram_webhook_secret:
+        raise HTTPException(status_code=503, detail="Webhook secret is not configured")
+    if not x_telegram_bot_api_secret_token or not hmac.compare_digest(x_telegram_bot_api_secret_token, settings.telegram_webhook_secret):
         raise HTTPException(status_code=403, detail="Invalid webhook secret")
     if bot is None:
         raise HTTPException(status_code=503, detail="Bot token is not configured")
