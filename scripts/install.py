@@ -352,9 +352,7 @@ def config_for_install(existing: dict[str, str], mode: str,
     for key, label, hidden in required:
         if not cfg.get(key):
             cfg[key] = prompt(label, hidden=hidden)
-    if not existing:
-        cfg["TELEGRAM_TERMS_URL"] = prompt("Ссылка на условия продажи (необязательно для теста)", required=False)
-        cfg["SUPPORT_CONTACT"] = prompt("Контакт поддержки (необязательно)", required=False)
+    # Legal terms, support, tariffs and payment providers are configured in the admin DB.
     cfg["TELEGRAM_BOT_USERNAME"] = cfg["TELEGRAM_BOT_USERNAME"].lstrip("@")
     if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", cfg.get("TELEGRAM_BOT_USERNAME", "")):
         raise ValueError("Bot username must use 5-32 ASCII letters, digits or underscores")
