@@ -1,3 +1,5 @@
+# Remnaum core stack. No host ports are published by default.
+# The installer selects a deployment overlay via COMPOSE_FILE in .env.
 services:
   app:
     build: .
@@ -12,32 +14,6 @@ services:
         condition: service_healthy
     volumes:
       - ./data:/app/data
-  nginx:
-    image: nginx:1.27-alpine
-    restart: unless-stopped
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on:
-      - app
-    expose:
-      - "80"
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    environment:
-      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?Set PUBLIC_DOMAIN in .env}
-      WEBAPP_DOMAIN: ${WEBAPP_DOMAIN:?Set WEBAPP_DOMAIN in .env}
-      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - nginx
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -65,5 +41,3 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  caddy_data:
-  caddy_config:
