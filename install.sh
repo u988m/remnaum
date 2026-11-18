@@ -70,7 +70,7 @@ REMNAWAVE_API_TOKEN=$panel_token
 REMNAWAVE_ACTIVE_INTERNAL_SQUADS=$squad_ids
 REMNAWAVE_WEBHOOK_SECRET=$remsecret
 PUBLIC_BASE_URL=https://$webapp_domain
-WEBAPP_URL=https://$webapp_domain/webapp
+WEBAPP_URL=https://$webapp_domain/app
 TELEGRAM_TERMS_URL=$terms_url
 SUPPORT_CONTACT=$support_contact
 ENV
