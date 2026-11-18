@@ -345,85 +345,6 @@ function limits(){return {days:+$("days").value,traffic:+$("traffic").value,devi
 function recalc(){if(!data)return;const v=limits(),p=data.pricing;const stars=v.days*p.stars_per_day+v.traffic*p.stars_per_gb+v.devices*p.stars_per_device;$("stars-price").textContent=stars+" ⭐";$("buy").textContent="Оплатить "+stars+" Stars";$("buy").disabled=!$("terms").checked||!data.stars_enabled||!data.terms_url||stars<1}
 ["days","traffic","devices"].forEach(k=>$(k).addEventListener("change",recalc));$("terms").addEventListener("change",recalc);
 $("buy").onclick=async()=>{try{$("buy").disabled=true;$("status").textContent="Создаём счёт…";await api("/api/v1/webapp/terms/accept",{accepted:true});const result=await api("/api/v1/webapp/checkout",limits());if(!tg?.openInvoice)throw Error("Откройте магазин из Telegram, чтобы оплатить счёт");tg.openInvoice(result.invoice_url,(status)=>{$("status").textContent=status==="paid"?"Оплата подтверждена. Обновляем подписку…":status==="cancelled"?"Оплата отменена":"Статус оплаты: "+status;if(status==="paid")setTimeout(()=>location.reload(),1800);else recalc()})}catch(e){$("status").textContent=e.message;recalc()}};
-async function adminApi(method,path,body){const r=await fetch(path,{method,headers:{"X-Telegram-Init-Data":tg?.initData||"","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(typeof d.detail==="string"?d.detail:"Ошибка запроса");return d}
-let cachedPlans=[];
-async function loadPlans(){
-  const d=await adminApi("GET","/admin/api/plans");cachedPlans=d.items;$("plans-table").replaceChildren();
-  d.items.forEach(p=>{
-    row("plans-table",[p.title,p.duration_days+" д / "+p.traffic_gb+" ГБ / "+p.device_limit+" уст.",(p.price_rub_minor/100).toFixed(2),p.price_stars,p.is_active?"Активен":"Скрыт"]);
-    const td=cell("");const button=document.createElement("button");button.className="action";button.textContent="Изменить";
-    button.onclick=()=>fillPlan(p);td.appendChild(button);$("plans-table").lastElementChild.appendChild(td);
-  });
-}
-function fillPlan(p){
-  $("plan-id").value=p.id;$("plan-title").value=p.title;$("plan-description").value=p.description||"";
-  $("plan-days").value=p.duration_days;$("plan-traffic").value=p.traffic_gb;$("plan-devices").value=p.device_limit;
-  $("plan-rub").value=p.price_rub_minor;$("plan-stars").value=p.price_stars;
-  $("plan-order").value=p.sort_order;$("plan-active").checked=p.is_active;
-}
-$("plan-new").onclick=()=>{$("plan-form").reset();$("plan-id").value="";};
-$("plans-refresh").onclick=()=>loadPlans().catch(e=>$("status").textContent=e.message);
-$("plan-form").onsubmit=async e=>{
-  e.preventDefault();try{
-    const payload={title:$("plan-title").value,description:$("plan-description").value,
-      duration_days:+$("plan-days").value,traffic_gb:+$("plan-traffic").value,device_limit:+$("plan-devices").value,
-      price_rub_minor:+$("plan-rub").value,price_stars:+$("plan-stars").value,
-      sort_order:+$("plan-order").value,is_active:$("plan-active").checked};
-    const id=$("plan-id").value;
-    await adminApi(id?"PUT":"POST",id?"/admin/api/plans/"+id:"/admin/api/plans",payload);
-    $("status").textContent="Тариф сохранён";await loadPlans();
-  }catch(e){$("status").textContent=e.message}
-};
-async function loadBrand(){
-  const d=await adminApi("GET","/admin/api/store-profile");
-  $("brand-name").value=d.name;$("brand-tagline").value=d.tagline;$("brand-description").value=d.description;
-  $("brand-support").value=d.support_contact;$("brand-color").value=d.accent_color;
-}
-$("brand-form").onsubmit=async e=>{
-  e.preventDefault();try{
-    await adminApi("PUT","/admin/api/store-profile",{
-      name:$("brand-name").value,tagline:$("brand-tagline").value,
-      description:$("brand-description").value,support_contact:$("brand-support").value,
-      accent_color:$("brand-color").value
-    });$("status").textContent="Оформление сохранено";
-  }catch(e){$("status").textContent=e.message}
-};
-const paymentNames=["telegram_stars","yookassa","yoomoney","cryptopay"];
-async function loadPaymentSettings(){
-  const d=await adminApi("GET","/admin/api/payment-settings");
-  $("method-list").replaceChildren();
-  paymentNames.forEach(name=>{
-    const label=document.createElement("label");label.style.display="block";label.style.margin="10px";
-    const check=document.createElement("input");check.type="checkbox";check.id="method-"+name;check.checked=!!d.methods[name];
-    label.append(check,document.createTextNode(" "+name));$("method-list").appendChild(label);
-  });
-  $("provider-status").textContent=Object.keys(d.configured).map(k=>k+": "+(d.configured[k]?"настроен":"не настроен")).join(" · ");
-}
-$("payment-settings-save").onclick=async()=>{
-  try{const methods={};paymentNames.forEach(n=>methods[n]=$("method-"+n).checked);
-    const credentials={yookassa:{shop_id:$("pay-yookassa-id").value,secret_key:$("pay-yookassa-secret").value},
-    yoomoney:{receiver:$("pay-yoomoney-receiver").value,notification_secret:$("pay-yoomoney-secret").value},
-    cryptopay:{api_token:$("pay-crypto-token").value}};
-    await adminApi("PUT","/admin/api/payment-settings",{methods,credentials});
-    ["pay-yookassa-secret","pay-yoomoney-secret","pay-crypto-token"].forEach(k=>$(k).value="");
-    $("status").textContent="Платёжные настройки сохранены";await loadPaymentSettings();
-  }catch(e){$("status").textContent=e.message}
-};
-const pricingKeys=["rub_per_day_minor","rub_per_gb_minor","rub_per_device_minor","stars_per_day","stars_per_gb","stars_per_device","currency"];
-async function loadPricing(){
-  const data=await adminApi("GET","/admin/api/tariff-pricing");
-  $("pricing-fields").replaceChildren();
-  pricingKeys.forEach(k=>{
-    const label=document.createElement("label");label.textContent=k;
-    const input=document.createElement("input");input.id="pricing-"+k;input.type=k==="currency"?"text":"number";
-    input.value=data[k];if(k!=="currency")input.min="0";
-    label.appendChild(input);$("pricing-fields").appendChild(label);
-  });
-}
-$("pricing-save").onclick=async()=>{try{
-  const pricing={};pricingKeys.forEach(k=>pricing[k]=k==="currency"?$("pricing-"+k).value:+$("pricing-"+k).value);
-  await adminApi("PUT","/admin/api/tariff-pricing",{pricing});$("status").textContent="Формула цен сохранена";
-}catch(e){$("status").textContent=e.message}};
 async function start(){try{if(!tg?.initData)throw Error("Откройте Mini App через кнопку в Telegram");data=await api("/api/v1/webapp/bootstrap");if(data.profile){$("store-name").textContent=data.profile.name;$("store-tagline").textContent=data.profile.tagline||"Ваш VPN";document.documentElement.style.setProperty("--tg-theme-button-color",data.profile.accent_color)}$("loading").style.display="none";$("app").style.display="block";$("welcome").textContent=data.user.first_name?"Здравствуйте, "+data.user.first_name+"! Настройте подписку под себя.":"Выберите параметры подписки.";if(data.terms_url){$("terms-link").href=data.terms_url}else{$("terms-link").textContent="условия не настроены";$("terms-link").removeAttribute("href");$("buy").disabled=true}
 fillOptions("days",data.limits.days_min,data.limits.days_max,1,data.limits.days_default,"дней");fillOptions("traffic",data.limits.traffic_min,data.limits.traffic_max,1,data.limits.traffic_default,"ГБ");fillOptions("devices",data.limits.devices_min,data.limits.devices_max,1,data.limits.devices_default,"устройств");if(data.subscription){const s=data.subscription;$("subscription").style.display="block";$("sub-status").textContent=s.status;$("sub-expiry").textContent=s.expires_at?new Date(s.expires_at).toLocaleString():"—";$("sub-traffic").textContent=s.traffic_gb??"—";$("sub-devices").textContent=s.device_limit??"—";$("sub-days").textContent=s.days_left??"—";if(s.subscription_url){$("sub-link").href=s.subscription_url;$("sub-link").style.display="inline-block"}}
 $("buy").disabled=!data.stars_enabled;recalc();loadAccountPanels();await loadReadyPlans()}catch(e){$("loading").textContent=e.message}}
@@ -648,6 +569,85 @@ async function loadUsers(){const d=await api("/admin/api/users?limit="+pageSize+
 async function showCustomer(id){$("status").textContent="";try{const d=await api("/admin/api/users/"+encodeURIComponent(id));$("customer-title").textContent="Клиент "+d.telegram_id;$("customer-summary").textContent=(d.username?"@"+d.username+" · ":"")+"Зарегистрирован: "+new Date(d.created_at).toLocaleString();$("customer-subscriptions").replaceChildren();$("customer-payments").replaceChildren();d.subscriptions.forEach(x=>row("customer-subscriptions",[x.id,x.status,x.expires_at?new Date(x.expires_at).toLocaleString():"—",new Date(x.created_at).toLocaleString()]));d.payments.forEach(x=>row("customer-payments",[x.id,x.provider,x.amount+" "+x.currency,x.status,new Date(x.created_at).toLocaleString()]));$("customer-detail").hidden=false;$("customer-detail").scrollIntoView({behavior:"smooth",block:"nearest"})}catch(e){$("status").textContent=e.message}}
 $("customer-close").onclick=()=>{$("customer-detail").hidden=true};
 async function loadPayments(){const d=await api("/admin/api/payments?limit="+pageSize+"&offset="+paymentOffset);$("payments-table").replaceChildren();d.items.forEach(p=>row("payments-table",[p.id,p.telegram_id,p.provider,p.amount+" "+p.currency,p.status,new Date(p.created_at).toLocaleString()]));$("payments-page").textContent="Показано "+(d.total?paymentOffset+1:0)+"–"+Math.min(paymentOffset+d.items.length,d.total)+" из "+d.total;$("payments-prev").disabled=paymentOffset===0;$("payments-next").disabled=paymentOffset+pageSize>=d.total}
+async function adminApi(method,path,body){const r=await fetch(path,{method,headers:{"X-Telegram-Init-Data":tg?.initData||"","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(typeof d.detail==="string"?d.detail:"Ошибка запроса");return d}
+let cachedPlans=[];
+async function loadPlans(){
+  const d=await adminApi("GET","/admin/api/plans");cachedPlans=d.items;$("plans-table").replaceChildren();
+  d.items.forEach(p=>{
+    row("plans-table",[p.title,p.duration_days+" д / "+p.traffic_gb+" ГБ / "+p.device_limit+" уст.",(p.price_rub_minor/100).toFixed(2),p.price_stars,p.is_active?"Активен":"Скрыт"]);
+    const td=cell("");const button=document.createElement("button");button.className="action";button.textContent="Изменить";
+    button.onclick=()=>fillPlan(p);td.appendChild(button);$("plans-table").lastElementChild.appendChild(td);
+  });
+}
+function fillPlan(p){
+  $("plan-id").value=p.id;$("plan-title").value=p.title;$("plan-description").value=p.description||"";
+  $("plan-days").value=p.duration_days;$("plan-traffic").value=p.traffic_gb;$("plan-devices").value=p.device_limit;
+  $("plan-rub").value=p.price_rub_minor;$("plan-stars").value=p.price_stars;
+  $("plan-order").value=p.sort_order;$("plan-active").checked=p.is_active;
+}
+$("plan-new").onclick=()=>{$("plan-form").reset();$("plan-id").value="";};
+$("plans-refresh").onclick=()=>loadPlans().catch(e=>$("status").textContent=e.message);
+$("plan-form").onsubmit=async e=>{
+  e.preventDefault();try{
+    const payload={title:$("plan-title").value,description:$("plan-description").value,
+      duration_days:+$("plan-days").value,traffic_gb:+$("plan-traffic").value,device_limit:+$("plan-devices").value,
+      price_rub_minor:+$("plan-rub").value,price_stars:+$("plan-stars").value,
+      sort_order:+$("plan-order").value,is_active:$("plan-active").checked};
+    const id=$("plan-id").value;
+    await adminApi(id?"PUT":"POST",id?"/admin/api/plans/"+id:"/admin/api/plans",payload);
+    $("status").textContent="Тариф сохранён";await loadPlans();
+  }catch(e){$("status").textContent=e.message}
+};
+async function loadBrand(){
+  const d=await adminApi("GET","/admin/api/store-profile");
+  $("brand-name").value=d.name;$("brand-tagline").value=d.tagline;$("brand-description").value=d.description;
+  $("brand-support").value=d.support_contact;$("brand-color").value=d.accent_color;
+}
+$("brand-form").onsubmit=async e=>{
+  e.preventDefault();try{
+    await adminApi("PUT","/admin/api/store-profile",{
+      name:$("brand-name").value,tagline:$("brand-tagline").value,
+      description:$("brand-description").value,support_contact:$("brand-support").value,
+      accent_color:$("brand-color").value
+    });$("status").textContent="Оформление сохранено";
+  }catch(e){$("status").textContent=e.message}
+};
+const paymentNames=["telegram_stars","yookassa","yoomoney","cryptopay"];
+async function loadPaymentSettings(){
+  const d=await adminApi("GET","/admin/api/payment-settings");
+  $("method-list").replaceChildren();
+  paymentNames.forEach(name=>{
+    const label=document.createElement("label");label.style.display="block";label.style.margin="10px";
+    const check=document.createElement("input");check.type="checkbox";check.id="method-"+name;check.checked=!!d.methods[name];
+    label.append(check,document.createTextNode(" "+name));$("method-list").appendChild(label);
+  });
+  $("provider-status").textContent=Object.keys(d.configured).map(k=>k+": "+(d.configured[k]?"настроен":"не настроен")).join(" · ");
+}
+$("payment-settings-save").onclick=async()=>{
+  try{const methods={};paymentNames.forEach(n=>methods[n]=$("method-"+n).checked);
+    const credentials={yookassa:{shop_id:$("pay-yookassa-id").value,secret_key:$("pay-yookassa-secret").value},
+    yoomoney:{receiver:$("pay-yoomoney-receiver").value,notification_secret:$("pay-yoomoney-secret").value},
+    cryptopay:{api_token:$("pay-crypto-token").value}};
+    await adminApi("PUT","/admin/api/payment-settings",{methods,credentials});
+    ["pay-yookassa-secret","pay-yoomoney-secret","pay-crypto-token"].forEach(k=>$(k).value="");
+    $("status").textContent="Платёжные настройки сохранены";await loadPaymentSettings();
+  }catch(e){$("status").textContent=e.message}
+};
+const pricingKeys=["rub_per_day_minor","rub_per_gb_minor","rub_per_device_minor","stars_per_day","stars_per_gb","stars_per_device","currency"];
+async function loadPricing(){
+  const data=await adminApi("GET","/admin/api/tariff-pricing");
+  $("pricing-fields").replaceChildren();
+  pricingKeys.forEach(k=>{
+    const label=document.createElement("label");label.textContent=k;
+    const input=document.createElement("input");input.id="pricing-"+k;input.type=k==="currency"?"text":"number";
+    input.value=data[k];if(k!=="currency")input.min="0";
+    label.appendChild(input);$("pricing-fields").appendChild(label);
+  });
+}
+$("pricing-save").onclick=async()=>{try{
+  const pricing={};pricingKeys.forEach(k=>pricing[k]=k==="currency"?$("pricing-"+k).value:+$("pricing-"+k).value);
+  await adminApi("PUT","/admin/api/tariff-pricing",{pricing});$("status").textContent="Формула цен сохранена";
+}catch(e){$("status").textContent=e.message}};
 async function start(){try{if(!tg?.initData)throw Error("Откройте панель через Telegram Mini App");const d=await api("/admin/api/overview");$("loading").hidden=true;$("dashboard").hidden=false;$("welcome").textContent="Здравствуйте, "+(d.admin_name||"администратор");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments;await loadUsers()}catch(e){$("loading").textContent=e.message}}
 document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const tab=b.dataset.tab;$("users-view").hidden=tab!=="users";$("payments-view").hidden=tab!=="payments";$("plans-view").hidden=tab!=="plans";$("brand-view").hidden=tab!=="brand";$("payment-settings-view").hidden=tab!=="settings";$("pricing-view").hidden=tab!=="tariffs";try{if(tab==="payments")await loadPayments();if(tab==="plans")await loadPlans();if(tab==="brand")await loadBrand();if(tab==="settings")await loadPaymentSettings();if(tab==="tariffs")await loadPricing()}catch(e){$("status").textContent=e.message}}));
 $("users-refresh").onclick=()=>loadUsers().catch(e=>$("status").textContent=e.message);$("payments-refresh").onclick=()=>loadPayments().catch(e=>$("status").textContent=e.message);
