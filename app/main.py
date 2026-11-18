@@ -9,6 +9,7 @@ from app.config import settings
 from app.db.base import Base
 from app.db.session import engine
 from app.web.routes import router as api_router
+from app.web.storefront import router as store_router
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title=settings.app_name, version="1.0.0-rc.2", lifespan=lifespan)
 app.include_router(api_router)
+app.include_router(store_router)
 
 
 @app.get("/health")
