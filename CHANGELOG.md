@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0-rc.4 — Trial, promo campaigns and purchase reliability
+
+- Optional one-time free trial configurable in the Telegram admin dashboard; Remnawave provisioning has a per-user lock and remote trial marker for safe retry.
+- Promo codes grant owner-defined bonus days once per customer, with campaign redemption limits and a database credit ledger; credits apply to the next verified subscription payment.
+- New Telegram bot and Mini App entry points for trial access and bonus codes; in-bot connection instructions.
+- Trial and promo management added to the owner dashboard and protected API.
+- Fixed Stars checkout depending on a removed legal terms environment variable.
+- Fixed Remnawave UUID handling when the Panel creates users.
+- CI checks the new empty tables and one-time promo activation in PostgreSQL; README condensed for public users.
+- Digital VPN purchases in Telegram continue to use Stars; other payment systems operate on the separate standalone website.
+
+
 ## 1.0.0-rc.3 — Storefront, encrypted settings and referrals
 
 - Independent `/store` storefront for regular browsers using signed Telegram Login Widget and short-lived secure sessions.
