@@ -60,22 +60,34 @@ async def provision_paid_payment(payment_id: int) -> bool:
             if exc.response.status_code != 404:
                 raise
 
-        if panel_user and subscription and subscription.panel_user_id:
-            panel_user_id = int(subscription.panel_user_id)
-            await panel.extend_user(panel_user_id, days)
-            await panel.update_user(
-                panel_user_id,
-                traffic_limit_bytes=traffic_bytes,
-                hwid_device_limit=device_limit,
-            )
-            panel_user = _unwrap(await panel.get_user(panel_user_id))
-        elif panel_user:
+        marker = f"remnaum-payment:{payment_id}"
+        if panel_user:
             panel_user_id = int(panel_user["id"])
-            await panel.update_user(
-                panel_user_id,
-                traffic_limit_bytes=traffic_bytes,
-                hwid_device_limit=device_limit,
-            )
+            description = str(panel_user.get("description") or "")
+            if marker not in description:
+                expire_value = panel_user.get("expireAt")
+                if isinstance(expire_value, str):
+                    current_expiry = datetime.fromisoformat(expire_value.replace("Z", "+00:00"))
+                    if current_expiry.tzinfo is None:
+                        current_expiry = current_expiry.replace(tzinfo=timezone.utc)
+                else:
+                    current_expiry = datetime.now(timezone.utc)
+                new_expiry = max(current_expiry, datetime.now(timezone.utc)) + timedelta(days=days)
+                new_description = f"{description} | {marker}".strip(" |")
+                await panel.update_user(
+                    panel_user_id,
+                    traffic_limit_bytes=traffic_bytes,
+                    hwid_device_limit=device_limit,
+                    expire_at=new_expiry,
+                    description=new_description,
+                )
+            else:
+                await panel.update_user(
+                    panel_user_id,
+                    traffic_limit_bytes=traffic_bytes,
+                    hwid_device_limit=device_limit,
+                    description=description,
+                )
             panel_user = _unwrap(await panel.get_user(panel_user_id))
         else:
             expire_at = datetime.now(timezone.utc) + timedelta(days=days)
@@ -87,7 +99,7 @@ async def provision_paid_payment(payment_id: int) -> bool:
                 traffic_limit_strategy="NO_RESET",
                 hwid_device_limit=device_limit,
                 active_internal_squads=settings.remnawave_internal_squad_ids or None,
-                description=f"Remnaum Telegram user {user.telegram_id}",
+                description=marker,
             )
             panel_user = _unwrap(created)
             if not panel_user.get("id"):
