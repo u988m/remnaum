@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VPN-магазин</title><meta name="color-scheme" content="dark"><link rel="stylesheet" href="/static/store.css"></head><body><main>
+<header><div class="brand" id="name">Remnaum</div><span class="pill">Безопасный VPN · Remnawave</span></header>
+<h1 id="tagline">VPN, который вы выбираете сами.</h1>
+<p class="lead" id="description">Управляйте подпиской и подключайте устройства без сложных настроек.</p>
+<section><h2>Выберите тариф</h2><div id="plans" class="cards"></div></section>
+<section class="login" id="login"><h2>Вход для оформления заказа</h2>
+<p class="small">Для покупки через самостоятельный сайт подтвердите аккаунт Telegram. В Mini App оплата цифровых подписок доступна через Telegram Stars.</p>
+__LOGIN_WIDGET__</section>
+<section id="account" class="login"><h2 id="hello">Вы вошли</h2>
+<p class="small">Оплата проходит на защищённой странице выбранного провайдера. Ключи платёжных систем не передаются браузеру.</p>
+<label><input type="checkbox" id="terms"> Принимаю <a id="terms-url" href="#" target="_blank" rel="noopener">условия продажи</a></label>
+<p>Способ оплаты</p><select id="provider"></select><br><br>
+<button id="buy" disabled>Перейти к оплате</button><p id="status" role="status"></p>
+</section>
+<footer>Покупка через самостоятельный веб-магазин. Если вы открыли Mini App непосредственно в Telegram, используйте Telegram Stars.</footer>
+</main><script src="/static/store.js" defer></script></body></html>
