@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
+import pwd
 import re
 import secrets
 import shutil
@@ -295,9 +296,97 @@ def perform_update(existing: dict[str, str]) -> int:
     if not wait_for_app_health():
         raise RuntimeError("API не отвечает. Проверьте docker compose logs --tail=100 app")
     scrub_migrated_legacy_payment_keys()
+    install_update_timer()
     print("\nRemnaum обновлён. База и секреты сохранены.")
     return 0
 
+
+
+
+def choose_install_dir(existing: dict[str, str], requested: str | None = None,
+                       *, no_relocate: bool = False) -> None:
+    """On first installation copy this checkout into a chosen permanent folder.
+
+    Never move a working installation or overwrite an unrelated directory.
+    Re-exec in the new copy before touching .env, ports, or Docker volumes.
+    """
+    if existing or no_relocate:
+        return
+    chosen = requested or prompt("Папка для установки Remnaum", default="/opt/remnaum")
+    path = Path(chosen).expanduser()
+    if not path.is_absolute():
+        raise ValueError("Путь должен быть абсолютным, например /opt/remnaum")
+    target = path.resolve()
+    if not re.fullmatch(r"/[A-Za-z0-9_./-]+", str(target)):
+        raise ValueError("В пути используйте только латинские символы, цифры, /, - и _")
+    if target == ROOT.resolve():
+        return
+    if target == Path("/") or str(target).startswith(("/etc/", "/bin/", "/usr/", "/dev/", "/proc/", "/sys/")):
+        raise ValueError("Нельзя устанавливать проект в системный каталог")
+    # Refuse existing populated paths to prevent accidental data loss or source replacement.
+    if target.exists() and any(target.iterdir()):
+        raise ValueError(f"Каталог {target} уже содержит данные; выберите другой путь")
+    if target.is_relative_to(ROOT.resolve()):
+        raise ValueError("Нельзя переносить проект внутрь самого себя")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        target.rmdir()
+    ignore = shutil.ignore_patterns(".env", "data", "backups", "generated", "__pycache__", ".pytest_cache")
+    shutil.copytree(ROOT, target, ignore=ignore, symlinks=True)
+    # Preserve GitHub credentials and ownership for the user who originally cloned the project.
+    username = os.environ.get("SUDO_USER", "")
+    if username and username != "root":
+        user = pwd.getpwnam(username)
+        for parent, dirs, files in os.walk(target):
+            os.chown(parent, user.pw_uid, user.pw_gid)
+            for entry in (*dirs, *files):
+                try:
+                    os.lchown(os.path.join(parent, entry), user.pw_uid, user.pw_gid)
+                except FileNotFoundError:
+                    pass
+    print(f"Проект установлен в {target}. Продолжаем настройку...")
+    os.execv(sys.executable, [
+        sys.executable, str(target / "scripts" / "install.py"),
+        "--action", "install", "--no-relocate", *sys.argv[1:],
+    ])
+
+
+def install_update_timer() -> bool:
+    """Install a host-side scheduler that can read the private Git remote safely."""
+    if not shutil.which("systemctl") or not Path("/run/systemd/system").exists():
+        print("Systemd недоступен: автоматические уведомления GitHub можно проверять вручную.")
+        return False
+    source = str(ROOT.resolve())
+    username = os.environ.get("SUDO_USER", "") or pwd.getpwuid(ROOT.stat().st_uid).pw_name
+    if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username):
+        username = "root"
+    unit = Path("/etc/systemd/system/remnaum-update-check.service")
+    timer = Path("/etc/systemd/system/remnaum-update-check.timer")
+    unit.write_text(
+        "[Unit]\\nDescription=Remnaum GitHub update checker\\n"
+        "[Service]\\nType=oneshot\\nUser=root\\n"
+        f"Environment=REMNAUM_GIT_USER={username}\\n"
+        f"WorkingDirectory={source}\\n"
+        f"ExecStart=/usr/bin/python3 {source}/scripts/check_updates.py\\n",
+        encoding="utf-8",
+    )
+    timer.write_text(
+        "[Unit]\\nDescription=Check Remnaum updates every six hours\\n"
+        "[Timer]\\nOnBootSec=5min\\nOnUnitInactiveSec=6h\\nPersistent=true\\nRandomizedDelaySec=10m\\n"
+        "[Install]\\nWantedBy=timers.target\\n",
+        encoding="utf-8",
+    )
+    os.chmod(unit, 0o644)
+    os.chmod(timer, 0o644)
+    try:
+        run(["systemctl", "daemon-reload"])
+        run(["systemctl", "enable", "--now", "remnaum-update-check.timer"])
+        print("Проверка новых версий GitHub включена (раз в 6 часов).")
+        return True
+    except subprocess.CalledProcessError:
+        print("Не удалось включить таймер GitHub; приложение продолжит работать.")
+        return False
 
 def config_for_install(existing: dict[str, str], mode: str,
                        network_override: str | None, port: int) -> dict[str, str]:
@@ -393,6 +482,8 @@ def main() -> int:
                         help="Optional topology selection (otherwise guided interactive prompt)")
     parser.add_argument("--proxy-network",
                         help="Existing Docker network of the reverse proxy, or 'none' for a host-only proxy")
+    parser.add_argument("--install-dir", default=None, help="Абсолютный путь для установки")
+    parser.add_argument("--no-relocate", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--local-port", type=int, default=None,
                         help="Panel mode: localhost-only port for host proxy, default 18080")
     args = parser.parse_args()
@@ -404,6 +495,7 @@ def main() -> int:
     action = choose_action(existing, args.action)
     if action == "update":
         return perform_update(existing)
+    choose_install_dir(existing, args.install_dir, no_relocate=args.no_relocate)
     print("\n[1/4] Способ установки")
     mode = choose_mode(existing, args.mode)
     if existing.get("DEPLOY_MODE") and existing["DEPLOY_MODE"] != mode:
@@ -456,6 +548,7 @@ def main() -> int:
     run(["docker", "compose", "up", "-d", "--build"])
     if not wait_for_app_health():
         raise RuntimeError("API не отвечает. Проверьте docker compose logs --tail=100 app")
+    install_update_timer()
     print("\nRemnaum запущен. Тестовые данные не создавались.")
     print("Telegram webhook: " + cfg["TELEGRAM_WEBHOOK_URL"])
     print("Mini App: " + cfg["WEBAPP_URL"])
