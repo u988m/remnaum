@@ -807,14 +807,15 @@ async def admin_user_detail(
 @router.post("/webhooks/remnawave")
 async def remnawave_webhook(request: Request, x_remnawave_signature: str | None = Header(default=None)):
     from app.services.remnawave_webhooks import verify_remnawave_webhook
+    from app.services.remnawave_events import record_and_reconcile
 
     body = await request.body()
     try:
         event = verify_remnawave_webhook(body, x_remnawave_signature, settings.remnawave_webhook_secret)
+        is_new = await record_and_reconcile(body, event)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
-    # No automatic subscription changes until event reconciliation is implemented.
-    return {"ok": True, "event": event["event"]}
+    return {"ok": True, "event": event["event"], "duplicate": not is_new}
 
 
 # Fixed plans share the existing Telegram-authenticated admin dashboard.
