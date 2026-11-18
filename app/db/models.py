@@ -153,3 +153,48 @@ class RemnawaveEvent(Base):
     scope: Mapped[str] = mapped_column(String(48), nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="received")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TrialSettings(Base):
+    """Optional one-time free trial configuration; no demo users are seeded."""
+    __tablename__ = "trial_settings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    days: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    traffic_gb: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+    device_limit: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class TrialClaim(Base):
+    """At most one trial claim for each account, including failed retries."""
+    __tablename__ = "trial_claims"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    panel_user_id: Mapped[str | None] = mapped_column(String(128))
+    status: Mapped[str] = mapped_column(String(24), default="pending", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PromoCode(Base):
+    """Owner-created bonus-day promo codes; redeemed once per account."""
+    __tablename__ = "promo_codes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    bonus_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_uses: Mapped[int] = mapped_column(Integer, nullable=False)
+    used_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PromoRedemption(Base):
+    """Available day credit until the customer's next verified subscription payment."""
+    __tablename__ = "promo_redemptions"
+    __table_args__ = (UniqueConstraint("user_id", "promo_id", name="uq_promo_redemption_user_code"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    promo_id: Mapped[int] = mapped_column(ForeignKey("promo_codes.id"), nullable=False)
+    bonus_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    applied_payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
