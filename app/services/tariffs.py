@@ -85,6 +85,19 @@ async def calculate_store_price(duration_days: int, traffic_gb: int, device_limi
     return duration_days * pricing["rub_per_day_minor"] + traffic_gb * pricing["rub_per_gb_minor"] + device_limit * pricing["rub_per_device_minor"]
 
 
+def calculate_stars_price(duration_days: int, traffic_gb: int, device_limit: int) -> int:
+    if min(duration_days, traffic_gb, device_limit) < 1:
+        raise ValueError("Tariff values must be positive")
+    amount = (
+        duration_days * settings.tariff_stars_price_per_day
+        + traffic_gb * settings.tariff_stars_price_per_gb
+        + device_limit * settings.tariff_stars_price_per_device
+    )
+    if amount < 1:
+        raise ValueError("Telegram Stars price must be greater than zero")
+    return amount
+
+
 async def calculate_store_stars_price(duration_days: int, traffic_gb: int, device_limit: int) -> int:
     pricing = await get_store_tariff_pricing()
     if min(duration_days, traffic_gb, device_limit) < 1:
