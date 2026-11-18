@@ -85,16 +85,20 @@ class RemnawaveClient:
         *,
         traffic_limit_bytes: int,
         hwid_device_limit: int,
+        expire_at: datetime | str | None = None,
+        description: str | None = None,
     ) -> Any:
-        return await self.request(
-            "PATCH",
-            "/api/users",
-            json={
-                "id": user_id,
-                "trafficLimitBytes": traffic_limit_bytes,
-                "hwidDeviceLimit": hwid_device_limit,
-            },
-        )
+        payload: dict[str, Any] = {
+            "id": user_id,
+            "status": "ACTIVE",
+            "trafficLimitBytes": traffic_limit_bytes,
+            "hwidDeviceLimit": hwid_device_limit,
+        }
+        if expire_at is not None:
+            payload["expireAt"] = self._iso_datetime(expire_at)
+        if description is not None:
+            payload["description"] = description
+        return await self.request("PATCH", "/api/users", json=payload)
 
     async def enable_user(self, user_id: int) -> Any:
         return await self.request("POST", f"/api/users/{user_id}/actions/enable")
