@@ -76,6 +76,24 @@ SUPPORT_CONTACT=$support_contact
 ENV
   chmod 600 .env
 fi
+# Migrate legacy .env without touching existing customer database volumes.
+if ! grep -q '^PUBLIC_DOMAIN=' .env; then
+  echo "Legacy config detected; configuring HTTPS domains without resetting data."
+  ask public_domain "Webhook domain without https://"
+  ask webapp_domain "Mini App/admin domain without https://"
+  ask acme_email "TLS certificate email"
+  [[ "$public_domain" =~ ^[a-zA-Z0-9.-]+$ && "$public_domain" == *.* ]] || exit 1
+  [[ "$webapp_domain" =~ ^[a-zA-Z0-9.-]+$ && "$webapp_domain" == *.* ]] || exit 1
+  printf 'PUBLIC_DOMAIN=%s\\nWEBAPP_DOMAIN=%s\\nACME_EMAIL=%s\\n' "$public_domain" "$webapp_domain" "$acme_email" >> .env
+  sed -i "s|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=https://$webapp_domain|" .env
+  sed -i "s|^WEBAPP_URL=.*|WEBAPP_URL=https://$webapp_domain/app|" .env
+  sed -i "s|^TELEGRAM_WEBHOOK_URL=.*|TELEGRAM_WEBHOOK_URL=https://$public_domain/telegram/webhook|" .env
+  sed -i "s|^TELEGRAM_USE_WEBHOOK=.*|TELEGRAM_USE_WEBHOOK=true|" .env
+fi
+if ! grep -q '^REMNAWAVE_WEBHOOK_SECRET=' .env; then
+  echo "REMNAWAVE_WEBHOOK_SECRET=$(openssl rand -hex 32)" >> .env
+fi
+chmod 600 .env
 mkdir -p data
 docker compose config --quiet
 docker compose up -d --build
