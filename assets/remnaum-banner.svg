@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-label="Remnaum — VPN storefront for Remnawave">
+<defs>
+<linearGradient id="bg" x2="1" y2="1"><stop stop-color="#070e1c"/><stop offset=".55" stop-color="#091327"/><stop offset="1" stop-color="#130e30"/></linearGradient>
+<linearGradient id="accent" x1="0" x2="1" y2="1"><stop stop-color="#0de3e5"/><stop offset=".52" stop-color="#3978ff"/><stop offset="1" stop-color="#8e48f8"/></linearGradient>
+<radialGradient id="halo"><stop stop-color="#1d5295" stop-opacity=".45"/><stop offset="1" stop-color="#0a1224" stop-opacity="0"/></radialGradient>
+<filter id="glow"><feGaussianBlur stdDeviation="13"/></filter>
+</defs>
+<rect width="1600" height="900" fill="url(#bg)"/>
+<ellipse cx="800" cy="430" rx="730" ry="520" fill="url(#halo)"/>
+<circle cx="800" cy="480" r="560" fill="none" stroke="url(#accent)" stroke-width="3" opacity=".35"/>
+<circle cx="800" cy="480" r="570" fill="none" stroke="#278cfb" stroke-width="15" opacity=".16" filter="url(#glow)"/>
+<path d="M0 785 Q800 470 1600 785" fill="none" stroke="url(#accent)" stroke-width="5" opacity=".8"/>
+<path d="M0 815 Q800 520 1600 815" fill="none" stroke="#285fbe" stroke-width="2" opacity=".35"/>
+<path d="M800 180 L1035 268 L1035 495 Q1020 610 800 708 Q580 610 565 495 L565 268 Z" fill="none" stroke="url(#accent)" stroke-width="4" opacity=".38"/>
+<path d="M280 335 L372 335 Q440 335 440 397 Q440 444 397 466 L445 543 L382 543 L329 460 L330 420 L372 420 Q388 420 388 404 Q388 390 371 390 L280 390 Z" fill="url(#accent)"/>
+<path d="M280 390 L330 390 L330 543 L280 543 Z" fill="url(#accent)"/>
+<text x="490" y="473" fill="#f3f7ff" font-size="134" font-family="Arial,Helvetica,sans-serif" font-weight="700" letter-spacing="-6">Remnaum</text>
+<text x="498" y="535" fill="#92a7c6" font-size="26" font-family="Arial,Helvetica,sans-serif" letter-spacing="5">VPN STOREFRONT FOR REMNAWAVE</text>
+<path d="M80 190 L80 675 M1520 190 L1520 675" stroke="#338dff" stroke-width="3" opacity=".2"/>
+<g fill="#23bbff" opacity=".75"><circle cx="80" cy="190" r="5"/><circle cx="1520" cy="190" r="5"/><circle cx="80" cy="675" r="5"/><circle cx="1520" cy="675" r="5"/></g>
+</svg>
