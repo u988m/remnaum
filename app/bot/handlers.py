@@ -9,6 +9,7 @@ from app.services.tariffs import TariffQuote, get_tariff_draft, update_tariff_dr
 from app.services.payment_service import (
     accept_current_terms,
     create_stars_payment_for_user,
+    create_payment_for_user,
     has_accepted_current_terms,
     retry_paid_payments_for_user,
     validate_stars_pre_checkout,
@@ -17,7 +18,7 @@ from app.services.payment_providers import VerifiedPayment
 from app.services.payment_service import settle_payment
 from app.services.subscriptions import get_user_subscription, provision_paid_payment
 from app.services.users import get_or_create_user
-from app.services.store_settings import is_payment_method_enabled
+from app.services.store_settings import is_payment_method_enabled, get_store_payment_settings, public_payment_settings
 from app.services.store_profile import get_terms_url
 from app.services.store_profile import get_store_profile
 from app.services.referrals import parse_referral_start, register_referral, referral_count, referral_code, reward_balance, get_referral_settings
@@ -208,7 +209,9 @@ async def tariff_update_handler(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "payment:choose")
 async def payment_choose_handler(callback: CallbackQuery) -> None:
     await callback.answer()
-    if not await is_payment_method_enabled("telegram_stars"):
+    methods, credentials = await get_store_payment_settings()
+    enabled = public_payment_settings(methods, credentials)["configured"]
+    if not any(methods.get(k) and enabled.get(k, False) for k in ("telegram_stars", "yookassa", "yoomoney", "cryptopay")):
         if callback.message:
             await callback.message.edit_text("Оплата временно отключена администратором.", reply_markup=back_menu())
         return
@@ -221,7 +224,7 @@ async def payment_choose_handler(callback: CallbackQuery) -> None:
             )
         return
     if await has_accepted_current_terms(callback.from_user.id):
-        await show_stars_checkout(callback)
+        await show_payment_options(callback)
         return
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📄 Прочитать условия", url=terms_url)],
@@ -235,21 +238,34 @@ async def payment_choose_handler(callback: CallbackQuery) -> None:
         )
 
 
-async def show_stars_checkout(callback: CallbackQuery) -> None:
+async def show_payment_options(callback: CallbackQuery) -> None:
     quote = await get_tariff_draft(callback.from_user.id)
     stars = await selected_stars_price(callback.from_user.id, quote)
     if stars is None:
         stars = await calculate_store_stars_price(quote.duration_days, quote.traffic_gb, quote.device_limit)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"⭐ Оплатить {stars} Stars", callback_data="payment:create:stars")],
-        [InlineKeyboardButton(text="⬅️ Назад к тарифу", callback_data="menu:plans")],
-    ])
+    methods, credentials = await get_store_payment_settings()
+    configured = public_payment_settings(methods, credentials)["configured"]
+    rows = []
+    if methods.get("telegram_stars") and configured.get("telegram_stars", True):
+        rows.append([InlineKeyboardButton(
+            text=f"⭐ Telegram Stars — {stars} ⭐",
+            callback_data="payment:create:stars",
+        )])
+    for name, title in (
+        ("yookassa", "💳 ЮKassa"),
+        ("yoomoney", "🏦 ЮMoney"),
+        ("cryptopay", "🪙 Crypto Pay"),
+    ):
+        if methods.get(name) and configured.get(name):
+            rows.append([InlineKeyboardButton(text=title, callback_data=f"payment:create:{name}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад к тарифу", callback_data="menu:plans")])
     if callback.message:
         await callback.message.edit_text(
-            f"💳 <b>Оплата Telegram Stars</b>\n\n"
+            f"💳 <b>Выберите оплату</b>\n\n"
             f"Тариф: {quote.duration_days} дней, {quote.traffic_gb} ГБ, {quote.device_limit} устройств.\n"
-            f"К оплате: <b>{stars} ⭐</b>",
-            reply_markup=keyboard,
+            f"Telegram Stars: <b>{stars} ⭐</b>\n"
+            "Внешние системы откроют защищённую страницу провайдера.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
 
 
@@ -262,6 +278,34 @@ async def payment_terms_accept_handler(callback: CallbackQuery) -> None:
         return
     await callback.answer("Условия приняты")
     await show_stars_checkout(callback)
+
+
+@router.callback_query(F.data.in_({"payment:create:yookassa", "payment:create:yoomoney", "payment:create:cryptopay"}))
+async def external_payment_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    name = (callback.data or "").rsplit(":", 1)[-1]
+    if not callback.message:
+        return
+    try:
+        payment, link = await create_payment_for_user(callback.from_user.id, name)
+        from urllib.parse import urlsplit
+        if urlsplit(link.url).scheme != "https":
+            raise RuntimeError("Провайдер вернул недопустимую платёжную ссылку")
+    except Exception:
+        await callback.message.answer(
+            "Не удалось создать платёж. Проверьте тариф или выберите другой способ.",
+            reply_markup=back_menu(),
+        )
+        return
+    await callback.message.answer(
+        f"💳 <b>Заказ №{payment.id}</b>\n\n"
+        "Нажмите кнопку ниже, оплатите и вернитесь в бот. "
+        "После подтверждения провайдером подписка будет выдана автоматически.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Перейти к оплате", url=link.url)],
+            [InlineKeyboardButton(text="🧾 Мои покупки", callback_data="menu:purchases")],
+        ]),
+    )
 
 
 @router.callback_query(F.data == "payment:create:stars")

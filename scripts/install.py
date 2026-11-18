@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import os
+import pwd
 import re
 import secrets
 import shutil
@@ -124,6 +126,36 @@ def install_docker() -> None:
         raise RuntimeError("Docker Compose v2 did not become available")
 
 
+def offer_docker_setup() -> None:
+    """Install missing components without touching a running Docker engine."""
+    if docker_ready():
+        return
+    if shutil.which("docker"):
+        if not Path("/usr/bin/apt-get").exists() and not shutil.which("apt-get"):
+            raise RuntimeError("Docker найден, но Compose v2 отсутствует. Установите Compose plugin.")
+        answer = prompt("Docker есть, но нет Compose v2. Установить дополнение? (Д/н)", default="Д")
+        if answer.lower() not in ("д", "да", "y", "yes"):
+            raise RuntimeError("Для запуска нужен Docker Compose v2")
+        run(["apt-get", "update"])
+        run(["apt-get", "install", "-y", "docker-compose-plugin"])
+        if not docker_ready():
+            raise RuntimeError("Compose v2 не появился; существующий Docker не был заменён")
+        return
+    answer = prompt("Docker не найден. Установить автоматически? (Д/н)", default="Д")
+    if answer.lower() not in ("д", "да", "y", "yes"):
+        raise RuntimeError("Для запуска нужен Docker")
+    install_docker()
+
+
+def first_free_loopback_port(preferred: int) -> int:
+    if loopback_available(preferred):
+        return preferred
+    for candidate in range(max(1024, preferred + 1), min(65535, preferred + 60)):
+        if loopback_available(candidate):
+            return candidate
+    raise RuntimeError("Не найден свободный локальный порт в ближайшем диапазоне")
+
+
 def network_exists(name: str) -> bool:
     return run(["docker", "network", "inspect", name], check=False, quiet=True).returncode == 0
 
@@ -195,6 +227,76 @@ def generate_proxy_snippets(cfg: dict[str, str]) -> None:
         (folder / f"remnaum.{variant}.caddy").write_text(caddy, encoding="utf-8")
         (folder / f"remnaum.{variant}.nginx.conf").write_text(nginx, encoding="utf-8")
     print("Proxy examples generated in generated/ for both Docker and host proxies")
+
+
+def caddy_site_block(cfg: dict[str, str]) -> str:
+    domains = list(dict.fromkeys([cfg["PUBLIC_DOMAIN"], cfg["WEBAPP_DOMAIN"]]))
+    if not all(valid_domain(domain) for domain in domains):
+        raise ValueError("Проверьте домены Caddy")
+    return (
+        "\n# Remnaum: автоматически добавленный магазин VPN\n"
+        + ", ".join("https://" + domain for domain in domains) + " {\n"
+        "    encode zstd gzip\n"
+        "    reverse_proxy http://remnaum-api:8080\n"
+        "}\n"
+    )
+
+
+def offer_panel_caddy_autoconfig(cfg: dict[str, str]) -> bool:
+    """Only touch the documented, unmodified Caddy bind mount with owner approval.
+
+    Saves an original backup, validates the *live* config and rolls back failed
+    Caddy reconfiguration. Other proxies are left intact.
+    """
+    if cfg.get("REMNAUM_PROXY_NETWORK") != "remnawave-network":
+        return False
+    caddyfile = Path("/opt/remnawave/caddy/Caddyfile")
+    if not caddyfile.is_file() or not shutil.which("docker"):
+        return False
+    try:
+        result = subprocess.check_output(
+            ["docker", "inspect", "caddy"], text=True,
+            stderr=subprocess.DEVNULL, timeout=10,
+        )
+        container = json.loads(result)[0]
+    except (ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return False
+    mounts = container.get("Mounts", [])
+    if not (container.get("State", {}).get("Running")
+            and "remnawave-network" in container.get("NetworkSettings", {}).get("Networks", {})
+            and any(m.get("Destination") == "/etc/caddy/Caddyfile"
+                    and Path(m.get("Source", "/")).resolve() == caddyfile.resolve()
+                    and m.get("RW") is True for m in mounts)):
+        return False
+    previous = caddyfile.read_bytes()
+    domains = [cfg["PUBLIC_DOMAIN"], cfg["WEBAPP_DOMAIN"]]
+    if any(domain.encode() in previous for domain in domains):
+        print("В текущем Caddyfile уже найдены домены магазина; проверьте конфигурацию вручную.")
+        return False
+    answer = prompt("Добавить домены в существующий Caddy Remnawave с резервной копией? (Д/н)", default="Д")
+    if answer.lower() not in ("д", "да", "y", "yes"):
+        return False
+    import datetime
+    backup = caddyfile.with_name("Caddyfile.remnaum.bak." + datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
+    shutil.copy2(caddyfile, backup)
+    # Write in place so Docker's bind mount keeps pointing to the correct inode.
+    append = caddy_site_block(cfg).encode()
+    try:
+        with caddyfile.open("wb") as handle:
+            handle.write(previous.rstrip() + b"\n" + append)
+            handle.flush()
+            os.fsync(handle.fileno())
+        run(["docker", "exec", "caddy", "caddy", "validate", "--config", "/etc/caddy/Caddyfile"])
+        run(["docker", "exec", "caddy", "caddy", "reload", "--config", "/etc/caddy/Caddyfile"])
+    except (OSError, subprocess.CalledProcessError):
+        with caddyfile.open("wb") as handle:
+            handle.write(previous)
+            handle.flush()
+            os.fsync(handle.fileno())
+        run(["docker", "exec", "caddy", "caddy", "reload", "--config", "/etc/caddy/Caddyfile"], check=False)
+        raise RuntimeError("Caddy отклонил новые домены. Исходная конфигурация восстановлена.")
+    print(f"Прокси Remnawave настроен автоматически; копия: {backup}")
+    return True
 
 
 LEGACY_PAYMENT_KEYS = {
@@ -295,9 +397,99 @@ def perform_update(existing: dict[str, str]) -> int:
     if not wait_for_app_health():
         raise RuntimeError("API не отвечает. Проверьте docker compose logs --tail=100 app")
     scrub_migrated_legacy_payment_keys()
+    install_update_timer()
     print("\nRemnaum обновлён. База и секреты сохранены.")
     return 0
 
+
+
+
+def choose_install_dir(existing: dict[str, str], requested: str | None = None,
+                       *, no_relocate: bool = False) -> None:
+    """On first installation copy this checkout into a chosen permanent folder.
+
+    Never move a working installation or overwrite an unrelated directory.
+    Re-exec in the new copy before touching .env, ports, or Docker volumes.
+    """
+    if existing or no_relocate:
+        return
+    chosen = requested or prompt("Папка для установки Remnaum", default="/opt/remnaum")
+    path = Path(chosen).expanduser()
+    if not path.is_absolute():
+        raise ValueError("Путь должен быть абсолютным, например /opt/remnaum")
+    target = path.resolve()
+    if not re.fullmatch(r"/[A-Za-z0-9_./-]+", str(target)):
+        raise ValueError("В пути используйте только латинские символы, цифры, /, - и _")
+    if target == ROOT.resolve():
+        return
+    if target == Path("/") or str(target).startswith(("/etc/", "/bin/", "/usr/", "/dev/", "/proc/", "/sys/")):
+        raise ValueError("Нельзя устанавливать проект в системный каталог")
+    # Refuse existing populated paths to prevent accidental data loss or source replacement.
+    if target.exists() and any(target.iterdir()):
+        raise ValueError(f"Каталог {target} уже содержит данные; выберите другой путь")
+    if target.is_relative_to(ROOT.resolve()):
+        raise ValueError("Нельзя переносить проект внутрь самого себя")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        target.rmdir()
+    ignore = shutil.ignore_patterns(".env", "data", "backups", "generated", "__pycache__", ".pytest_cache")
+    shutil.copytree(ROOT, target, ignore=ignore, symlinks=True)
+    # Preserve GitHub credentials and ownership for the user who originally cloned the project.
+    username = os.environ.get("SUDO_USER", "")
+    if username and username != "root":
+        user = pwd.getpwnam(username)
+        for parent, dirs, files in os.walk(target):
+            os.chown(parent, user.pw_uid, user.pw_gid)
+            for entry in (*dirs, *files):
+                try:
+                    os.lchown(os.path.join(parent, entry), user.pw_uid, user.pw_gid)
+                except FileNotFoundError:
+                    pass
+    print(f"Проект установлен в {target}. Продолжаем настройку...")
+    os.execv(sys.executable, [
+        sys.executable, str(target / "scripts" / "install.py"),
+        "--action", "install", "--no-relocate", *sys.argv[1:],
+    ])
+
+
+def install_update_timer() -> bool:
+    """Install a host-side scheduler that can read the private Git remote safely."""
+    if os.geteuid() != 0:
+        return False
+    if not shutil.which("systemctl") or not Path("/run/systemd/system").exists():
+        print("Systemd недоступен: автоматические уведомления GitHub можно проверять вручную.")
+        return False
+    source = str(ROOT.resolve())
+    username = os.environ.get("SUDO_USER", "") or pwd.getpwuid(ROOT.stat().st_uid).pw_name
+    if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username):
+        username = "root"
+    unit = Path("/etc/systemd/system/remnaum-update-check.service")
+    timer = Path("/etc/systemd/system/remnaum-update-check.timer")
+    unit.write_text(
+        "[Unit]\nDescription=Remnaum GitHub update checker\n"
+        "[Service]\nType=oneshot\nUser=root\n"
+        f"Environment=REMNAUM_GIT_USER={username}\n"
+        f"WorkingDirectory={source}\n"
+        f"ExecStart=/usr/bin/python3 {source}/scripts/check_updates.py\n",
+        encoding="utf-8",
+    )
+    timer.write_text(
+        "[Unit]\nDescription=Check Remnaum updates every six hours\n"
+        "[Timer]\nOnBootSec=5min\nOnUnitInactiveSec=6h\nPersistent=true\nRandomizedDelaySec=10m\n"
+        "[Install]\nWantedBy=timers.target\n",
+        encoding="utf-8",
+    )
+    os.chmod(unit, 0o644)
+    os.chmod(timer, 0o644)
+    try:
+        run(["systemctl", "daemon-reload"])
+        run(["systemctl", "enable", "--now", "remnaum-update-check.timer"])
+        print("Проверка новых версий GitHub включена (раз в 6 часов).")
+        return True
+    except subprocess.CalledProcessError:
+        print("Не удалось включить таймер GitHub; приложение продолжит работать.")
+        return False
 
 def config_for_install(existing: dict[str, str], mode: str,
                        network_override: str | None, port: int) -> dict[str, str]:
@@ -393,6 +585,8 @@ def main() -> int:
                         help="Optional topology selection (otherwise guided interactive prompt)")
     parser.add_argument("--proxy-network",
                         help="Existing Docker network of the reverse proxy, or 'none' for a host-only proxy")
+    parser.add_argument("--install-dir", default=None, help="Абсолютный путь для установки")
+    parser.add_argument("--no-relocate", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--local-port", type=int, default=None,
                         help="Panel mode: localhost-only port for host proxy, default 18080")
     args = parser.parse_args()
@@ -404,6 +598,7 @@ def main() -> int:
     action = choose_action(existing, args.action)
     if action == "update":
         return perform_update(existing)
+    choose_install_dir(existing, args.install_dir, no_relocate=args.no_relocate)
     print("\n[1/4] Способ установки")
     mode = choose_mode(existing, args.mode)
     if existing.get("DEPLOY_MODE") and existing["DEPLOY_MODE"] != mode:
@@ -413,19 +608,22 @@ def main() -> int:
         )
 
     print("\n[2/4] Проверяем Docker и порты")
-    if not docker_ready():
-        if mode == "panel":
-            raise RuntimeError("Docker Compose is missing. On a Panel host, install it manually without replacing existing Docker.")
-        if shutil.which("docker"):
-            raise RuntimeError("Docker exists but Compose v2 is missing. Install the Compose plugin without replacing your Docker Engine.")
-        install_docker()
+    offer_docker_setup()
     port = args.local_port or int(existing.get("REMNAUM_LOCAL_PORT") or "18080")
     if not 1024 <= port <= 65535:
         raise ValueError("Local app port must be between 1024 and 65535")
     if mode == "standalone" and existing.get("DEPLOY_MODE") != "standalone" and not public_ports_available():
-        raise RuntimeError("80/443 are already occupied. Select '--mode panel' and reuse the existing proxy.")
-    if mode == "panel" and existing.get("DEPLOY_MODE") != "panel" and not loopback_available(port):
-        raise RuntimeError(f"127.0.0.1:{port} is busy; choose --local-port with a free port.")
+        print("Порты 80/443 заняты существующим прокси.")
+        answer = prompt("Поставить Remnaum рядом с ним без конфликта портов? (Д/н)", default="Д")
+        if answer.lower() in ("д", "да", "y", "yes"):
+            mode = "panel"
+        else:
+            raise RuntimeError("Освободите публичные 80/443 или используйте режим совместного прокси.")
+    if mode == "panel" and existing.get("DEPLOY_MODE") != "panel":
+        chosen_port = first_free_loopback_port(port)
+        if chosen_port != port:
+            print(f"Порт {port} занят. Выбран свободный 127.0.0.1:{chosen_port}.")
+        port = chosen_port
 
     print("\n[3/4] Настройки магазина")
     cfg = config_for_install(existing, mode, args.proxy_network, port)
@@ -456,6 +654,10 @@ def main() -> int:
     run(["docker", "compose", "up", "-d", "--build"])
     if not wait_for_app_health():
         raise RuntimeError("API не отвечает. Проверьте docker compose logs --tail=100 app")
+    if mode == "panel":
+        if not offer_panel_caddy_autoconfig(cfg):
+            print("Если прокси не настроен автоматически, используйте примеры в generated/.")
+    install_update_timer()
     print("\nRemnaum запущен. Тестовые данные не создавались.")
     print("Telegram webhook: " + cfg["TELEGRAM_WEBHOOK_URL"])
     print("Mini App: " + cfg["WEBAPP_URL"])

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0-rc.5 — Automated setup, update notices, checkout and modern frontend
+
+- GitHub update checker on VPS with a six-hour systemd timer, deduplicated Telegram administrator notifications and [Remnaum news](https://t.me/remnaum/4) button. Uses existing Git credentials or public GitHub API.
+- Guided install location selection; safe checkout copy and automatic dependencies. New `bootstrap.sh` downloads source on a fresh public VPS. Port conflict resolution proposes reuse of an existing proxy.
+- Optional automatic integration with official Remnawave Caddy (backup, validate and rollback). Never replaces the Panel or its public port listeners.
+- Choice of enabled payment methods in Telegram bot and Mini App, with server-verified checkout requests and existing encrypted PostgreSQL provider settings; default remains Stars-only until owner enables methods.
+- Real HTML templates, CSS and JavaScript assets for Mini App, owner dashboard and browser shop, with responsive and accessible styling.
+- Expanded integration checks for static assets, unauthenticated checkout protection, clean setup, and update-notice deduplication.
+
+
 ## 1.0.0-rc.4 — Trial, promo campaigns and purchase reliability
 
 - Optional one-time free trial configurable in the Telegram admin dashboard; Remnawave provisioning has a per-user lock and remote trial marker for safe retry.
