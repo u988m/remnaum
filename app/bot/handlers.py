@@ -45,6 +45,7 @@ def tariff_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="− 1 устройство", callback_data="tariff:devices:-1"),
             InlineKeyboardButton(text="+ 1 устройство", callback_data="tariff:devices:1"),
         ],
+        [InlineKeyboardButton(text="💳 Перейти к оплате", callback_data="payment:choose")],
         [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
     ])
 
