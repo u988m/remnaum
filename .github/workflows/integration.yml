@@ -61,7 +61,6 @@ jobs:
         if: matrix.mode != 'standalone'
         run: |
           docker run -d --name simulated-panel-proxy -p 80:80 -p 443:80 nginx:1.27-alpine
-          curl -fsS http://127.0.0.1/
       - name: Start empty database and API
         run: docker compose up -d --build postgres redis app
       - name: Validate Nginx configuration (standalone only)
