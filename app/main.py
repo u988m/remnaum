@@ -8,6 +8,7 @@ from app.bot.runtime import bot, dispatcher, setup_bot
 from app.config import settings
 from app.db.base import Base
 from app.db.session import engine
+from app.services.legacy_settings import migrate_legacy_payment_settings
 from app.web.routes import router as api_router
 from app.web.storefront import router as store_router
 
@@ -36,6 +37,7 @@ async def _register_telegram_webhook() -> None:
 async def lifespan(_: FastAPI):
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+    await migrate_legacy_payment_settings()
 
     polling_task = None
     webhook_task = None
