@@ -285,6 +285,9 @@ button:disabled{opacity:.45}a{color:var(--tg-theme-link-color,#65a9ff)}.status{f
 <header><div class="brand"><span id="store-name">Remnaum</span><span style="color:var(--tg-theme-button-color,#4b8bea)">.</span></div><div class="tag">VPN STORE</div></header>
 <h1 id="store-tagline">Ваш VPN — ваши правила</h1><div class="muted" id="welcome">Выберите параметры подписки и получите доступ за пару секунд.</div>
 <section class="panel" id="subscription" style="display:none"><h2>Ваша подписка</h2><div class="row"><span class="muted">Статус</span><b id="sub-status">—</b></div><div class="row"><span class="muted">Действует до</span><b id="sub-expiry">—</b></div><div class="grid"><div class="metric"><b id="sub-traffic">—</b><span>ГБ</span></div><div class="metric"><b id="sub-devices">—</b><span>устройств</span></div><div class="metric"><b id="sub-days">—</b><span>дней осталось</span></div></div><a id="sub-link" href="#" target="_blank" style="display:none">Открыть ссылку подключения</a></section>
+<section class="panel" id="account-devices"><h2>📱 Мои устройства</h2><div class="muted" id="account-device-info">Загружаем…</div></section>
+<section class="panel" id="account-purchases"><h2>🧾 Мои покупки</h2><div class="muted" id="account-purchase-info">Загружаем…</div></section>
+<section class="panel" id="account-referrals"><h2>🎁 Пригласить друга</h2><div class="muted" id="account-referral-info">Загружаем…</div><a id="account-referral-link" style="display:none"></a></section>
 <section class="panel" id="fixed-plans" style="display:none"><h2>Готовые тарифы</h2><div id="plans-list"></div><p class="muted">Цены готовых тарифов задаёт владелец магазина. Для оплаты примите условия ниже.</p></section>
 <section class="panel"><h2>Соберите свой тариф</h2><div class="row"><label for="days">Срок подписки</label><select id="days"></select></div><div class="row"><label for="traffic">Трафик</label><select id="traffic"></select></div><div class="row"><label for="devices">Устройства</label><select id="devices"></select></div>
 <div style="margin-top:16px"><div class="muted">Стоимость в Telegram</div><div class="price" id="stars-price">—</div></div>
@@ -297,6 +300,24 @@ const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
 let data=null;
 const $=id=>document.getElementById(id);
 function api(path,body){return fetch(path,{method:body?"POST":"GET",headers:{"Content-Type":"application/json","X-Telegram-Init-Data":tg?.initData||""},body:body?JSON.stringify(body):undefined}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.detail||"Ошибка запроса");return d})}
+async function loadAccountPanels(){
+  const results=await Promise.allSettled([
+    api("/api/v1/webapp/devices"),api("/api/v1/webapp/purchases"),api("/api/v1/webapp/referrals")
+  ]);
+  if(results[0].status==="fulfilled"){
+    const d=results[0].value;const labels=d.items.map(x=>x.name);
+    $("account-device-info").textContent="Лимит: "+(d.limit??"—")+" · "+(labels.length?labels.join(" · "):"Подключённых устройств пока нет");
+  }else $("account-device-info").textContent="Информация об устройствах временно недоступна";
+  if(results[1].status==="fulfilled"){
+    const d=results[1].value;
+    $("account-purchase-info").textContent=d.items.length?d.items.map(x=>"#"+x.id+" · "+(x.currency==="XTR"?x.amount+" ⭐":(x.amount/100).toFixed(2)+" "+x.currency)+" · "+x.status).join(" | "):"Покупок пока нет";
+  }else $("account-purchase-info").textContent="История покупок временно недоступна";
+  if(results[2].status==="fulfilled"){
+    const d=results[2].value;
+    $("account-referral-info").textContent="Приглашено: "+d.count+". Бонусная программа пока не включена.";
+    if(d.link){$("account-referral-link").href=d.link;$("account-referral-link").textContent=d.link;$("account-referral-link").style.display="block"}
+  }else $("account-referral-info").textContent="Реферальная информация временно недоступна";
+}
 function fillOptions(id,min,max,step,selected,label){const el=$(id);el.replaceChildren();const chosen=Math.min(max,Math.max(min,selected));const values=[];for(let n=min;n<=max;n+=step)values.push(n);if(!values.includes(chosen))values.push(chosen);values.sort((a,b)=>a-b);values.forEach(n=>{const o=document.createElement("option");o.value=String(n);o.textContent=n+" "+label;el.appendChild(o)});el.value=String(chosen)}
 async function loadReadyPlans(){
   const result=await api("/api/v1/plans");
@@ -405,7 +426,7 @@ $("pricing-save").onclick=async()=>{try{
 }catch(e){$("status").textContent=e.message}};
 async function start(){try{if(!tg?.initData)throw Error("Откройте Mini App через кнопку в Telegram");data=await api("/api/v1/webapp/bootstrap");if(data.profile){$("store-name").textContent=data.profile.name;$("store-tagline").textContent=data.profile.tagline||"Ваш VPN";document.documentElement.style.setProperty("--tg-theme-button-color",data.profile.accent_color)}$("loading").style.display="none";$("app").style.display="block";$("welcome").textContent=data.user.first_name?"Здравствуйте, "+data.user.first_name+"! Настройте подписку под себя.":"Выберите параметры подписки.";if(data.terms_url){$("terms-link").href=data.terms_url}else{$("terms-link").textContent="условия не настроены";$("terms-link").removeAttribute("href");$("buy").disabled=true}
 fillOptions("days",data.limits.days_min,data.limits.days_max,1,data.limits.days_default,"дней");fillOptions("traffic",data.limits.traffic_min,data.limits.traffic_max,1,data.limits.traffic_default,"ГБ");fillOptions("devices",data.limits.devices_min,data.limits.devices_max,1,data.limits.devices_default,"устройств");if(data.subscription){const s=data.subscription;$("subscription").style.display="block";$("sub-status").textContent=s.status;$("sub-expiry").textContent=s.expires_at?new Date(s.expires_at).toLocaleString():"—";$("sub-traffic").textContent=s.traffic_gb??"—";$("sub-devices").textContent=s.device_limit??"—";$("sub-days").textContent=s.days_left??"—";if(s.subscription_url){$("sub-link").href=s.subscription_url;$("sub-link").style.display="inline-block"}}
-$("buy").disabled=!data.stars_enabled;recalc();await loadReadyPlans()}catch(e){$("loading").textContent=e.message}}
+$("buy").disabled=!data.stars_enabled;recalc();loadAccountPanels();await loadReadyPlans()}catch(e){$("loading").textContent=e.message}}
 start();
 </script></body></html>""")
 
