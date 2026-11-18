@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from app.config import settings
 from app.services.tariffs import TariffQuote, format_price, get_tariff_draft, update_tariff_draft
 from app.services.payment_service import create_payment_for_user
+from app.services.subscriptions import get_user_subscription
 from app.services.users import get_or_create_user
 
 router = Router(name="user")
@@ -178,13 +179,33 @@ async def profile_handler(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "menu:subscription")
 async def subscription_handler(callback: CallbackQuery) -> None:
     await callback.answer()
-    if callback.message:
+    if not callback.message:
+        return
+    subscription = await get_user_subscription(callback.from_user.id)
+    if subscription is None:
         await callback.message.edit_text(
-            "🔐 <b>Моя подписка</b>\n\n"
-            "Активная VPN-подписка пока не найдена. "
-            "После подключения оплаты и выдачи доступа здесь появятся статус и ссылка подключения.",
+            "🔐 <b>Моя подписка</b>\\n\\nАктивная VPN-подписка пока не найдена.",
             reply_markup=back_menu(),
         )
+        return
+
+    expires_at = subscription["expires_at"]
+    expires_text = expires_at.strftime("%d.%m.%Y %H:%M UTC") if expires_at else "не указано"
+    details = (
+        "🔐 <b>Моя подписка</b>\\n\\n"
+        f"Статус: <b>{escape(subscription['status'])}</b>\\n"
+        f"Действует до: <b>{expires_text}</b>\\n"
+        f"Трафик: <b>{subscription['traffic_gb'] or '—'} ГБ</b>\\n"
+        f"Устройства: <b>{subscription['device_limit'] or '—'}</b>"
+    )
+    url = subscription.get("subscription_url")
+    keyboard = back_menu()
+    if isinstance(url, str) and url.startswith("https://"):
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔗 Получить ссылку подключения", url=url)],
+            [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
+        ])
+    await callback.message.edit_text(details, reply_markup=keyboard)
 
 
 @router.callback_query(F.data == "menu:support")
