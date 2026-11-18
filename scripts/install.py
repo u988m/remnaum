@@ -11,6 +11,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -201,13 +202,59 @@ def choose_mode(existing: dict[str, str], requested: str | None) -> str:
         return requested
     if existing.get("DEPLOY_MODE") in ("panel", "standalone"):
         return existing["DEPLOY_MODE"]
-    print("\nInstallation topology:")
-    print("  1) panel      — alongside Remnawave; never bind public 80/443")
-    print("  2) standalone — separate VPS; Caddy owns 80/443 and automatic HTTPS")
-    selection = prompt("Choose 1 or 2")
+    print("\nВыберите сервер:")
+    print("  1 — На сервере с Remnawave (не занимает порты 80/443)")
+    print("  2 — На отдельном VPS (Caddy + HTTPS на 80/443)")
+    selection = prompt("Введите 1 или 2")
     if selection not in ("1", "2"):
-        raise ValueError("Choose installation mode 1 or 2")
+        raise ValueError("Выберите 1 или 2")
     return "panel" if selection == "1" else "standalone"
+
+
+def choose_action(existing: dict[str, str], requested: str | None) -> str:
+    if requested:
+        if requested == "update" and not existing:
+            raise ValueError("Сначала установите Remnaum.")
+        return requested
+    print("\n===== Remnaum =====")
+    print("  1 — Установить / настроить")
+    print("  2 — Обновить")
+    choice = prompt("Выберите действие (1/2)", default="1")
+    if choice not in ("1", "2"):
+        raise ValueError("Выберите 1 или 2")
+    if choice == "2" and not existing:
+        raise ValueError("Сначала установите Remnaum.")
+    return "install" if choice == "1" else "update"
+
+
+def wait_for_app_health(max_attempts: int = 35) -> bool:
+    check = [
+        "docker", "compose", "exec", "-T", "app", "python", "-c",
+        "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).status == 200",
+    ]
+    for _ in range(max_attempts):
+        if run(check, check=False, quiet=True).returncode == 0:
+            return True
+        time.sleep(2)
+    return False
+
+
+def perform_update(existing: dict[str, str]) -> int:
+    if not existing.get("COMPOSE_FILE"):
+        raise ValueError("Сначала выберите режим установки через пункт 1.")
+    if not docker_ready():
+        raise RuntimeError("Docker Compose недоступен.")
+    if not shutil.which("git"):
+        raise RuntimeError("Для обновления необходим git.")
+    print("\n[1/3] Резервная копия базы и обновление кода")
+    run(["bash", "update.sh"])
+    print("[2/3] Проверка контейнеров")
+    run(["docker", "compose", "ps"])
+    print("[3/3] Проверка приложения")
+    if not wait_for_app_health():
+        raise RuntimeError("API не отвечает. Проверьте docker compose logs --tail=100 app")
+    print("\nRemnaum обновлён. База и секреты сохранены.")
+    return 0
 
 
 def config_for_install(existing: dict[str, str], mode: str,
@@ -226,8 +273,8 @@ def config_for_install(existing: dict[str, str], mode: str,
         cfg["DATABASE_URL"] = (f"postgresql+asyncpg://remnaum:{cfg['POSTGRES_PASSWORD']}"
                                "@postgres:5432/remnaum")
 
-    for key, label in (("PUBLIC_DOMAIN", "Telegram/Remnawave webhook domain (no https://)"),
-                       ("WEBAPP_DOMAIN", "Mini App/admin domain (no https://)")):
+    for key, label in (("PUBLIC_DOMAIN", "Домен вебхуков Telegram/Remnawave (без https://)"),
+                       ("WEBAPP_DOMAIN", "Домен Mini App и админки (без https://)")):
         if not valid_domain(cfg.get(key, "")) or key not in existing:
             cfg[key] = prompt(label)
         if not valid_domain(cfg[key]):
@@ -235,7 +282,7 @@ def config_for_install(existing: dict[str, str], mode: str,
 
     if mode == "standalone":
         if not cfg.get("ACME_EMAIL") or cfg["ACME_EMAIL"].endswith("@example.com"):
-            cfg["ACME_EMAIL"] = prompt("Email for Caddy ACME certificates")
+            cfg["ACME_EMAIL"] = prompt("Email для SSL-сертификата Caddy")
         if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", cfg["ACME_EMAIL"]):
             raise ValueError("Invalid certificate email")
     else:
@@ -253,19 +300,19 @@ def config_for_install(existing: dict[str, str], mode: str,
         cfg["REMNAUM_PROXY_NETWORK"] = proxy_network
 
     required = (
-        ("TELEGRAM_BOT_USERNAME", "Telegram bot username (without @)", False),
-        ("TELEGRAM_BOT_TOKEN", "Telegram BotFather token", True),
-        ("ADMIN_IDS", "Numeric Telegram admin IDs (comma-separated)", False),
-        ("REMNAWAVE_BASE_URL", "Remnawave Panel URL (https://...)", False),
-        ("REMNAWAVE_API_TOKEN", "Remnawave API token", True),
-        ("REMNAWAVE_ACTIVE_INTERNAL_SQUADS", "Remnawave internal squad UUIDs", False),
+        ("TELEGRAM_BOT_USERNAME", "Имя бота из BotFather (без @)", False),
+        ("TELEGRAM_BOT_TOKEN", "Токен Telegram-бота", True),
+        ("ADMIN_IDS", "Telegram ID администраторов (через запятую)", False),
+        ("REMNAWAVE_BASE_URL", "Адрес панели Remnawave (с https://)", False),
+        ("REMNAWAVE_API_TOKEN", "API-токен Remnawave", True),
+        ("REMNAWAVE_ACTIVE_INTERNAL_SQUADS", "UUID внутренних групп Remnawave (через запятую)", False),
     )
     for key, label, hidden in required:
         if not cfg.get(key):
             cfg[key] = prompt(label, hidden=hidden)
     if not existing:
-        cfg["TELEGRAM_TERMS_URL"] = prompt("Public terms URL (optional for initial test)", required=False)
-        cfg["SUPPORT_CONTACT"] = prompt("Support contact (optional)", required=False)
+        cfg["TELEGRAM_TERMS_URL"] = prompt("Ссылка на условия продажи (необязательно для теста)", required=False)
+        cfg["SUPPORT_CONTACT"] = prompt("Контакт поддержки (необязательно)", required=False)
     cfg["TELEGRAM_BOT_USERNAME"] = cfg["TELEGRAM_BOT_USERNAME"].lstrip("@")
     if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", cfg.get("TELEGRAM_BOT_USERNAME", "")):
         raise ValueError("Bot username must use 5-32 ASCII letters, digits or underscores")
@@ -300,7 +347,8 @@ def config_for_install(existing: dict[str, str], mode: str,
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Install Remnaum in a standalone or shared Panel deployment.")
+    parser = argparse.ArgumentParser(description="Мастер установки и обновления Remnaum.")
+    parser.add_argument("--action", choices=("install", "update"), help="Выбор без меню")
     parser.add_argument("--mode", choices=("panel", "standalone"),
                         help="Optional topology selection (otherwise guided interactive prompt)")
     parser.add_argument("--proxy-network",
@@ -313,13 +361,18 @@ def main() -> int:
         raise RuntimeError("Run with sudo: sudo sh install.sh")
     os.chdir(ROOT)
     existing = read_env()
+    action = choose_action(existing, args.action)
+    if action == "update":
+        return perform_update(existing)
+    print("\n[1/4] Способ установки")
     mode = choose_mode(existing, args.mode)
     if existing.get("DEPLOY_MODE") and existing["DEPLOY_MODE"] != mode:
-        answer = prompt(f"Switch installation from {existing['DEPLOY_MODE']} to {mode}? Type YES")
-        if answer != "YES":
-            print("No changes were made")
-            return 0
+        raise ValueError(
+            "Нельзя автоматически менять режим действующей установки: сначала перенесите прокси "
+            "и проверьте сохранность БД. Текущий режим: " + existing["DEPLOY_MODE"]
+        )
 
+    print("\n[2/4] Проверяем Docker и порты")
     if not docker_ready():
         if mode == "panel":
             raise RuntimeError("Docker Compose is missing. On a Panel host, install it manually without replacing existing Docker.")
@@ -334,6 +387,7 @@ def main() -> int:
     if mode == "panel" and existing.get("DEPLOY_MODE") != "panel" and not loopback_available(port):
         raise RuntimeError(f"127.0.0.1:{port} is busy; choose --local-port with a free port.")
 
+    print("\n[3/4] Настройки магазина")
     cfg = config_for_install(existing, mode, args.proxy_network, port)
     if not existing:
         base = ROOT / ".env.example"
@@ -357,9 +411,12 @@ def main() -> int:
     else:
         print("\nStandalone mode: Remnaum Caddy will own 80/443; Nginx stays private.")
 
+    print("\n[4/4] Сборка и запуск контейнеров")
     run(["docker", "compose", "config", "--quiet"])
-    run(["docker", "compose", "up", "-d", "--build", "--remove-orphans"])
-    print("\nRemnaum containers started. No demo users or payments were added.")
+    run(["docker", "compose", "up", "-d", "--build"])
+    if not wait_for_app_health():
+        raise RuntimeError("API не отвечает. Проверьте docker compose logs --tail=100 app")
+    print("\nRemnaum запущен. Тестовые данные не создавались.")
     print("Telegram webhook: " + cfg["TELEGRAM_WEBHOOK_URL"])
     print("Mini App: " + cfg["WEBAPP_URL"])
     print("Remnawave events: https://" + cfg["PUBLIC_DOMAIN"] + "/webhooks/remnawave")
