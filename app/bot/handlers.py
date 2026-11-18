@@ -89,8 +89,8 @@ async def start_handler(message: Message) -> None:
     if message.from_user is None:
         return
     inviter = parse_referral_start(message.text)
-    await get_or_create_user(message.from_user)
-    if inviter is not None:
+    is_new_user = await get_or_create_user(message.from_user)
+    if is_new_user and inviter is not None:
         await register_referral(message.from_user.id, inviter)
     await message.answer(
         "Добро пожаловать в <b>Remnaum</b>! 🚀\n\n"
