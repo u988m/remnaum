@@ -401,6 +401,17 @@ def restore_backup(archive: Path, *, supplied_key: str | None = None, target_roo
             ], cwd=target, check=True, capture_output=True, timeout=120)
             subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=target,
                            check=True, timeout=360)
+            import time
+            for _ in range(40):
+                health = subprocess.run([
+                    "docker", "compose", "exec", "-T", "app", "python", "-c",
+                    "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=4).status==200",
+                ], cwd=target, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if health.returncode == 0:
+                    break
+                time.sleep(2)
+            else:
+                raise RuntimeError("Данные восстановлены, но приложение не отвечает. Проверьте логи: docker compose logs app")
             print("✓ Данные, настройки и контейнеры Remnaum восстановлены")
             print("Исходный путь архива:", metadata.get("original_path"))
             print("Текущий путь:", target)
