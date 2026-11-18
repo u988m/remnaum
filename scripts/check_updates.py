@@ -53,16 +53,33 @@ def git(command: list[str]) -> str:
     ).strip()
 
 
+def public_github_sha() -> str | None:
+    """Fallback when the checkout cannot authenticate, after repo becomes public."""
+    request = Request(
+        "https://api.github.com/repos/u988m/remnaum/commits/main",
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "Remnaum-Update-Checker"},
+    )
+    try:
+        with urlopen(request, timeout=10) as response:
+            value = json.load(response).get("sha", "")
+        return value if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) else None
+    except (OSError, ValueError, KeyError):
+        return None
+
+
 def available_update() -> tuple[str, str] | None:
     """Remote main changed and local checkout has not yet installed it."""
     if git(["branch", "--show-current"]) != "main":
         return None
     current = git(["rev-parse", "HEAD"])
-    remote_line = git(["ls-remote", "origin", "refs/heads/main"])
-    fields = remote_line.split()
-    if len(fields) != 2 or fields[1] != "refs/heads/main":
+    try:
+        remote_line = git(["ls-remote", "origin", "refs/heads/main"])
+        fields = remote_line.split()
+        upstream = fields[0] if len(fields) == 2 and fields[1] == "refs/heads/main" else None
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        upstream = public_github_sha()
+    if upstream is None:
         return None
-    upstream = fields[0]
     if not re.fullmatch(r"[0-9a-f]{40}", upstream):
         return None
     return (upstream, current) if upstream != current else None
