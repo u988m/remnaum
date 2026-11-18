@@ -107,6 +107,42 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(cfg["APP_SECRET_KEY"], "keep-this-key")
         self.assertEqual(cfg["POSTGRES_PASSWORD"], "keep-this-db-password")
 
+    def test_action_menu_install_and_update(self):
+        with patch.object(installer, "prompt", return_value="1"):
+            self.assertEqual(installer.choose_action({}, None), "install")
+        with patch.object(installer, "prompt", return_value="2"):
+            self.assertEqual(installer.choose_action({"DEPLOY_MODE": "panel"}, None), "update")
+        with patch.object(installer, "prompt", return_value="2"):
+            with self.assertRaises(ValueError):
+                installer.choose_action({}, None)
+        self.assertEqual(installer.choose_action({}, "install"), "install")
+        with self.assertRaises(ValueError):
+            installer.choose_action({}, "update")
+
+    def test_update_requires_existing_config_before_touching_git(self):
+        with self.assertRaises(ValueError):
+            installer.perform_update({"DEPLOY_MODE": "panel"})
+
+    def test_update_runs_backup_and_pull_then_health_check(self):
+        with patch.object(installer, "docker_ready", return_value=True), \
+             patch.object(installer.shutil, "which", return_value="/usr/bin/git"), \
+             patch.object(installer, "run") as runner, \
+             patch.object(installer, "wait_for_app_health", return_value=True):
+            self.assertEqual(installer.perform_update({
+                "DEPLOY_MODE": "panel",
+                "COMPOSE_FILE": "compose.yaml:compose.panel.yaml",
+            }), 0)
+        self.assertEqual(runner.call_args_list[0].args[0], ["bash", "update.sh"])
+        self.assertEqual(runner.call_args_list[1].args[0], ["docker", "compose", "ps"])
+
+    def test_installer_health_retries_then_succeeds(self):
+        from subprocess import CompletedProcess
+        with patch.object(installer, "run", side_effect=[
+            CompletedProcess([], 1), CompletedProcess([], 0)
+        ]) as runner, patch.object(installer.time, "sleep"):
+            self.assertTrue(installer.wait_for_app_health(2))
+        self.assertEqual(runner.call_count, 2)
+
     def test_refuse_panel_domain_collision(self):
         existing = {
             "PUBLIC_DOMAIN": "panel.myvpn.site",
