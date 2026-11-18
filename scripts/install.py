@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 from remnawave_setup import (
     discover_squads, select_squads, validate_uuid_list,
     local_panel_for_url, panel_webhook_secret, apply_local_panel_webhook,
+    discover_local_panel, read_panel_env,
     panel_api_url,
 )
 
@@ -538,6 +539,18 @@ def config_for_install(existing: dict[str, str], mode: str,
             raise ValueError(f"Docker proxy network not found: {proxy_network}")
         cfg["REMNAUM_PROXY_NETWORK"] = proxy_network
 
+    # Official local Panel keeps its public domain in /opt/remnawave/.env.
+    # The API token itself is not in that file and must still be supplied.
+    if mode == "panel" and not cfg.get("REMNAWAVE_BASE_URL"):
+        local_env = discover_local_panel()
+        if local_env:
+            panel_domain = read_panel_env(local_env).get("FRONT_END_DOMAIN", "").strip()
+            if "://" in panel_domain:
+                panel_domain = urlsplit(panel_domain).hostname or ""
+            if valid_domain(panel_domain):
+                cfg["REMNAWAVE_BASE_URL"] = "https://" + panel_domain
+                print("✅ Адрес установленной панели найден автоматически:", cfg["REMNAWAVE_BASE_URL"])
+
     required = (
         ("TELEGRAM_BOT_USERNAME", "Имя бота из BotFather (без @)", False),
         ("TELEGRAM_BOT_TOKEN", "Токен Telegram-бота", True),
@@ -562,11 +575,16 @@ def config_for_install(existing: dict[str, str], mode: str,
     # On a shared host reuse the already configured secret so other Panel
     # webhook consumers are not disconnected or made incompatible.
     panel_env = local_panel_for_url(cfg["REMNAWAVE_BASE_URL"]) if mode == "panel" else None
-    if panel_env is not None and not existing.get("REMNAWAVE_WEBHOOK_SECRET"):
+    if panel_env is not None:
         previous = panel_webhook_secret(panel_env)
-        if previous:
-            cfg["REMNAWAVE_WEBHOOK_SECRET"] = previous
-            print("✅ Секрет вебхука синхронизирован с локальной панелью")
+        if previous and previous != cfg.get("REMNAWAVE_WEBHOOK_SECRET"):
+            allowed = not existing or prompt(
+                "Синхронизировать секрет вебхука из локальной панели? (Д/н)",
+                default="Д",
+            ).lower() in ("д", "да", "y", "yes")
+            if allowed:
+                cfg["REMNAWAVE_WEBHOOK_SECRET"] = previous
+                print("✅ Секрет вебхука синхронизирован с локальной панелью")
     # Legal terms, support, tariffs and payment providers are configured in the admin DB.
     cfg["TELEGRAM_BOT_USERNAME"] = cfg["TELEGRAM_BOT_USERNAME"].lstrip("@")
     if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", cfg.get("TELEGRAM_BOT_USERNAME", "")):
