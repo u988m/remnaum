@@ -196,6 +196,11 @@ async def validate_stars_pre_checkout(
         payment = await session.scalar(
             select(Payment)
             .join(User, Payment.user_id == User.id)
+            .join(
+                TermsAcceptance,
+                (TermsAcceptance.user_id == User.id)
+                & (TermsAcceptance.terms_version == settings.telegram_terms_version),
+            )
             .where(
                 Payment.id == payment_id,
                 Payment.provider == "telegram_stars",
