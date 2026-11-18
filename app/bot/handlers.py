@@ -18,6 +18,10 @@ from app.services.payment_service import settle_payment
 from app.services.subscriptions import get_user_subscription, provision_paid_payment
 from app.services.users import get_or_create_user
 from app.services.store_settings import is_payment_method_enabled
+from app.services.referrals import parse_referral_start, register_referral, referral_count, referral_code
+from app.db.models import Payment, User
+from app.db.session import SessionLocal
+from sqlalchemy import select
 
 router = Router(name="user")
 
@@ -26,8 +30,11 @@ def main_menu() -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="📦 Собрать тариф", callback_data="menu:plans"),
          InlineKeyboardButton(text="👤 Мой профиль", callback_data="menu:profile")],
-        [InlineKeyboardButton(text="🔐 Моя подписка", callback_data="menu:subscription"),
-         InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support")],
+        [InlineKeyboardButton(text="🔐 Подписка", callback_data="menu:subscription"),
+         InlineKeyboardButton(text="📱 Устройства", callback_data="menu:devices")],
+        [InlineKeyboardButton(text="🧾 Мои покупки", callback_data="menu:purchases"),
+         InlineKeyboardButton(text="🎁 Пригласить друга", callback_data="menu:referral")],
+        [InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support")],
     ]
     if settings.webapp_url:
         rows.append([InlineKeyboardButton(text="🌐 Личный кабинет", web_app=WebAppInfo(url=settings.webapp_url))])
@@ -81,7 +88,10 @@ async def show_tariff(callback: CallbackQuery, quote: TariffQuote | None = None)
 async def start_handler(message: Message) -> None:
     if message.from_user is None:
         return
+    inviter = parse_referral_start(message.text)
     await get_or_create_user(message.from_user)
+    if inviter is not None:
+        await register_referral(message.from_user.id, inviter)
     await message.answer(
         "Добро пожаловать в <b>Remnaum</b>! 🚀\n\n"
         "Соберите VPN-тариф под себя: выберите срок, трафик и количество устройств.",
@@ -335,3 +345,58 @@ async def support_handler(callback: CallbackQuery) -> None:
     support = escape(settings.support_contact) if settings.support_contact else "Контакт поддержки ещё не настроен."
     if callback.message:
         await callback.message.edit_text(f"🆘 <b>Поддержка</b>\n\n{support}", reply_markup=back_menu())
+
+
+@router.callback_query(F.data == "menu:devices")
+async def devices_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    subscription = await get_user_subscription(callback.from_user.id)
+    if subscription is None:
+        message = "📱 <b>Мои устройства</b>\\n\\nСначала оформите подписку."
+    else:
+        limit = subscription.get("device_limit")
+        message = (
+            "📱 <b>Мои устройства</b>\\n\\n"
+            f"Лимит устройств: <b>{limit if limit is not None else '—'}</b>\\n"
+            "Подключите устройство с помощью ссылки в разделе «Подписка».\\n"
+            "Список HWID-устройств появится после подключения API управления устройствами."
+        )
+    if callback.message:
+        await callback.message.edit_text(message.replace("\\\\n", "\\n"), reply_markup=back_menu())
+
+
+@router.callback_query(F.data == "menu:purchases")
+async def purchases_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    async with SessionLocal() as session:
+        rows = (await session.scalars(
+            select(Payment).join(User, Payment.user_id == User.id)
+            .where(User.telegram_id == callback.from_user.id)
+            .order_by(Payment.created_at.desc(), Payment.id.desc()).limit(10)
+        )).all()
+    lines = ["🧾 <b>Мои покупки</b>", ""]
+    if not rows:
+        lines.append("Покупок пока нет.")
+    for p in rows:
+        amount = f"{p.amount} ⭐" if p.currency == "XTR" else f"{p.amount / 100:.2f} {escape(p.currency)}"
+        lines.append(f"#{p.id} · {escape(p.provider)} · {amount} · {escape(p.status)}")
+    if callback.message:
+        await callback.message.edit_text("\\n".join(lines), reply_markup=back_menu())
+
+
+@router.callback_query(F.data == "menu:referral")
+async def referral_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not settings.telegram_bot_username:
+        text = "🎁 Реферальная ссылка пока не настроена владельцем."
+    else:
+        link = f"https://t.me/{settings.telegram_bot_username.lstrip('@')}?start={referral_code(callback.from_user.id)}"
+        count = await referral_count(callback.from_user.id)
+        text = (
+            "🎁 <b>Пригласить друга</b>\\n\\n"
+            f"Ваша ссылка: {escape(link)}\\n"
+            f"Приглашено пользователей: <b>{count}</b>\\n\\n"
+            "Реферальные вознаграждения пока не подключены."
+        )
+    if callback.message:
+        await callback.message.edit_text(text.replace("\\\\n", "\\n"), reply_markup=back_menu())
