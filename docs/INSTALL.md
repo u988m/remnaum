@@ -17,7 +17,7 @@ sudo bash install.sh
 ```
 The guided installer creates a private .env, a Caddy configuration (automatic HTTPS), and an internal Nginx reverse proxy. Database and Redis are private Docker volumes; no demo customer or payment is seeded. Credentials are never printed after the input step.
 
-Caddy terminates HTTPS, Nginx routes traffic inside Docker. Telegram webhook lives at https://YOUR_WEBHOOK_DOMAIN/telegram/webhook, Mini App at https://YOUR_WEBAPP_DOMAIN/webapp, admin at https://YOUR_WEBAPP_DOMAIN/admin, and Remnawave events at https://YOUR_WEBHOOK_DOMAIN/webhooks/remnawave. Caddy requires working DNS and public HTTP/HTTPS connectivity to obtain certificates.
+Caddy terminates HTTPS, Nginx routes traffic inside Docker. Telegram webhook lives at https://YOUR_WEBHOOK_DOMAIN/telegram/webhook, Mini App at https://YOUR_WEBAPP_DOMAIN/app, admin at https://YOUR_WEBAPP_DOMAIN/admin, and Remnawave events at https://YOUR_WEBHOOK_DOMAIN/webhooks/remnawave. Caddy requires working DNS and public HTTP/HTTPS connectivity to obtain certificates.
 
 The installer **does not modify Remnawave Panel settings remotely**. On the Panel server set:
 ```dotenv
@@ -27,7 +27,7 @@ WEBHOOK_SECRET_HEADER=THE_SAME_REMNAWAVE_WEBHOOK_SECRET_FROM_REMNAUM_ENV
 ```
 Restart the panel using its documented deployment process. The Remnaum receiver verifies the official HMAC-SHA256 signature; unsigned payloads are rejected.
 
-Use `docker compose ps`, `docker compose logs --tail=100 app`, and `curl https://YOUR_WEBAPP_DOMAIN/health` to check health. Configure BotFather Menu Button / Main Mini App to `https://YOUR_WEBAPP_DOMAIN/webapp`; the app also sets the chat menu button on boot.
+Use `docker compose ps`, `docker compose logs --tail=100 app`, and `curl https://YOUR_WEBAPP_DOMAIN/health` to check health. Configure BotFather Menu Button / Main Mini App to `https://YOUR_WEBAPP_DOMAIN/app`; the app also sets the chat menu button on boot.
 
 ## Security / upgrades
 - Never commit .env, API tokens, webhook secrets, or customer databases.
