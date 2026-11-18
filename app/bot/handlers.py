@@ -365,7 +365,7 @@ async def stars_payment_create_handler(callback: CallbackQuery) -> None:
     if callback.message:
         profile = await get_store_profile()
         await callback.message.answer_invoice(
-            title=profile["name"][:50] + " VPN",
+            title=profile["name"][:28] + " VPN",
             description="VPN-подписка с выбранными вами параметрами.",
             payload=f"remnaum:{payment.id}",
             provider_token="",
