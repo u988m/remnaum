@@ -113,3 +113,11 @@ class SelectedPlan(Base):
     __tablename__ = "selected_plans"
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
     plan_id: Mapped[int] = mapped_column(ForeignKey("tariff_plans.id"), nullable=False)
+
+
+class StoreProfile(Base):
+    """Single-store branding, editable without restarting the application."""
+    __tablename__ = "store_profile"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    data: Mapped[dict] = mapped_column(JSON, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
