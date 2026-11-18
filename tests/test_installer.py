@@ -85,6 +85,28 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn("standalone", cfg["COMPOSE_FILE"])
         self.assertIn("panel-network.yaml", cfg["COMPOSE_FILE"])
 
+    def test_existing_installation_prompts_only_for_missing_bot_username(self):
+        old = {
+            "PUBLIC_DOMAIN": "hook.myvpn.site",
+            "WEBAPP_DOMAIN": "app.myvpn.site",
+            "TELEGRAM_BOT_USERNAME": "",
+            "TELEGRAM_BOT_TOKEN": "1234567:ABC",
+            "ADMIN_IDS": "123456789",
+            "REMNAWAVE_BASE_URL": "https://panel.myvpn.site",
+            "REMNAWAVE_API_TOKEN": "remote-secret",
+            "REMNAWAVE_ACTIVE_INTERNAL_SQUADS": "test-id",
+            "APP_SECRET_KEY": "keep-this-key",
+            "POSTGRES_PASSWORD": "keep-this-db-password",
+            "DATABASE_URL": "postgresql+asyncpg://remnaum:keep-this-db-password@postgres:5432/remnaum",
+        }
+        with patch.object(installer, "network_exists", return_value=False):
+            with patch.object(installer, "prompt", return_value="test_bot") as ask:
+                cfg = installer.config_for_install(old, "panel", "none", 18080)
+        ask.assert_called_once()
+        self.assertEqual(cfg["TELEGRAM_BOT_USERNAME"], "test_bot")
+        self.assertEqual(cfg["APP_SECRET_KEY"], "keep-this-key")
+        self.assertEqual(cfg["POSTGRES_PASSWORD"], "keep-this-db-password")
+
     def test_refuse_panel_domain_collision(self):
         existing = {
             "PUBLIC_DOMAIN": "panel.myvpn.site",
