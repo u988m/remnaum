@@ -62,11 +62,11 @@ def tariff_keyboard() -> InlineKeyboardMarkup:
 def tariff_text(quote: TariffQuote) -> str:
     stars = calculate_stars_price(quote.duration_days, quote.traffic_gb, quote.device_limit)
     return (
-        "📦 <b>Конструктор тарифа</b>\\n\\n"
-        f"Срок: <b>{quote.duration_days} дней</b>\\n"
-        f"Трафик: <b>{quote.traffic_gb} ГБ</b>\\n"
-        f"Устройства: <b>{quote.device_limit}</b>\\n\\n"
-        f"Стоимость: <b>{stars} ⭐</b>\\n\\n"
+        "📦 <b>Конструктор тарифа</b>\n\n"
+        f"Срок: <b>{quote.duration_days} дней</b>\n"
+        f"Трафик: <b>{quote.traffic_gb} ГБ</b>\n"
+        f"Устройства: <b>{quote.device_limit}</b>\n\n"
+        f"Стоимость: <b>{stars} ⭐</b>\n\n"
         "Настройте параметры кнопками ниже. Значения ограничены доступным диапазоном."
     )
 
