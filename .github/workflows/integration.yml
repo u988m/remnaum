@@ -57,11 +57,21 @@ jobs:
       - name: Validate Caddy configuration (standalone only)
         if: matrix.mode == 'standalone'
         run: docker compose run --rm --no-deps --entrypoint caddy caddy validate --config /etc/caddy/Caddyfile
+      - name: Simulate existing Panel owning public 80/443
+        if: matrix.mode != 'standalone'
+        run: |
+          docker run -d --name simulated-panel-proxy -p 80:80 -p 443:80 nginx:1.27-alpine
+          curl -fsS http://127.0.0.1/
       - name: Start empty database and API
         run: docker compose up -d --build postgres redis app
       - name: Validate Nginx configuration (standalone only)
         if: matrix.mode == 'standalone'
         run: docker compose run --rm --no-deps --entrypoint nginx nginx -t
+      - name: Test active Nginx proxy (standalone)
+        if: matrix.mode == 'standalone'
+        run: |
+          docker compose up -d nginx
+          docker compose exec -T app python -c "import urllib.request; assert urllib.request.urlopen('http://nginx/health').status == 200"
       - name: Verify health and clean data
         run: |
           for i in $(seq 1 40); do
@@ -71,6 +81,10 @@ jobs:
           docker compose exec -T app python -c "import urllib.request; assert urllib.request.urlopen('http://localhost:8080/health').status == 200"
           if [ "${{ matrix.mode }}" != standalone ]; then
             curl -fsS http://127.0.0.1:18080/health
+            test "$(docker inspect -f '{{.State.Running}}' simulated-panel-proxy)" = "true"
+          fi
+          if [ "${{ matrix.mode }}" = panel-network ]; then
+            docker compose exec -T app python -c "import socket; assert socket.gethostbyname('remnaum-api')"
           fi
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM users;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM payments;')" = "0"
@@ -85,4 +99,6 @@ jobs:
         run: docker compose logs --tail=200
       - name: Stop
         if: always()
-        run: docker compose down
+        run: |
+          docker compose down
+          docker rm -f simulated-panel-proxy || true
