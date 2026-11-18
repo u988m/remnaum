@@ -461,7 +461,7 @@ th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflo
 <div class="card"><span>Ожидают оплаты</span><b id="pending-count">—</b></div>
 </div>
 <nav><button class="active" data-tab="users">Клиенты</button><button data-tab="payments">Платежи</button><button data-tab="settings" onclick="location.href='/admin/payments'">Оплата</button><button data-tab="tariffs" onclick="location.href='/admin/tariffs'">Тарифы</button></nav>
-<section class="section" id="users-view"><div class="toolbar"><h2>Клиенты и подписки</h2><button class="action" id="users-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>Telegram ID</th><th>Username</th><th>Подписка</th><th>До</th><th>Регистрация</th></tr></thead><tbody id="users-table"></tbody></table></div><div class="toolbar" style="margin-top:12px"><button class="action" id="users-prev">Назад</button><span id="users-page" class="muted">Страница 1</span><button class="action" id="users-next">Далее</button></div></section>
+<section class="section" id="users-view"><div class="toolbar"><h2>Клиенты и подписки</h2><button class="action" id="users-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>Telegram ID</th><th>Username</th><th>Подписка</th><th>До</th><th>Регистрация</th></tr></thead><tbody id="users-table"></tbody></table></div><div id="customer-detail" class="section" hidden aria-live="polite"><div class="toolbar"><h2 id="customer-title">Карточка клиента</h2><button class="action" id="customer-close">Закрыть</button></div><p class="muted" id="customer-summary"></p><h3>Подписки</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Статус</th><th>Действует до</th><th>Создана</th></tr></thead><tbody id="customer-subscriptions"></tbody></table></div><h3>Платежи</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="customer-payments"></tbody></table></div></div><div class="toolbar" style="margin-top:12px"><button class="action" id="users-prev">Назад</button><span id="users-page" class="muted">Страница 1</span><button class="action" id="users-next">Далее</button></div></section>
 <section class="section" id="payments-view" hidden><div class="toolbar"><h2>История платежей</h2><button class="action" id="payments-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Клиент</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="payments-table"></tbody></table></div><div class="toolbar" style="margin-top:12px"><button class="action" id="payments-prev">Назад</button><span id="payments-page" class="muted">Страница 1</span><button class="action" id="payments-next">Далее</button></div></section>
 <div id="status" class="status"></div>
 </div></main>
@@ -471,7 +471,9 @@ async function api(path){const r=await fetch(path,{headers:{"X-Telegram-Init-Dat
 function cell(value){const td=document.createElement("td");td.textContent=value??"—";return td}
 function row(target,values){const tr=document.createElement("tr");values.forEach(v=>tr.appendChild(cell(v)));$(target).appendChild(tr)}
 async function overview(){const d=await api("/admin/api/overview");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments}
-async function loadUsers(){const d=await api("/admin/api/users?limit="+pageSize+"&offset="+userOffset);$("users-table").replaceChildren();d.items.forEach(u=>row("users-table",[u.telegram_id,u.username?"@"+u.username:"—",u.subscription_status,u.expires_at?new Date(u.expires_at).toLocaleDateString():"—",new Date(u.created_at).toLocaleDateString()]));$("users-page").textContent="Показано "+(d.total?userOffset+1:0)+"–"+Math.min(userOffset+d.items.length,d.total)+" из "+d.total;$("users-prev").disabled=userOffset===0;$("users-next").disabled=userOffset+pageSize>=d.total}
+async function loadUsers(){const d=await api("/admin/api/users?limit="+pageSize+"&offset="+userOffset);$("users-table").replaceChildren();d.items.forEach(u=>{row("users-table",[u.telegram_id,u.username?"@"+u.username:"—",u.subscription_status,u.expires_at?new Date(u.expires_at).toLocaleDateString():"—",new Date(u.created_at).toLocaleDateString()]);const tr=$("users-table").lastElementChild;const button=document.createElement("button");button.className="action";button.textContent="Подробнее";button.onclick=()=>showCustomer(u.telegram_id);tr.appendChild(cell(button.textContent));tr.lastElementChild.replaceChildren(button)});$("users-page").textContent="Показано "+(d.total?userOffset+1:0)+"–"+Math.min(userOffset+d.items.length,d.total)+" из "+d.total;$("users-prev").disabled=userOffset===0;$("users-next").disabled=userOffset+pageSize>=d.total}
+async function showCustomer(id){$("status").textContent="";try{const d=await api("/admin/api/users/"+encodeURIComponent(id));$("customer-title").textContent="Клиент "+d.telegram_id;$("customer-summary").textContent=(d.username?"@"+d.username+" · ":"")+"Зарегистрирован: "+new Date(d.created_at).toLocaleString();$("customer-subscriptions").replaceChildren();$("customer-payments").replaceChildren();d.subscriptions.forEach(x=>row("customer-subscriptions",[x.id,x.status,x.expires_at?new Date(x.expires_at).toLocaleString():"—",new Date(x.created_at).toLocaleString()]));d.payments.forEach(x=>row("customer-payments",[x.id,x.provider,x.amount+" "+x.currency,x.status,new Date(x.created_at).toLocaleString()]));$("customer-detail").hidden=false;$("customer-detail").scrollIntoView({behavior:"smooth",block:"nearest"})}catch(e){$("status").textContent=e.message}}
+$("customer-close").onclick=()=>{$("customer-detail").hidden=true};
 async function loadPayments(){const d=await api("/admin/api/payments?limit="+pageSize+"&offset="+paymentOffset);$("payments-table").replaceChildren();d.items.forEach(p=>row("payments-table",[p.id,p.telegram_id,p.provider,p.amount+" "+p.currency,p.status,new Date(p.created_at).toLocaleString()]));$("payments-page").textContent="Показано "+(d.total?paymentOffset+1:0)+"–"+Math.min(paymentOffset+d.items.length,d.total)+" из "+d.total;$("payments-prev").disabled=paymentOffset===0;$("payments-next").disabled=paymentOffset+pageSize>=d.total}
 async function start(){try{if(!tg?.initData)throw Error("Откройте панель через Telegram Mini App");const d=await api("/admin/api/overview");$("loading").hidden=true;$("dashboard").hidden=false;$("welcome").textContent="Здравствуйте, "+(d.admin_name||"администратор");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments;await loadUsers()}catch(e){$("loading").textContent=e.message}}
 document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const users=b.dataset.tab==="users";$("users-view").hidden=!users;$("payments-view").hidden=users;if(!users&&b.dataset.tab==="payments")try{await loadPayments()}catch(e){$("status").textContent=e.message}}));
@@ -563,3 +565,48 @@ async def admin_payments(
             "created_at": payment.created_at.isoformat(),
         } for payment, telegram_id in result.all()]
     return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/admin/api/users/{telegram_id}")
+async def admin_user_detail(
+    telegram_id: int,
+    x_telegram_init_data: str | None = Header(default=None),
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    if telegram_id < 1:
+        raise HTTPException(status_code=422, detail="Invalid Telegram ID")
+    async with SessionLocal() as session:
+        user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        subscriptions = (await session.scalars(
+            select(Subscription)
+            .where(Subscription.user_id == user.id)
+            .order_by(Subscription.created_at.desc(), Subscription.id.desc())
+            .limit(50)
+        )).all()
+        payments = (await session.scalars(
+            select(Payment)
+            .where(Payment.user_id == user.id)
+            .order_by(Payment.created_at.desc(), Payment.id.desc())
+            .limit(50)
+        )).all()
+    return {
+        "telegram_id": user.telegram_id,
+        "username": user.username,
+        "created_at": user.created_at.isoformat(),
+        "subscriptions": [{
+            "id": subscription.id,
+            "status": subscription.status,
+            "expires_at": subscription.expires_at.isoformat() if subscription.expires_at else None,
+            "created_at": subscription.created_at.isoformat(),
+        } for subscription in subscriptions],
+        "payments": [{
+            "id": payment.id,
+            "provider": payment.provider,
+            "amount": payment.amount,
+            "currency": payment.currency,
+            "status": payment.status,
+            "created_at": payment.created_at.isoformat(),
+        } for payment in payments],
+    }
