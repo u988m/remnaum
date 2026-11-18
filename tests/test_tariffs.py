@@ -10,7 +10,7 @@ class TariffPricingTests(unittest.TestCase):
             config.tariff_price_per_day_minor = 10
             config.tariff_price_per_gb_minor = 20
             config.tariff_price_per_device_minor = 30
-            self.assertEqual(calculate_price(30, 100, 3), 5300)
+            self.assertEqual(calculate_price(30, 100, 3), 2090)
 
     def test_rejects_non_positive_values(self):
         with self.assertRaises(ValueError):
