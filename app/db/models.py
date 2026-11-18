@@ -40,6 +40,18 @@ class TariffDraft(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class SubscriptionDetails(Base):
+    __tablename__ = "subscription_details"
+    __table_args__ = (UniqueConstraint("subscription_id", name="uq_subscription_details_subscription_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    subscription_id: Mapped[int] = mapped_column(ForeignKey("subscriptions.id"), index=True)
+    subscription_url: Mapped[str | None] = mapped_column(Text)
+    traffic_gb: Mapped[int] = mapped_column(Integer)
+    device_limit: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Payment(Base):
     __tablename__ = "payments"
 
