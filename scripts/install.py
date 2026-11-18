@@ -252,15 +252,21 @@ def config_for_install(existing: dict[str, str], mode: str,
             raise ValueError(f"Docker proxy network not found: {proxy_network}")
         cfg["REMNAUM_PROXY_NETWORK"] = proxy_network
 
+    required = (
+        ("TELEGRAM_BOT_USERNAME", "Telegram bot username (without @)", False),
+        ("TELEGRAM_BOT_TOKEN", "Telegram BotFather token", True),
+        ("ADMIN_IDS", "Numeric Telegram admin IDs (comma-separated)", False),
+        ("REMNAWAVE_BASE_URL", "Remnawave Panel URL (https://...)", False),
+        ("REMNAWAVE_API_TOKEN", "Remnawave API token", True),
+        ("REMNAWAVE_ACTIVE_INTERNAL_SQUADS", "Remnawave internal squad UUIDs", False),
+    )
+    for key, label, hidden in required:
+        if not cfg.get(key):
+            cfg[key] = prompt(label, hidden=hidden)
     if not existing:
-        cfg["TELEGRAM_BOT_USERNAME"] = prompt("Telegram bot username (without @)").lstrip("@")
-        cfg["TELEGRAM_BOT_TOKEN"] = prompt("Telegram BotFather token", hidden=True)
-        cfg["ADMIN_IDS"] = prompt("Numeric Telegram admin IDs (comma-separated)")
-        cfg["REMNAWAVE_BASE_URL"] = prompt("Remnawave Panel URL (https://...)")
-        cfg["REMNAWAVE_API_TOKEN"] = prompt("Remnawave API token", hidden=True)
-        cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"] = prompt("Remnawave internal squad UUIDs")
         cfg["TELEGRAM_TERMS_URL"] = prompt("Public terms URL (optional for initial test)", required=False)
         cfg["SUPPORT_CONTACT"] = prompt("Support contact (optional)", required=False)
+    cfg["TELEGRAM_BOT_USERNAME"] = cfg["TELEGRAM_BOT_USERNAME"].lstrip("@")
     if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", cfg.get("TELEGRAM_BOT_USERNAME", "")):
         raise ValueError("Bot username must use 5-32 ASCII letters, digits or underscores")
     if not re.fullmatch(r"[0-9]+(?:,[0-9]+)*", cfg.get("ADMIN_IDS", "")):
