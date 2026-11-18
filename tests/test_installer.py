@@ -223,6 +223,26 @@ class InstallerTests(unittest.TestCase):
             self.assertFalse(installer.sync_squads_after_update(values))
         save.assert_not_called()
 
+    def test_update_applies_changed_groups_without_restarting_database(self):
+        with patch.object(installer, "docker_ready", return_value=True), \
+             patch.object(installer.shutil, "which", return_value="/usr/bin/git"), \
+             patch.object(installer, "run") as runner, \
+             patch.object(installer, "sync_squads_after_update", return_value=True), \
+             patch.object(installer, "wait_for_app_health", return_value=True), \
+             patch.object(installer, "offer_backup_key"), \
+             patch.object(installer, "scrub_migrated_legacy_payment_keys"), \
+             patch.object(installer, "install_global_command"), \
+             patch.object(installer.backups, "configure_timer", return_value=True), \
+             patch.object(installer, "install_update_timer", return_value=True):
+            result = installer.perform_update({
+                "DEPLOY_MODE": "panel",
+                "COMPOSE_FILE": "compose.yaml:compose.panel.yaml",
+            })
+        self.assertEqual(result, 0)
+        commands = [call.args[0] for call in runner.call_args_list]
+        self.assertIn(["docker", "compose", "up", "-d", "--no-deps", "--force-recreate", "app"], commands)
+        self.assertFalse(any("postgres" in command or "redis" in command for command in commands))
+
     def test_installer_health_retries_then_succeeds(self):
         from subprocess import CompletedProcess
         with patch.object(installer, "run", side_effect=[
