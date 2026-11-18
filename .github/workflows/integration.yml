@@ -18,10 +18,11 @@ jobs:
         run: |
           bash -n install.sh update.sh backup.sh
           docker compose config --quiet
-          docker compose run --rm --no-deps --entrypoint nginx nginx -t
           docker compose run --rm --no-deps --entrypoint caddy caddy validate --config /etc/caddy/Caddyfile
       - name: Start empty database and API
         run: docker compose up -d --build postgres redis app
+      - name: Validate Nginx with running API DNS
+        run: docker compose run --rm --no-deps --entrypoint nginx nginx -t
       - name: Verify health and clean data
         run: |
           for i in $(seq 1 30); do
