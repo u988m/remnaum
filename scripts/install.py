@@ -16,6 +16,11 @@ import sys
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
+from remnawave_setup import (
+    discover_squads, select_squads, validate_uuid_list,
+    local_panel_for_url, panel_webhook_secret, apply_local_panel_webhook,
+    panel_api_url,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV_PATH = ROOT / ".env"
@@ -539,11 +544,29 @@ def config_for_install(existing: dict[str, str], mode: str,
         ("ADMIN_IDS", "Telegram ID администраторов (через запятую)", False),
         ("REMNAWAVE_BASE_URL", "Адрес панели Remnawave (с https://)", False),
         ("REMNAWAVE_API_TOKEN", "API-токен Remnawave", True),
-        ("REMNAWAVE_ACTIVE_INTERNAL_SQUADS", "UUID внутренних групп Remnawave (через запятую)", False),
     )
     for key, label, hidden in required:
         if not cfg.get(key):
             cfg[key] = prompt(label, hidden=hidden)
+    # Never ask for UUIDs when the panel can provide its Internal Squads.
+    if not cfg.get("REMNAWAVE_ACTIVE_INTERNAL_SQUADS"):
+        print("\\n🔎 Получаем внутренние группы Remnawave через API...")
+        try:
+            squads = discover_squads(cfg["REMNAWAVE_BASE_URL"], cfg["REMNAWAVE_API_TOKEN"])
+            cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"] = select_squads(squads, prompt)
+        except (OSError, ValueError) as exc:
+            # Do not print exception details from upstream (they might contain credentials).
+            print("Не удалось получить группы автоматически. Проверьте API-токен и доступность панели.")
+            manual = prompt("UUID внутренней группы (резервный вариант, через запятую)")
+            cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"] = validate_uuid_list(manual)
+    # On a shared host reuse the already configured secret so other Panel
+    # webhook consumers are not disconnected or made incompatible.
+    panel_env = local_panel_for_url(cfg["REMNAWAVE_BASE_URL"]) if mode == "panel" else None
+    if panel_env is not None and not existing.get("REMNAWAVE_WEBHOOK_SECRET"):
+        previous = panel_webhook_secret(panel_env)
+        if previous:
+            cfg["REMNAWAVE_WEBHOOK_SECRET"] = previous
+            print("✅ Секрет вебхука синхронизирован с локальной панелью")
     # Legal terms, support, tariffs and payment providers are configured in the admin DB.
     cfg["TELEGRAM_BOT_USERNAME"] = cfg["TELEGRAM_BOT_USERNAME"].lstrip("@")
     if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", cfg.get("TELEGRAM_BOT_USERNAME", "")):
@@ -551,8 +574,7 @@ def config_for_install(existing: dict[str, str], mode: str,
     if not re.fullmatch(r"[0-9]+(?:,[0-9]+)*", cfg.get("ADMIN_IDS", "")):
         raise ValueError("ADMIN_IDS must be comma-separated Telegram numeric IDs")
     panel_url = urlsplit(cfg.get("REMNAWAVE_BASE_URL", ""))
-    if panel_url.scheme != "https" or not panel_url.hostname:
-        raise ValueError("Panel API URL must use HTTPS")
+    panel_api_url(cfg.get("REMNAWAVE_BASE_URL", ""))
     if any(name == panel_url.hostname for name in (cfg["PUBLIC_DOMAIN"], cfg["WEBAPP_DOMAIN"])):
         raise ValueError("Do not reuse the Panel's domain for the Remnaum bot/Mini App")
     if cfg.get("TELEGRAM_TERMS_URL") and not cfg["TELEGRAM_TERMS_URL"].startswith("https://"):
@@ -657,12 +679,30 @@ def main() -> int:
     if mode == "panel":
         if not offer_panel_caddy_autoconfig(cfg):
             print("Если прокси не настроен автоматически, используйте примеры в generated/.")
+        panel_env = local_panel_for_url(cfg["REMNAWAVE_BASE_URL"])
+        if panel_env is not None:
+            print("\\n🔗 Подключаем исходящие события Remnawave...")
+            try:
+                applied = apply_local_panel_webhook(
+                    panel_env,
+                    "https://" + cfg["PUBLIC_DOMAIN"] + "/webhooks/remnawave",
+                    cfg["REMNAWAVE_WEBHOOK_SECRET"],
+                    prompt,
+                )
+                if not applied:
+                    print("Настройка панели пропущена. Данные для ручного подключения есть в .env.")
+            except (ValueError, OSError, subprocess.CalledProcessError) as exc:
+                print("Не удалось автоматически обновить вебхук панели. Её прежние настройки сохранены.")
+                print("Проверьте настройки и логи панели; вебхук: https://" + cfg["PUBLIC_DOMAIN"] + "/webhooks/remnawave")
+        else:
+            print("Локальная панель не совпадает с адресом API; её настройки не меняем.")
     install_update_timer()
     print("\nRemnaum запущен. Тестовые данные не создавались.")
     print("Telegram webhook: " + cfg["TELEGRAM_WEBHOOK_URL"])
     print("Mini App: " + cfg["WEBAPP_URL"])
     print("Remnawave events: https://" + cfg["PUBLIC_DOMAIN"] + "/webhooks/remnawave")
-    print("Configure the Panel's outgoing webhook separately using REMNAWAVE_WEBHOOK_SECRET from .env.")
+    if mode != "panel" or local_panel_for_url(cfg["REMNAWAVE_BASE_URL"]) is None:
+        print("Для удалённой панели параметры вебхука находятся в .env — настройте исходящие события на сервере панели.")
     print("Check: docker compose ps; docker compose logs --tail=100 app")
     return 0
 
