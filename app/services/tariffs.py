@@ -127,3 +127,33 @@ def calculate_stars_price(duration_days: int, traffic_gb: int, device_limit: int
     if amount < 1:
         raise ValueError("Telegram Stars price must be greater than zero")
     return amount
+
+
+async def ensure_tariff_draft(telegram_id: int) -> TariffQuote:
+    async with SessionLocal() as session:
+        user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+        if user is None:
+            raise ValueError("Telegram user is not registered")
+        draft = await session.scalar(
+            select(TariffDraft).where(TariffDraft.user_id == user.id).with_for_update()
+        )
+        if draft is None:
+            days = settings.tariff_min_days
+            traffic = settings.tariff_min_traffic_gb
+            devices = settings.tariff_min_devices
+            draft = TariffDraft(
+                user_id=user.id,
+                duration_days=days,
+                traffic_gb=traffic,
+                device_limit=devices,
+                amount_minor=calculate_price(days, traffic, devices),
+            )
+            session.add(draft)
+            await session.commit()
+        return TariffQuote(
+            duration_days=draft.duration_days,
+            traffic_gb=draft.traffic_gb,
+            device_limit=draft.device_limit,
+            amount_minor=draft.amount_minor,
+            currency=settings.tariff_currency,
+        )
