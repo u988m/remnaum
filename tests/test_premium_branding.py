@@ -71,6 +71,30 @@ class PremiumMenuTests(unittest.TestCase):
             self.assertEqual(bot_username(), "new_bot")
 
 
+class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_start_sends_owner_photo_above_the_button_menu(self):
+        from app.bot.handlers import start_handler
+        message = SimpleNamespace(
+            from_user=SimpleNamespace(id=12345, username="customer"),
+            text="/start",
+            answer_photo=AsyncMock(),
+            answer=AsyncMock(),
+        )
+        profile = {"name": "Личный VPN", "tagline": "Подключение без сложностей",
+                   "description": "Всё под рукой"}
+        with patch("app.bot.handlers.get_or_create_user", new_callable=AsyncMock) as register, \
+             patch("app.bot.handlers.get_store_profile", new_callable=AsyncMock) as branding, \
+             patch("app.bot.handlers.welcome_image_path", return_value=Path("/tmp/welcome.jpg")):
+            register.return_value = False
+            branding.return_value = profile
+            await start_handler(message)
+        message.answer_photo.assert_awaited_once()
+        message.answer.assert_awaited_once()
+        photo_caption = message.answer_photo.call_args.kwargs["caption"]
+        self.assertIn("Личный VPN", photo_caption)
+        markup = message.answer.call_args.kwargs["reply_markup"]
+        self.assertEqual(len(markup.inline_keyboard[0]), 2)
+
 class WelcomeImageApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_upload_requires_admin_auth_before_saving(self):
         with self.assertRaises(HTTPException) as error:
