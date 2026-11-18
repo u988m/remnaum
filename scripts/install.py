@@ -202,12 +202,12 @@ def choose_mode(existing: dict[str, str], requested: str | None) -> str:
         return requested
     if existing.get("DEPLOY_MODE") in ("panel", "standalone"):
         return existing["DEPLOY_MODE"]
-    print("\nInstallation topology:")
-    print("  1) panel      — alongside Remnawave; never bind public 80/443")
-    print("  2) standalone — separate VPS; Caddy owns 80/443 and automatic HTTPS")
-    selection = prompt("Choose 1 or 2")
+    print("\nВыберите сервер:")
+    print("  1 — На сервере с Remnawave (не занимает порты 80/443)")
+    print("  2 — На отдельном VPS (Caddy + HTTPS на 80/443)")
+    selection = prompt("Введите 1 или 2")
     if selection not in ("1", "2"):
-        raise ValueError("Choose installation mode 1 or 2")
+        raise ValueError("Выберите 1 или 2")
     return "panel" if selection == "1" else "standalone"
 
 
@@ -273,8 +273,8 @@ def config_for_install(existing: dict[str, str], mode: str,
         cfg["DATABASE_URL"] = (f"postgresql+asyncpg://remnaum:{cfg['POSTGRES_PASSWORD']}"
                                "@postgres:5432/remnaum")
 
-    for key, label in (("PUBLIC_DOMAIN", "Telegram/Remnawave webhook domain (no https://)"),
-                       ("WEBAPP_DOMAIN", "Mini App/admin domain (no https://)")):
+    for key, label in (("PUBLIC_DOMAIN", "Домен вебхуков Telegram/Remnawave (без https://)"),
+                       ("WEBAPP_DOMAIN", "Домен Mini App и админки (без https://)")):
         if not valid_domain(cfg.get(key, "")) or key not in existing:
             cfg[key] = prompt(label)
         if not valid_domain(cfg[key]):
@@ -282,7 +282,7 @@ def config_for_install(existing: dict[str, str], mode: str,
 
     if mode == "standalone":
         if not cfg.get("ACME_EMAIL") or cfg["ACME_EMAIL"].endswith("@example.com"):
-            cfg["ACME_EMAIL"] = prompt("Email for Caddy ACME certificates")
+            cfg["ACME_EMAIL"] = prompt("Email для SSL-сертификата Caddy")
         if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", cfg["ACME_EMAIL"]):
             raise ValueError("Invalid certificate email")
     else:
@@ -300,19 +300,19 @@ def config_for_install(existing: dict[str, str], mode: str,
         cfg["REMNAUM_PROXY_NETWORK"] = proxy_network
 
     required = (
-        ("TELEGRAM_BOT_USERNAME", "Telegram bot username (without @)", False),
-        ("TELEGRAM_BOT_TOKEN", "Telegram BotFather token", True),
-        ("ADMIN_IDS", "Numeric Telegram admin IDs (comma-separated)", False),
-        ("REMNAWAVE_BASE_URL", "Remnawave Panel URL (https://...)", False),
-        ("REMNAWAVE_API_TOKEN", "Remnawave API token", True),
-        ("REMNAWAVE_ACTIVE_INTERNAL_SQUADS", "Remnawave internal squad UUIDs", False),
+        ("TELEGRAM_BOT_USERNAME", "Имя бота из BotFather (без @)", False),
+        ("TELEGRAM_BOT_TOKEN", "Токен Telegram-бота", True),
+        ("ADMIN_IDS", "Telegram ID администраторов (через запятую)", False),
+        ("REMNAWAVE_BASE_URL", "Адрес панели Remnawave (с https://)", False),
+        ("REMNAWAVE_API_TOKEN", "API-токен Remnawave", True),
+        ("REMNAWAVE_ACTIVE_INTERNAL_SQUADS", "UUID внутренних групп Remnawave (через запятую)", False),
     )
     for key, label, hidden in required:
         if not cfg.get(key):
             cfg[key] = prompt(label, hidden=hidden)
     if not existing:
-        cfg["TELEGRAM_TERMS_URL"] = prompt("Public terms URL (optional for initial test)", required=False)
-        cfg["SUPPORT_CONTACT"] = prompt("Support contact (optional)", required=False)
+        cfg["TELEGRAM_TERMS_URL"] = prompt("Ссылка на условия продажи (необязательно для теста)", required=False)
+        cfg["SUPPORT_CONTACT"] = prompt("Контакт поддержки (необязательно)", required=False)
     cfg["TELEGRAM_BOT_USERNAME"] = cfg["TELEGRAM_BOT_USERNAME"].lstrip("@")
     if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", cfg.get("TELEGRAM_BOT_USERNAME", "")):
         raise ValueError("Bot username must use 5-32 ASCII letters, digits or underscores")
