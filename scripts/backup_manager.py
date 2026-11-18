@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import getpass
 import fcntl
 import hashlib
 import hmac
@@ -96,6 +97,8 @@ def key_bytes(*, supplied: str | None = None, create: bool = False) -> bytes:
         return value
     if not create:
         raise ValueError("Нет ключа: введите секрет восстановления от прежнего сервера")
+    if not sys.stdout.isatty():
+        raise RuntimeError("Перед автоматическими копиями установите ключ восстановления через sudo remnaum")
     value = secrets.token_urlsafe(48).encode()
     _secure_write(KEY, value + b"\n")
     print("\nКЛЮЧ ВОССТАНОВЛЕНИЯ (сохраните отдельно от сервера):")
@@ -266,7 +269,6 @@ def send_to_telegram(archive: Path, chat_id: str) -> None:
         raise ValueError("Некорректный chat ID")
     token = _bot_token()
     boundary = secrets.token_hex(18)
-    filename = archive.name.encode("ascii")
     prefix = (
         f"--{boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{chat_id}\r\n"
         f"--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"{archive.name}\"\r\n"
@@ -347,9 +349,6 @@ def restore_backup(archive: Path, *, supplied_key: str | None = None) -> None:
             if not (install_dir / ".env").is_file() or not (install_dir / "compose.yaml").exists():
                 raise ValueError("В архиве нет .env или Docker Compose")
             print("Восстанавливаем данные и настройки в", ROOT)
-            # On an active installation create an additional recovery point first.
-            if (ROOT / ".env").exists():
-                create_backup_before_restore = False  # Caller confirms before invoking.
             subprocess.run(["docker", "compose", "stop", "app"], cwd=ROOT,
                            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             for entry in sorted(install_dir.iterdir()):
@@ -437,10 +436,8 @@ def main() -> int:
     create.add_argument("--scheduled", action="store_true")
     restore = sub.add_parser("restore")
     restore.add_argument("archive", type=Path)
-    restore.add_argument("--key", default=None)
     inspect = sub.add_parser("inspect")
     inspect.add_argument("archive", type=Path)
-    inspect.add_argument("--key", default=None)
     sub.add_parser("timer")
     args = parser.parse_args()
     if os.geteuid() != 0:
@@ -448,9 +445,9 @@ def main() -> int:
     if args.action == "create":
         create_backup(scheduled=args.scheduled)
     elif args.action == "restore":
-        restore_backup(args.archive.expanduser().resolve(), supplied_key=args.key)
+        restore_backup(args.archive.expanduser().resolve(), supplied_key=(None if KEY.exists() else getpass.getpass("Ключ восстановления: ")))
     elif args.action == "inspect":
-        print(json.dumps(inspect_backup(args.archive.expanduser().resolve(), supplied_key=args.key),
+        print(json.dumps(inspect_backup(args.archive.expanduser().resolve(), supplied_key=(None if KEY.exists() else getpass.getpass("Ключ восстановления: "))),
                          ensure_ascii=False, indent=2))
     else:
         configure_timer()
