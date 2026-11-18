@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from app.config import settings
 from app.services.tariffs import TariffQuote, format_price, get_tariff_draft, update_tariff_draft
+from app.services.payment_service import create_payment_for_user
 from app.services.users import get_or_create_user
 
 router = Router(name="user")
@@ -55,7 +56,7 @@ def tariff_text(quote: TariffQuote) -> str:
         f"Устройства: <b>{quote.device_limit}</b>\n\n"
         f"Итоговая стоимость: <b>{escape(format_price(quote.amount_minor, quote.currency))}</b>\n\n"
         "Настройте параметры кнопками ниже. Значения ограничены доступным диапазоном. "
-        "Оплата и активация будут доступны после подключения платёжного провайдера."
+        "После выбора тарифа можно перейти к оплате."
     )
 
 
@@ -114,6 +115,50 @@ async def tariff_update_handler(callback: CallbackQuery) -> None:
         return
     await callback.answer("Параметр обновлён")
     await show_tariff(callback, quote)
+
+
+@router.callback_query(F.data == "payment:choose")
+async def payment_choose_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="ЮKassa", callback_data="payment:create:yookassa")],
+        [InlineKeyboardButton(text="ЮMoney", callback_data="payment:create:yoomoney")],
+        [InlineKeyboardButton(text="Crypto Pay", callback_data="payment:create:cryptopay")],
+        [InlineKeyboardButton(text="⬅️ Назад к тарифу", callback_data="menu:plans")],
+    ])
+    if callback.message:
+        quote = await get_tariff_draft(callback.from_user.id)
+        await callback.message.edit_text(
+            f"💳 <b>Выберите способ оплаты</b>\\n\\n"
+            f"К оплате: <b>{escape(format_price(quote.amount_minor, quote.currency))}</b>",
+            reply_markup=keyboard,
+        )
+
+
+@router.callback_query(F.data.startswith("payment:create:"))
+async def payment_create_handler(callback: CallbackQuery) -> None:
+    provider_name = callback.data.rsplit(":", 1)[-1]
+    await callback.answer("Создаю счёт…")
+    try:
+        _, link = await create_payment_for_user(callback.from_user.id, provider_name)
+    except (ValueError, RuntimeError) as exc:
+        if callback.message:
+            await callback.message.answer(f"Не удалось создать счёт: {escape(str(exc))}")
+        return
+    except Exception:
+        if callback.message:
+            await callback.message.answer("Платёжный сервис временно недоступен. Попробуйте позже.")
+        return
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Перейти к оплате", url=link.url)],
+        [InlineKeyboardButton(text="⬅️ К способам оплаты", callback_data="payment:choose")],
+    ])
+    if callback.message:
+        await callback.message.answer(
+            f"Счёт создан. После оплаты дождитесь подтверждения платёжной системы.",
+            reply_markup=keyboard,
+        )
 
 
 @router.callback_query(F.data == "menu:profile")
