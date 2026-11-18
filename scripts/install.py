@@ -463,7 +463,7 @@ def show_backup_menu(existing: dict[str, str]) -> int:
             backups.ROOT = target
             backups.DATA = target / "data"
             backups.SETTINGS = target / "data" / "backup-settings.json"
-            backups.KEY = target / "data" / "backup.key"
+            backups.KEY = target / "backups" / ".recovery-key"
             backups.BACKUPS = target / "backups"
         if secret and not backups.KEY.exists():
             backups._secure_write(backups.KEY, secret.encode() + b"\n")
