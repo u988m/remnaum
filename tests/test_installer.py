@@ -107,6 +107,11 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(cfg["APP_SECRET_KEY"], "keep-this-key")
         self.assertEqual(cfg["POSTGRES_PASSWORD"], "keep-this-db-password")
 
+    def test_existing_mode_is_preserved_when_reconfiguring(self):
+        self.assertEqual(
+            installer.choose_mode({"DEPLOY_MODE": "panel"}, None), "panel"
+        )
+
     def test_action_menu_install_and_update(self):
         with patch.object(installer, "prompt", return_value="1"):
             self.assertEqual(installer.choose_action({}, None), "install")
