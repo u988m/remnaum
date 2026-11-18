@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     cryptopay_api_token: str = ""
     cryptopay_api_base_url: str = "https://pay.crypt.bot/api"
     cryptopay_accepted_assets: str = "USDT,TON,BTC,ETH,TRX,USDC"
+    telegram_terms_url: str = ""
+    telegram_terms_version: str = "1"
+    tariff_stars_price_per_day: int = Field(default=1, ge=0)
+    tariff_stars_price_per_gb: int = Field(default=1, ge=0)
+    tariff_stars_price_per_device: int = Field(default=10, ge=0)
     public_base_url: str = "http://localhost:8080"
     webapp_url: str = ""
     support_contact: str = ""
