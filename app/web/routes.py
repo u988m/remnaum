@@ -329,6 +329,35 @@ function limits(){return {days:+$("days").value,traffic:+$("traffic").value,devi
 function recalc(){if(!data)return;const v=limits(),p=data.pricing;const stars=v.days*p.stars_per_day+v.traffic*p.stars_per_gb+v.devices*p.stars_per_device;$("stars-price").textContent=stars+" ⭐";$("buy").textContent="Оплатить "+stars+" Stars";$("buy").disabled=!$("terms").checked||!data.stars_enabled||!data.terms_url||stars<1}
 ["days","traffic","devices"].forEach(k=>$(k).addEventListener("change",recalc));$("terms").addEventListener("change",recalc);
 $("buy").onclick=async()=>{try{$("buy").disabled=true;$("status").textContent="Создаём счёт…";await api("/api/v1/webapp/terms/accept",{accepted:true});const result=await api("/api/v1/webapp/checkout",limits());if(!tg?.openInvoice)throw Error("Откройте магазин из Telegram, чтобы оплатить счёт");tg.openInvoice(result.invoice_url,(status)=>{$("status").textContent=status==="paid"?"Оплата подтверждена. Обновляем подписку…":status==="cancelled"?"Оплата отменена":"Статус оплаты: "+status;if(status==="paid")setTimeout(()=>location.reload(),1800);else recalc()})}catch(e){$("status").textContent=e.message;recalc()}};
+async function adminApi(method,path,body){const r=await fetch(path,{method,headers:{"X-Telegram-Init-Data":tg?.initData||"","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(typeof d.detail==="string"?d.detail:"Ошибка запроса");return d}
+let cachedPlans=[];
+async function loadPlans(){
+  const d=await adminApi("GET","/admin/api/plans");cachedPlans=d.items;$("plans-table").replaceChildren();
+  d.items.forEach(p=>{
+    row("plans-table",[p.title,p.duration_days+" д / "+p.traffic_gb+" ГБ / "+p.device_limit+" уст.",(p.price_rub_minor/100).toFixed(2),p.price_stars,p.is_active?"Активен":"Скрыт"]);
+    const td=cell("");const button=document.createElement("button");button.className="action";button.textContent="Изменить";
+    button.onclick=()=>fillPlan(p);td.appendChild(button);$("plans-table").lastElementChild.appendChild(td);
+  });
+}
+function fillPlan(p){
+  $("plan-id").value=p.id;$("plan-title").value=p.title;$("plan-description").value=p.description||"";
+  $("plan-days").value=p.duration_days;$("plan-traffic").value=p.traffic_gb;$("plan-devices").value=p.device_limit;
+  $("plan-rub").value=p.price_rub_minor;$("plan-stars").value=p.price_stars;
+  $("plan-order").value=p.sort_order;$("plan-active").checked=p.is_active;
+}
+$("plan-new").onclick=()=>{$("plan-form").reset();$("plan-id").value="";};
+$("plans-refresh").onclick=()=>loadPlans().catch(e=>$("status").textContent=e.message);
+$("plan-form").onsubmit=async e=>{
+  e.preventDefault();try{
+    const payload={title:$("plan-title").value,description:$("plan-description").value,
+      duration_days:+$("plan-days").value,traffic_gb:+$("plan-traffic").value,device_limit:+$("plan-devices").value,
+      price_rub_minor:+$("plan-rub").value,price_stars:+$("plan-stars").value,
+      sort_order:+$("plan-order").value,is_active:$("plan-active").checked};
+    const id=$("plan-id").value;
+    await adminApi(id?"PUT":"POST",id?"/admin/api/plans/"+id:"/admin/api/plans",payload);
+    $("status").textContent="Тариф сохранён";await loadPlans();
+  }catch(e){$("status").textContent=e.message}
+};
 async function start(){try{if(!tg?.initData)throw Error("Откройте Mini App через кнопку в Telegram");data=await api("/api/v1/webapp/bootstrap");$("loading").style.display="none";$("app").style.display="block";$("welcome").textContent=data.user.first_name?"Здравствуйте, "+data.user.first_name+"! Настройте подписку под себя.":"Выберите параметры подписки.";if(data.terms_url){$("terms-link").href=data.terms_url}else{$("terms-link").textContent="условия не настроены";$("terms-link").removeAttribute("href");$("buy").disabled=true}
 fillOptions("days",data.limits.days_min,data.limits.days_max,1,data.limits.days_default,"дней");fillOptions("traffic",data.limits.traffic_min,data.limits.traffic_max,1,data.limits.traffic_default,"ГБ");fillOptions("devices",data.limits.devices_min,data.limits.devices_max,1,data.limits.devices_default,"устройств");if(data.subscription){const s=data.subscription;$("subscription").style.display="block";$("sub-status").textContent=s.status;$("sub-expiry").textContent=s.expires_at?new Date(s.expires_at).toLocaleString():"—";$("sub-traffic").textContent=s.traffic_gb??"—";$("sub-devices").textContent=s.device_limit??"—";$("sub-days").textContent=s.days_left??"—";if(s.subscription_url){$("sub-link").href=s.subscription_url;$("sub-link").style.display="inline-block"}}
 $("buy").disabled=!data.stars_enabled;recalc();await loadReadyPlans()}catch(e){$("loading").textContent=e.message}}
@@ -471,6 +500,7 @@ th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflo
 .table-wrap{overflow-x:auto}.status{font-size:13px;min-height:22px;margin-top:12px;color:#9eacc0}
 .pill{display:inline-block;padding:4px 8px;border-radius:20px;background:#24354a;color:#d7e6fb;font-size:11px}
 .empty{padding:25px;text-align:center;color:#9eacc0}
+#plan-form input:not([type=checkbox]){width:100%;border:1px solid #34445c;border-radius:9px;background:#0b1018;color:#f4f7fc;padding:11px;margin-top:5px}#plan-form label{font-size:12px;color:#9eacc0}#plan-form{margin-bottom:16px}
 @media(max-width:700px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.card b{font-size:22px}main{padding:18px 12px 36px}header{margin-bottom:20px}h1{font-size:23px}th,td{padding:10px 7px}}
 </style></head><body><main>
 <header><div class="brand">Remnaum<span style="color:#5b9cff">.</span></div><div class="tag">ADMIN PANEL</div></header>
@@ -483,9 +513,29 @@ th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflo
 <div class="card"><span>Успешные платежи</span><b id="paid-count">—</b></div>
 <div class="card"><span>Ожидают оплаты</span><b id="pending-count">—</b></div>
 </div>
-<nav><button class="active" data-tab="users">Клиенты</button><button data-tab="payments">Платежи</button><button data-tab="settings" onclick="location.href='/admin/payments'">Оплата</button><button data-tab="tariffs" onclick="location.href='/admin/tariffs'">Тарифы</button></nav>
+<nav><button class="active" data-tab="users">Клиенты</button><button data-tab="payments">Платежи</button><button data-tab="plans">Готовые тарифы</button><button data-tab="settings" onclick="location.href='/admin/payments'">Оплата</button><button data-tab="tariffs" onclick="location.href='/admin/tariffs'">Тарифы</button></nav>
 <section class="section" id="users-view"><div class="toolbar"><h2>Клиенты и подписки</h2><button class="action" id="users-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>Telegram ID</th><th>Username</th><th>Подписка</th><th>До</th><th>Регистрация</th><th>Действие</th></tr></thead><tbody id="users-table"></tbody></table></div><div id="customer-detail" class="section" hidden aria-live="polite"><div class="toolbar"><h2 id="customer-title">Карточка клиента</h2><button class="action" id="customer-close">Закрыть</button></div><p class="muted" id="customer-summary"></p><h3>Подписки</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Статус</th><th>Действует до</th><th>Создана</th></tr></thead><tbody id="customer-subscriptions"></tbody></table></div><h3>Платежи</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="customer-payments"></tbody></table></div></div><div class="toolbar" style="margin-top:12px"><button class="action" id="users-prev">Назад</button><span id="users-page" class="muted">Страница 1</span><button class="action" id="users-next">Далее</button></div></section>
 <section class="section" id="payments-view" hidden><div class="toolbar"><h2>История платежей</h2><button class="action" id="payments-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Клиент</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="payments-table"></tbody></table></div><div class="toolbar" style="margin-top:12px"><button class="action" id="payments-prev">Назад</button><span id="payments-page" class="muted">Страница 1</span><button class="action" id="payments-next">Далее</button></div></section>
+<section class="section" id="plans-view" hidden>
+<div class="toolbar"><h2>Готовые тарифы</h2><button class="action" id="plans-refresh">Обновить</button></div>
+<p class="muted">Создайте тарифы с отдельными ценами в рублях и Telegram Stars. Неактивные планы скрываются от покупателей.</p>
+<form id="plan-form">
+<input type="hidden" id="plan-id">
+<div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px">
+<label>Название<input id="plan-title" required maxlength="80" placeholder="Стандарт"></label>
+<label>Сортировка<input id="plan-order" type="number" value="0" min="0" max="10000"></label>
+<label>Срок (дней)<input id="plan-days" type="number" value="30" min="1" required></label>
+<label>Трафик (ГБ)<input id="plan-traffic" type="number" value="100" min="1" required></label>
+<label>Устройств<input id="plan-devices" type="number" value="1" min="1" required></label>
+<label>Цена (копейки RUB)<input id="plan-rub" type="number" value="9900" min="0" required></label>
+<label>Цена (Stars)<input id="plan-stars" type="number" value="100" min="1" required></label>
+<label>Активен<input id="plan-active" type="checkbox" checked></label>
+</div>
+<label>Описание<input id="plan-description" maxlength="2000" placeholder="Описание тарифа" style="width:100%"></label>
+<div class="toolbar"><button class="action primary" type="submit">Сохранить тариф</button><button class="action" type="button" id="plan-new">Новый тариф</button></div>
+</form>
+<div class="table-wrap"><table><thead><tr><th>Тариф</th><th>Параметры</th><th>Рубли</th><th>Stars</th><th>Статус</th><th>Действие</th></tr></thead><tbody id="plans-table"></tbody></table></div>
+</section>
 <div id="status" class="status"></div>
 </div></main>
 <script>
@@ -499,7 +549,7 @@ async function showCustomer(id){$("status").textContent="";try{const d=await api
 $("customer-close").onclick=()=>{$("customer-detail").hidden=true};
 async function loadPayments(){const d=await api("/admin/api/payments?limit="+pageSize+"&offset="+paymentOffset);$("payments-table").replaceChildren();d.items.forEach(p=>row("payments-table",[p.id,p.telegram_id,p.provider,p.amount+" "+p.currency,p.status,new Date(p.created_at).toLocaleString()]));$("payments-page").textContent="Показано "+(d.total?paymentOffset+1:0)+"–"+Math.min(paymentOffset+d.items.length,d.total)+" из "+d.total;$("payments-prev").disabled=paymentOffset===0;$("payments-next").disabled=paymentOffset+pageSize>=d.total}
 async function start(){try{if(!tg?.initData)throw Error("Откройте панель через Telegram Mini App");const d=await api("/admin/api/overview");$("loading").hidden=true;$("dashboard").hidden=false;$("welcome").textContent="Здравствуйте, "+(d.admin_name||"администратор");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments;await loadUsers()}catch(e){$("loading").textContent=e.message}}
-document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const users=b.dataset.tab==="users";$("users-view").hidden=!users;$("payments-view").hidden=users;if(!users&&b.dataset.tab==="payments")try{await loadPayments()}catch(e){$("status").textContent=e.message}}));
+document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const tab=b.dataset.tab;$("users-view").hidden=tab!=="users";$("payments-view").hidden=tab!=="payments";$("plans-view").hidden=tab!=="plans";try{if(tab==="payments")await loadPayments();if(tab==="plans")await loadPlans()}catch(e){$("status").textContent=e.message}}));
 $("users-refresh").onclick=()=>loadUsers().catch(e=>$("status").textContent=e.message);$("payments-refresh").onclick=()=>loadPayments().catch(e=>$("status").textContent=e.message);
 $("users-prev").onclick=()=>{userOffset=Math.max(0,userOffset-pageSize);loadUsers()};$("users-next").onclick=()=>{userOffset+=pageSize;loadUsers()};
 $("payments-prev").onclick=()=>{paymentOffset=Math.max(0,paymentOffset-pageSize);loadPayments()};$("payments-next").onclick=()=>{paymentOffset+=pageSize;loadPayments()};
