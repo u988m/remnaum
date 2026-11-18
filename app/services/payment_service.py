@@ -21,6 +21,8 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
         if draft.amount_minor <= 0:
             raise ValueError("Tariff amount must be greater than zero")
 
+        if provider_name == "yoomoney" and _tariff_currency().upper() != "RUB":
+            raise ValueError("Set TARIFF_CURRENCY=RUB to enable YooMoney wallet payments")
         payment = Payment(
             user_id=user.id,
             provider=provider_name,
@@ -85,7 +87,11 @@ async def settle_payment(verified: VerifiedPayment, provider_name: str) -> bool:
             raise ValueError("Payment provider mismatch")
         if payment.amount != verified.amount_minor or payment.currency.upper() != verified.currency.upper():
             raise ValueError("Payment amount or currency mismatch")
-        if payment.provider_payment_id and payment.provider_payment_id != verified.provider_payment_id:
+        if (
+            payment.provider_payment_id
+            and not payment.provider_payment_id.startswith("ym-")
+            and payment.provider_payment_id != verified.provider_payment_id
+        ):
             raise ValueError("Provider payment ID mismatch")
         if payment.status == "succeeded":
             return False
