@@ -316,7 +316,9 @@ def main() -> int:
 
     if not docker_ready():
         if mode == "panel":
-            raise RuntimeError("Docker Compose not found; do not modify your existing Remnawave host. Install Docker/Compose safely first.")
+            raise RuntimeError("Docker Compose is missing. On a Panel host, install it manually without replacing existing Docker.")
+        if shutil.which("docker"):
+            raise RuntimeError("Docker exists but Compose v2 is missing. Install the Compose plugin without replacing your Docker Engine.")
         install_docker()
     port = args.local_port or int(existing.get("REMNAUM_LOCAL_PORT") or "18080")
     if not 1024 <= port <= 65535:
