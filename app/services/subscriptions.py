@@ -20,6 +20,13 @@ def _unwrap(data: Any) -> dict[str, Any]:
     return {}
 
 
+def _panel_identity(user: dict[str, Any]) -> int | str:
+    value = user.get("id") if user.get("id") is not None else user.get("uuid")
+    if value is None or value == "":
+        raise RuntimeError("Remnawave user has no id/uuid")
+    return int(value) if str(value).isdigit() else str(value)
+
+
 async def provision_paid_payment(payment_id: int) -> bool:
     async with SessionLocal() as session:
         payment = await session.scalar(
@@ -66,7 +73,7 @@ async def provision_paid_payment(payment_id: int) -> bool:
 
         marker = f"remnaum-payment:{payment_id}"
         if panel_user:
-            panel_user_id = int(panel_user["id"])
+            panel_user_id = _panel_identity(panel_user)
             description = str(panel_user.get("description") or "")
             if marker not in description:
                 expire_value = panel_user.get("expireAt")
