@@ -378,7 +378,7 @@ async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=Non
         "profile": await get_store_profile(),
         "pricing": {key: value for key, value in pricing.items() if key.startswith("stars_")},
         "stars_enabled": await is_payment_method_enabled("telegram_stars"),
-        "terms_url": settings.telegram_terms_url,
+        "terms_url": await get_terms_url(),
         "limits": {
             "days_min": settings.tariff_min_days, "days_max": settings.tariff_max_days,
             "traffic_min": settings.tariff_min_traffic_gb, "traffic_max": settings.tariff_max_traffic_gb,
@@ -541,6 +541,7 @@ th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflo
 <label>Заголовок<input id="brand-tagline" maxlength="300"></label>
 <label>Описание<input id="brand-description" maxlength="300"></label>
 <label>Контакт поддержки<input id="brand-support" maxlength="300"></label>
+<label>Ссылка на условия продажи (HTTPS)<input id="brand-terms" maxlength="300" placeholder="https://..."></label>
 <label>Основной цвет<input id="brand-color" type="color" value="#4b8bea"></label>
 <button type="submit" class="action primary">Сохранить оформление</button>
 </form>
@@ -610,13 +611,13 @@ $("plan-form").onsubmit=async e=>{
 async function loadBrand(){
   const d=await adminApi("GET","/admin/api/store-profile");
   $("brand-name").value=d.name;$("brand-tagline").value=d.tagline;$("brand-description").value=d.description;
-  $("brand-support").value=d.support_contact;$("brand-color").value=d.accent_color;
+  $("brand-support").value=d.support_contact;$("brand-terms").value=d.terms_url||"";$("brand-color").value=d.accent_color;
 }
 $("brand-form").onsubmit=async e=>{
   e.preventDefault();try{
     await adminApi("PUT","/admin/api/store-profile",{
       name:$("brand-name").value,tagline:$("brand-tagline").value,
-      description:$("brand-description").value,support_contact:$("brand-support").value,
+      description:$("brand-description").value,support_contact:$("brand-support").value,terms_url:$("brand-terms").value,
       accent_color:$("brand-color").value
     });$("status").textContent="Оформление сохранено";
   }catch(e){$("status").textContent=e.message}
@@ -902,7 +903,7 @@ async def webapp_checkout_ready_plan(data: WebAppFixedPlanCheckout, x_telegram_i
     return {"payment_id": payment.id, "stars": stars, "invoice_url": url}
 
 
-from app.services.store_profile import get_store_profile, update_store_profile
+from app.services.store_profile import get_store_profile, update_store_profile, get_terms_url
 
 
 class StoreProfilePayload(BaseModel):
@@ -911,6 +912,7 @@ class StoreProfilePayload(BaseModel):
     description: str = Field(default="", max_length=300)
     accent_color: str = Field(default="#4b8bea", pattern=r"^#[a-fA-F0-9]{6}$")
     support_contact: str = Field(default="", max_length=300)
+    terms_url: str = Field(default="", max_length=300)
 
 
 @router.get("/api/v1/store-profile")
