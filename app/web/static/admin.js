@@ -64,6 +64,17 @@ async function loadBrand(){
   $("welcome-photo-status").textContent=d.welcome_photo_file_id?"Фото приветствия установлено":"Фото не установлено";
   $("welcome-photo-remove").disabled=!d.welcome_photo_file_id;
   if(d.welcome_photo_file_id)await loadPhotoPreview();
+  try{
+    const botInfo=await adminApi("GET","/admin/api/bot-info");
+    $("bot-display-name").textContent=botInfo.name||"Без названия";
+    $("bot-display-username").textContent=botInfo.username?"@"+botInfo.username:"";
+    $("brand-use-bot-name").disabled=!botInfo.name;
+    $("brand-use-bot-name").onclick=()=>{
+      $("brand-name").value=botInfo.name.slice(0,80);
+      $("status").textContent="Название Telegram-бота подставлено. Нажмите «Сохранить оформление».";
+    };
+  }catch(error){$("bot-display-name").textContent="Не удалось определить название"}
+
   $("brand-support").value=d.support_contact;$("brand-terms").value=d.terms_url||"";$("brand-color").value=d.accent_color;
 }
 $("brand-form").onsubmit=async e=>{
