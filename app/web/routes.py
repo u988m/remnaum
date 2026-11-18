@@ -364,6 +364,42 @@ $("brand-form").onsubmit=async e=>{
     });$("status").textContent="Оформление сохранено";
   }catch(e){$("status").textContent=e.message}
 };
+const paymentNames=["telegram_stars","yookassa","yoomoney","cryptopay"];
+async function loadPaymentSettings(){
+  const d=await adminApi("GET","/admin/api/payment-settings");
+  $("method-list").replaceChildren();
+  paymentNames.forEach(name=>{
+    const label=document.createElement("label");label.style.display="block";label.style.margin="10px";
+    const check=document.createElement("input");check.type="checkbox";check.id="method-"+name;check.checked=!!d.methods[name];
+    label.append(check,document.createTextNode(" "+name));$("method-list").appendChild(label);
+  });
+  $("provider-status").textContent=Object.keys(d.configured).map(k=>k+": "+(d.configured[k]?"настроен":"не настроен")).join(" · ");
+}
+$("payment-settings-save").onclick=async()=>{
+  try{const methods={};paymentNames.forEach(n=>methods[n]=$("method-"+n).checked);
+    const credentials={yookassa:{shop_id:$("pay-yookassa-id").value,secret_key:$("pay-yookassa-secret").value},
+    yoomoney:{receiver:$("pay-yoomoney-receiver").value,notification_secret:$("pay-yoomoney-secret").value},
+    cryptopay:{api_token:$("pay-crypto-token").value}};
+    await adminApi("PUT","/admin/api/payment-settings",{methods,credentials});
+    ["pay-yookassa-secret","pay-yoomoney-secret","pay-crypto-token"].forEach(k=>$(k).value="");
+    $("status").textContent="Платёжные настройки сохранены";await loadPaymentSettings();
+  }catch(e){$("status").textContent=e.message}
+};
+const pricingKeys=["rub_per_day_minor","rub_per_gb_minor","rub_per_device_minor","stars_per_day","stars_per_gb","stars_per_device","currency"];
+async function loadPricing(){
+  const data=await adminApi("GET","/admin/api/tariff-pricing");
+  $("pricing-fields").replaceChildren();
+  pricingKeys.forEach(k=>{
+    const label=document.createElement("label");label.textContent=k;
+    const input=document.createElement("input");input.id="pricing-"+k;input.type=k==="currency"?"text":"number";
+    input.value=data[k];if(k!=="currency")input.min="0";
+    label.appendChild(input);$("pricing-fields").appendChild(label);
+  });
+}
+$("pricing-save").onclick=async()=>{try{
+  const pricing={};pricingKeys.forEach(k=>pricing[k]=k==="currency"?$("pricing-"+k).value:+$("pricing-"+k).value);
+  await adminApi("PUT","/admin/api/tariff-pricing",{pricing});$("status").textContent="Формула цен сохранена";
+}catch(e){$("status").textContent=e.message}};
 async function start(){try{if(!tg?.initData)throw Error("Откройте Mini App через кнопку в Telegram");data=await api("/api/v1/webapp/bootstrap");if(data.profile){$("store-name").textContent=data.profile.name;$("store-tagline").textContent=data.profile.tagline||"Ваш VPN";document.documentElement.style.setProperty("--tg-theme-button-color",data.profile.accent_color)}$("loading").style.display="none";$("app").style.display="block";$("welcome").textContent=data.user.first_name?"Здравствуйте, "+data.user.first_name+"! Настройте подписку под себя.":"Выберите параметры подписки.";if(data.terms_url){$("terms-link").href=data.terms_url}else{$("terms-link").textContent="условия не настроены";$("terms-link").removeAttribute("href");$("buy").disabled=true}
 fillOptions("days",data.limits.days_min,data.limits.days_max,1,data.limits.days_default,"дней");fillOptions("traffic",data.limits.traffic_min,data.limits.traffic_max,1,data.limits.traffic_default,"ГБ");fillOptions("devices",data.limits.devices_min,data.limits.devices_max,1,data.limits.devices_default,"устройств");if(data.subscription){const s=data.subscription;$("subscription").style.display="block";$("sub-status").textContent=s.status;$("sub-expiry").textContent=s.expires_at?new Date(s.expires_at).toLocaleString():"—";$("sub-traffic").textContent=s.traffic_gb??"—";$("sub-devices").textContent=s.device_limit??"—";$("sub-days").textContent=s.days_left??"—";if(s.subscription_url){$("sub-link").href=s.subscription_url;$("sub-link").style.display="inline-block"}}
 $("buy").disabled=!data.stars_enabled;recalc();await loadReadyPlans()}catch(e){$("loading").textContent=e.message}}
@@ -507,7 +543,7 @@ th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflo
 .table-wrap{overflow-x:auto}.status{font-size:13px;min-height:22px;margin-top:12px;color:#9eacc0}
 .pill{display:inline-block;padding:4px 8px;border-radius:20px;background:#24354a;color:#d7e6fb;font-size:11px}
 .empty{padding:25px;text-align:center;color:#9eacc0}
-#plan-form input:not([type=checkbox]),#brand-form input:not([type=color]){width:100%;border:1px solid #34445c;border-radius:9px;background:#0b1018;color:#f4f7fc;padding:11px;margin-top:5px}#plan-form label,#brand-form label{display:block;margin:12px 0;font-size:12px;color:#9eacc0}#plan-form{margin-bottom:16px}
+#plan-form input:not([type=checkbox]),#brand-form input:not([type=color]),#payment-settings-view input:not([type=checkbox]),#pricing-view input{width:100%;border:1px solid #34445c;border-radius:9px;background:#0b1018;color:#f4f7fc;padding:11px;margin-top:5px}#plan-form label,#brand-form label{display:block;margin:12px 0;font-size:12px;color:#9eacc0}#plan-form{margin-bottom:16px}
 @media(max-width:700px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.card b{font-size:22px}main{padding:18px 12px 36px}header{margin-bottom:20px}h1{font-size:23px}th,td{padding:10px 7px}}
 </style></head><body><main>
 <header><div class="brand">Remnaum<span style="color:#5b9cff">.</span></div><div class="tag">ADMIN PANEL</div></header>
@@ -520,7 +556,7 @@ th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflo
 <div class="card"><span>Успешные платежи</span><b id="paid-count">—</b></div>
 <div class="card"><span>Ожидают оплаты</span><b id="pending-count">—</b></div>
 </div>
-<nav><button class="active" data-tab="users">Клиенты</button><button data-tab="payments">Платежи</button><button data-tab="plans">Готовые тарифы</button><button data-tab="brand">Оформление</button><button data-tab="settings" onclick="location.href='/admin/payments'">Оплата</button><button data-tab="tariffs" onclick="location.href='/admin/tariffs'">Тарифы</button></nav>
+<nav><button class="active" data-tab="users">Клиенты</button><button data-tab="payments">Платежи</button><button data-tab="plans">Готовые тарифы</button><button data-tab="brand">Оформление</button><button data-tab="settings">Оплата</button><button data-tab="tariffs">Конструктор</button></nav>
 <section class="section" id="users-view"><div class="toolbar"><h2>Клиенты и подписки</h2><button class="action" id="users-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>Telegram ID</th><th>Username</th><th>Подписка</th><th>До</th><th>Регистрация</th><th>Действие</th></tr></thead><tbody id="users-table"></tbody></table></div><div id="customer-detail" class="section" hidden aria-live="polite"><div class="toolbar"><h2 id="customer-title">Карточка клиента</h2><button class="action" id="customer-close">Закрыть</button></div><p class="muted" id="customer-summary"></p><h3>Подписки</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Статус</th><th>Действует до</th><th>Создана</th></tr></thead><tbody id="customer-subscriptions"></tbody></table></div><h3>Платежи</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="customer-payments"></tbody></table></div></div><div class="toolbar" style="margin-top:12px"><button class="action" id="users-prev">Назад</button><span id="users-page" class="muted">Страница 1</span><button class="action" id="users-next">Далее</button></div></section>
 <section class="section" id="payments-view" hidden><div class="toolbar"><h2>История платежей</h2><button class="action" id="payments-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Клиент</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="payments-table"></tbody></table></div><div class="toolbar" style="margin-top:12px"><button class="action" id="payments-prev">Назад</button><span id="payments-page" class="muted">Страница 1</span><button class="action" id="payments-next">Далее</button></div></section>
 <section class="section" id="plans-view" hidden>
@@ -555,6 +591,27 @@ th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflo
 <button type="submit" class="action primary">Сохранить оформление</button>
 </form>
 </section>
+<section class="section" id="payment-settings-view" hidden>
+<h2>Способы оплаты</h2>
+<p class="muted">Stars для цифровых покупок внутри Telegram; внешние провайдеры предназначены для самостоятельного веб-магазина.</p>
+<div id="method-list"></div>
+<h3>Реквизиты внешних провайдеров</h3>
+<div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px">
+<label>YooKassa Shop ID<input id="pay-yookassa-id"></label>
+<label>YooKassa Secret<input id="pay-yookassa-secret" type="password"></label>
+<label>YooMoney Receiver<input id="pay-yoomoney-receiver"></label>
+<label>YooMoney Secret<input id="pay-yoomoney-secret" type="password"></label>
+<label>Crypto Pay API token<input id="pay-crypto-token" type="password"></label>
+</div>
+<button class="action primary" id="payment-settings-save">Сохранить способы оплаты</button>
+<p class="muted" id="provider-status"></p>
+</section>
+<section class="section" id="pricing-view" hidden>
+<h2>Цены индивидуального конструктора</h2>
+<p class="muted">Все суммы в рублях указываются в копейках; Stars — целыми единицами.</p>
+<div id="pricing-fields" class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px"></div>
+<button class="action primary" id="pricing-save">Сохранить формулу цен</button>
+</section>
 <div id="status" class="status"></div>
 </div></main>
 <script>
@@ -568,7 +625,7 @@ async function showCustomer(id){$("status").textContent="";try{const d=await api
 $("customer-close").onclick=()=>{$("customer-detail").hidden=true};
 async function loadPayments(){const d=await api("/admin/api/payments?limit="+pageSize+"&offset="+paymentOffset);$("payments-table").replaceChildren();d.items.forEach(p=>row("payments-table",[p.id,p.telegram_id,p.provider,p.amount+" "+p.currency,p.status,new Date(p.created_at).toLocaleString()]));$("payments-page").textContent="Показано "+(d.total?paymentOffset+1:0)+"–"+Math.min(paymentOffset+d.items.length,d.total)+" из "+d.total;$("payments-prev").disabled=paymentOffset===0;$("payments-next").disabled=paymentOffset+pageSize>=d.total}
 async function start(){try{if(!tg?.initData)throw Error("Откройте панель через Telegram Mini App");const d=await api("/admin/api/overview");$("loading").hidden=true;$("dashboard").hidden=false;$("welcome").textContent="Здравствуйте, "+(d.admin_name||"администратор");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments;await loadUsers()}catch(e){$("loading").textContent=e.message}}
-document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const tab=b.dataset.tab;$("users-view").hidden=tab!=="users";$("payments-view").hidden=tab!=="payments";$("plans-view").hidden=tab!=="plans";$("brand-view").hidden=tab!=="brand";try{if(tab==="payments")await loadPayments();if(tab==="plans")await loadPlans();if(tab==="brand")await loadBrand()}catch(e){$("status").textContent=e.message}}));
+document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const tab=b.dataset.tab;$("users-view").hidden=tab!=="users";$("payments-view").hidden=tab!=="payments";$("plans-view").hidden=tab!=="plans";$("brand-view").hidden=tab!=="brand";$("payment-settings-view").hidden=tab!=="settings";$("pricing-view").hidden=tab!=="tariffs";try{if(tab==="payments")await loadPayments();if(tab==="plans")await loadPlans();if(tab==="brand")await loadBrand();if(tab==="settings")await loadPaymentSettings();if(tab==="tariffs")await loadPricing()}catch(e){$("status").textContent=e.message}}));
 $("users-refresh").onclick=()=>loadUsers().catch(e=>$("status").textContent=e.message);$("payments-refresh").onclick=()=>loadPayments().catch(e=>$("status").textContent=e.message);
 $("users-prev").onclick=()=>{userOffset=Math.max(0,userOffset-pageSize);loadUsers()};$("users-next").onclick=()=>{userOffset+=pageSize;loadUsers()};
 $("payments-prev").onclick=()=>{paymentOffset=Math.max(0,paymentOffset-pageSize);loadPayments()};$("payments-next").onclick=()=>{paymentOffset+=pageSize;loadPayments()};
