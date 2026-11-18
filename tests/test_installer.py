@@ -149,6 +149,53 @@ class InstallerTests(unittest.TestCase):
             self.assertTrue(installer.wait_for_app_health(2))
         self.assertEqual(runner.call_count, 2)
 
+    def test_auto_placement_copies_checkout_without_existing_secrets(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "source"
+            source.mkdir()
+            (source / "scripts").mkdir()
+            (source / "scripts" / "install.py").write_text("# installer")
+            (source / ".env").write_text("TELEGRAM_BOT_TOKEN=should-not-copy")
+            (source / "install.sh").write_text("#!/bin/sh")
+            (source / "data").mkdir()
+            target = Path(temp) / "opt" / "remnaum"
+            with patch.object(installer, "ROOT", source), \
+                 patch.dict(installer.os.environ, {"SUDO_USER": "root"}), \
+                 patch.object(installer.os, "execv") as exec_call:
+                installer.choose_install_dir({}, str(target))
+            self.assertTrue((target / "install.sh").is_file())
+            self.assertFalse((target / ".env").exists())
+            self.assertFalse((target / "data").exists())
+            self.assertTrue(exec_call.called)
+
+    def test_deny_overwriting_an_existing_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            dest = Path(temp) / "existing"
+            dest.mkdir()
+            (dest / "keep.txt").write_text("real business data")
+            with patch.object(installer, "ROOT", Path(temp) / "checkout"):
+                with self.assertRaisesRegex(ValueError, "содержит данные"):
+                    installer.choose_install_dir({}, str(dest))
+            self.assertEqual((dest / "keep.txt").read_text(), "real business data")
+
+    def test_caddy_block_for_separate_webhook_and_app_domains(self):
+        block = installer.caddy_site_block({
+            "PUBLIC_DOMAIN": "webhook.myvpn.site",
+            "WEBAPP_DOMAIN": "miniapp.myvpn.site",
+        })
+        self.assertIn("https://webhook.myvpn.site", block)
+        self.assertIn("https://miniapp.myvpn.site", block)
+        self.assertIn("remnaum-api:8080", block)
+        with self.assertRaises(ValueError):
+            installer.caddy_site_block({
+                "PUBLIC_DOMAIN": "localhost",
+                "WEBAPP_DOMAIN": "miniapp.myvpn.site",
+            })
+
+    def test_port_conflict_chooses_next_safe_loopback_port(self):
+        with patch.object(installer, "loopback_available", side_effect=lambda p: p == 18082):
+            self.assertEqual(installer.first_free_loopback_port(18080), 18082)
+
     def test_refuse_panel_domain_collision(self):
         existing = {
             "PUBLIC_DOMAIN": "panel.myvpn.site",
