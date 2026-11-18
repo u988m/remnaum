@@ -121,6 +121,19 @@ class RemnawaveSetupTests(unittest.TestCase):
                 setup.plan_panel_webhook(env, WEBHOOK, "B" * 64)
             self.assertEqual(initial, env.read_text())
 
+    def test_public_webhook_requires_correct_health_and_tls(self):
+        from unittest.mock import MagicMock
+        response = MagicMock()
+        response.status = 200
+        response.read.return_value = b'{"status":"ok","service":"remnaum"}'
+        response.__enter__.return_value = response
+        with patch.object(setup.urllib.request, "urlopen", return_value=response):
+            self.assertTrue(setup.public_webhook_ready(WEBHOOK))
+        response.read.return_value = b'{"status":"unhealthy"}'
+        with patch.object(setup.urllib.request, "urlopen", return_value=response):
+            self.assertFalse(setup.public_webhook_ready(WEBHOOK))
+        self.assertFalse(setup.public_webhook_ready("http://hook.myvpn.site/webhooks/remnawave"))
+
     def test_webhook_reconfiguration_requires_explicit_consent(self):
         with tempfile.TemporaryDirectory() as temp:
             root, env = self._panel(temp)
