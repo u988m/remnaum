@@ -19,6 +19,7 @@ from app.services.subscriptions import get_user_subscription, provision_paid_pay
 from app.services.users import get_or_create_user
 from app.services.store_settings import is_payment_method_enabled
 from app.services.referrals import parse_referral_start, register_referral, referral_count, referral_code
+from app.services.plans import list_plans, choose_plan, selected_stars_price, clear_selected_plan
 from app.db.models import Payment, User
 from app.db.session import SessionLocal
 from sqlalchemy import select
@@ -130,7 +131,53 @@ async def home_handler(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "menu:plans")
 async def plans_handler(callback: CallbackQuery) -> None:
     await callback.answer()
+    plans = await list_plans()
+    rows = []
+    for plan in plans[:20]:
+        rows.append([InlineKeyboardButton(
+            text=f"📦 {plan['title']} · {plan['price_stars']} ⭐",
+            callback_data=f"plan:select:{plan['id']}",
+        )])
+    rows.append([InlineKeyboardButton(text="🛠 Собрать свой тариф", callback_data="menu:builder")])
+    rows.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")])
+    if callback.message:
+        await callback.message.edit_text(
+            "📦 <b>Выберите готовый тариф</b> или соберите свой вариант.\\n"
+            "Цены готовых планов задаёт владелец магазина.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+
+
+@router.callback_query(F.data == "menu:builder")
+async def builder_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await clear_selected_plan(callback.from_user.id)
     await show_tariff(callback)
+
+
+@router.callback_query(F.data.startswith("plan:select:"))
+async def fixed_plan_handler(callback: CallbackQuery) -> None:
+    try:
+        plan_id = int(callback.data.rsplit(":", 1)[1])
+        quote = await choose_plan(callback.from_user.id, plan_id)
+        stars = await selected_stars_price(callback.from_user.id, quote)
+    except (ValueError, TypeError) as exc:
+        await callback.answer(str(exc), show_alert=True)
+        return
+    await callback.answer("Тариф выбран")
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Перейти к оплате", callback_data="payment:choose")],
+        [InlineKeyboardButton(text="⬅️ Другие тарифы", callback_data="menu:plans")],
+    ])
+    if callback.message:
+        await callback.message.edit_text(
+            "✅ <b>Готовый тариф выбран</b>\\n\\n"
+            f"Срок: {quote.duration_days} дней\\n"
+            f"Трафик: {quote.traffic_gb} ГБ\\n"
+            f"Устройств: {quote.device_limit}\\n"
+            f"Стоимость: {quote.amount_minor / 100:.2f} RUB / {stars} ⭐",
+            reply_markup=keyboard,
+        )
 
 
 @router.callback_query(F.data.startswith("tariff:"))
@@ -181,7 +228,9 @@ async def payment_choose_handler(callback: CallbackQuery) -> None:
 
 async def show_stars_checkout(callback: CallbackQuery) -> None:
     quote = await get_tariff_draft(callback.from_user.id)
-    stars = await calculate_store_stars_price(quote.duration_days, quote.traffic_gb, quote.device_limit)
+    stars = await selected_stars_price(callback.from_user.id, quote)
+    if stars is None:
+        stars = await calculate_store_stars_price(quote.duration_days, quote.traffic_gb, quote.device_limit)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"⭐ Оплатить {stars} Stars", callback_data="payment:create:stars")],
         [InlineKeyboardButton(text="⬅️ Назад к тарифу", callback_data="menu:plans")],
