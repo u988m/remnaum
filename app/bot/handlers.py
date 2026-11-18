@@ -41,7 +41,8 @@ def main_menu() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="🎁 Пригласить друга", callback_data="menu:referral")],
         [InlineKeyboardButton(text="🎟 Промокод", callback_data="menu:promo"),
          InlineKeyboardButton(text="🎁 Пробный доступ", callback_data="menu:trial")],
-        [InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support")],
+        [InlineKeyboardButton(text="📖 Как подключиться", callback_data="menu:connect"),
+         InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support")],
     ]
     if settings.webapp_url:
         rows.append([InlineKeyboardButton(text="🌐 Личный кабинет", web_app=WebAppInfo(url=settings.webapp_url))])
@@ -487,6 +488,28 @@ async def subscription_handler(callback: CallbackQuery) -> None:
             [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
         ])
     await callback.message.edit_text(details, reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "menu:connect")
+async def connection_help_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.message:
+        return
+    subscription = await get_user_subscription(callback.from_user.id)
+    link = subscription.get("subscription_url") if subscription else None
+    rows = []
+    if isinstance(link, str) and link.startswith("https://"):
+        rows.append([InlineKeyboardButton(text="🔗 Моя ссылка подключения", url=link)])
+    rows.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")])
+    await callback.message.edit_text(
+        "📖 <b>Как подключить VPN</b>\n\n"
+        "1. Установите приложение-клиент, совместимое с подпиской вашей панели Remnawave.\n"
+        "2. Откройте ссылку подключения из раздела «Подписка».\n"
+        "3. Импортируйте ссылку в клиент и обновите список серверов.\n"
+        "4. Выберите сервер и включите соединение.\n\n"
+        "Если профиль не открывается, напишите в поддержку магазина.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
 
 
 @router.callback_query(F.data == "menu:support")
