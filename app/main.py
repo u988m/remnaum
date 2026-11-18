@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -9,6 +10,26 @@ from app.db.base import Base
 from app.db.session import engine
 from app.web.routes import router as api_router
 
+log = logging.getLogger(__name__)
+
+
+async def _register_telegram_webhook() -> None:
+    """Retry registration while DNS / Caddy TLS is being provisioned."""
+    while True:
+        try:
+            await bot.set_webhook(
+                settings.telegram_webhook_url,
+                secret_token=settings.telegram_webhook_secret,
+                drop_pending_updates=False,
+            )
+            log.info("Telegram webhook registered")
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("Could not register Telegram webhook yet: %s", exc)
+            await asyncio.sleep(30)
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -16,26 +37,28 @@ async def lifespan(_: FastAPI):
         await connection.run_sync(Base.metadata.create_all)
 
     polling_task = None
+    webhook_task = None
     if settings.telegram_bot_token:
         await setup_bot()
         if settings.telegram_use_webhook and settings.telegram_webhook_url:
-            await bot.set_webhook(
-                settings.telegram_webhook_url,
-                secret_token=settings.telegram_webhook_secret or None,
-                drop_pending_updates=False,
-            )
+            if not settings.telegram_webhook_secret:
+                raise RuntimeError("TELEGRAM_WEBHOOK_SECRET is required in webhook mode")
+            webhook_task = asyncio.create_task(_register_telegram_webhook())
         elif not settings.telegram_use_webhook:
             polling_task = asyncio.create_task(dispatcher.start_polling(bot))
-    yield
-    if polling_task:
-        polling_task.cancel()
-        try:
-            await polling_task
-        except asyncio.CancelledError:
-            pass
-    if bot:
-        await bot.session.close()
-    await engine.dispose()
+    try:
+        yield
+    finally:
+        for task in (polling_task, webhook_task):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        if bot:
+            await bot.session.close()
+        await engine.dispose()
 
 
 app = FastAPI(title=settings.app_name, version="1.0.0-rc.1", lifespan=lifespan)
