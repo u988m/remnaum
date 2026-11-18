@@ -96,7 +96,7 @@ async def start_handler(message: Message) -> None:
         await register_referral(message.from_user.id, inviter)
     profile = await get_store_profile()
     await message.answer(
-        f"Добро пожаловать в <b>{escape(profile['name'])}</b>! 🚀\\n\\n"
+        f"Добро пожаловать в <b>{escape(profile['name'])}</b>! 🚀\n\n"
         f"{escape(profile['description']) or 'Выберите подходящую подписку.'}",
         reply_markup=main_menu(),
     )
