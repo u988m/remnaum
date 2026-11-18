@@ -1,128 +1,317 @@
-# Remnaum — two deployment modes
+# 📖 Подробная установка Remnaum
 
-The **same bot, Mini App, database and Remnawave API integration** are deployed in either mode. Pick the mode based on who already owns public TCP ports 80 and 443.
+**Версия:** 1.0.0-rc.2 · **Язык:** русский · **Платформы:** Ubuntu / Debian · **Режимы:** `panel` и `standalone`
 
-## Quick start
+[← На главную страницу проекта](../README.md) · [Баги](https://t.me/remnaum/3) · [Предложения](https://t.me/remnaum/5) · [Помощь](https://t.me/remnaum/6)
+
+> [!WARNING]
+> Remnaum 1.0.0-rc.2 — кандидат на релиз для тестирования. Подключение настоящей Remnawave-панели, реальные платежи и TLS на собственном сервере требуют отдельной проверки.
+
+## Содержание
+
+1. [Что нужно подготовить](#1-что-нужно-подготовить)
+2. [Общая установка](#2-общая-установка)
+3. [На одном сервере с Remnawave](#3-установка-на-сервере-с-remnawave)
+4. [На отдельном сервере](#4-установка-на-отдельном-сервере)
+5. [Настройка Telegram и Mini App](#5-telegram-бот-и-mini-app)
+6. [Настройка вебхука Remnawave](#6-вебхук-remnawave)
+7. [Проверки и диагностика](#7-проверка-работоспособности)
+8. [Обновления и резервные копии](#8-обновления-и-резервные-копии)
+9. [Типичные ошибки](#9-типичные-ошибки)
+
+## 1. Что нужно подготовить
+
+**Сервер и доступ.** Нужен сервер Ubuntu или Debian с SSH, правами `sudo`, Python 3 и доступом к интернету. На VPS с существующей Remnawave должен быть установлен работающий Docker + Compose v2; установщик **не будет переустанавливать Docker на таком сервере**. На отдельном VPS установщик может установить Docker Engine и Compose.
+
+**Панель.** Нужна действующая Remnawave Panel с HTTPS API: её адрес (например, `https://panel.myvpn.ru`), действительный API-токен и UUID внутренних групп. Саму панель устанавливают отдельно.
+
+**Telegram.** Создайте бота в [@BotFather](https://t.me/BotFather). Сохраните токен и username (например, `MyVpnShopBot`, без `@`). Узнайте свой числовой Telegram ID — он будет указан в `ADMIN_IDS`.
+
+**Домены и DNS.** Подготовьте один или два поддомена:
+- вебхуки — например, `bot.myvpn.ru`;
+- Mini App и админка — например, `app.myvpn.ru`.
+
+Домены можно сделать **одинаковыми друг другу**, но **отличными от домена самой панели**. Добавьте DNS-записи `A` на IP сервера с Remnaum; `AAAA` добавляйте только при настроенном IPv6. Telegram и Mini App работают через публичный HTTPS.
+
+**Два тестовых сервера одновременно:** используйте разных ботов и токены Telegram. Иначе последний зарегистрированный webhook заберёт обновления на себя.
+
+## 2. Общая установка
+
+Подключитесь к вашему серверу через SSH и скачайте репозиторий:
 
 ```bash
 git clone https://github.com/u988m/remnaum.git
 cd remnaum
+```
+
+Если репозиторий приватный, потребуется GitHub-доступ. Не вставляйте личные токены в публичные команды/скриншоты.
+
+Запустите мастер:
+
+```bash
 sudo sh install.sh
 ```
 
-This POSIX shell entry point starts the Python 3 standard-library installer. It will ask which mode to use and guide you through domains, BotFather token, Telegram admin IDs and Remnawave API details. You may also use `sudo sh install.sh --mode panel` or `sudo sh install.sh --mode standalone`.
+Он предложит два пункта:
 
-**Requirements:** Ubuntu/Debian with Python 3 and root/sudo access. On a standalone VPS the installer can install official Docker Engine + Compose packages if missing. On an existing Remnawave Panel VPS, it **never installs/replaces Docker automatically**; working Docker Compose is required.
+```text
+1) panel      — на сервере с Remnawave, без занятия публичных 80/443
+2) standalone — на отдельном сервере, со своим Caddy и HTTPS на 80/443
+```
 
-Create A/AAAA DNS records for the webhook domain and the Mini App domain. Use subdomains distinct from the existing Remnawave Panel domain. They can be identical to each other. You also need a BotFather token, your numeric Telegram admin ID, Remnawave Panel HTTPS API URL/token, and active internal squad UUIDs. Provide a public HTTPS terms URL before accepting real Stars payments.
+Можно сразу выбрать нужный режим командой `sudo sh install.sh --mode panel` либо `sudo sh install.sh --mode standalone`.
 
-### Mode 1 — shared Panel server (`panel`)
+Установщик спросит имя и токен бота, Telegram ID администратора, домены, URL и токен панели, UUID внутренних групп, контакт поддержки и ссылку на условия. В режиме `standalone` понадобится также email для HTTPS-сертификатов.
 
-Choose **1** at the installer prompt, or run:
+**Не вводите `https://` перед доменами вебхуков и Mini App** — установщик ожидает только имя домена. Для **адреса Remnawave Panel**, напротив, нужен полный URL с `https://`.
+
+Итоговые настройки и случайные секреты сохраняются в `.env` с правами доступа `600`. Пароли и API-токены нельзя публиковать.
+
+## 3. Установка на сервере с Remnawave
+
+### Шаг 1. Запустите совместный режим
 
 ```bash
 sudo sh install.sh --mode panel
 ```
 
-**No Remnaum service binds public 80/443 in this mode.** The app runs on internal container port 8080 and publishes only `127.0.0.1:18080` for a native host proxy. PostgreSQL and Redis are internal Docker services, with separate Remnaum volumes.
+В таком режиме:
 
-The installer detects the *existing* `remnawave-network` when present. In that case it attaches only the Remnaum **app** to that Docker network with alias `remnaum-api`. An existing Panel proxy attached to that same network can forward new domains to `http://remnaum-api:8080`. Remnawave containers, certificates, configuration, service names and ports are not modified. The official Remnawave Caddy and Nginx guides both use `remnawave-network`: [Caddy](https://docs.rw/install/reverse-proxies/caddy/) and [Nginx](https://docs.rw/install/reverse-proxies/nginx/).
+- **80/443 остаются у существующего прокси Remnawave**;
+- Remnaum публикует HTTP только на `127.0.0.1:18080`, то есть на локальном интерфейсе хоста;
+- FastAPI дополнительно доступен на внутреннем порту `8080`;
+- PostgreSQL/Redis Remnaum **не используют** базу и контейнеры панели;
+- существующие конфигурации Remnawave/Caddy/Nginx **не переписываются**.
 
-To select a different existing proxy network explicitly:
+### Шаг 2. Проверьте приложение локально
 
 ```bash
-sudo sh install.sh --mode panel --proxy-network YOUR_EXISTING_DOCKER_NETWORK
+docker compose ps
+curl http://127.0.0.1:18080/health
 ```
 
-To use a **host-native** Caddy/Nginx (not running in Docker), choose `--proxy-network none`, then route new domains to `http://127.0.0.1:18080`. You can change the loopback port with `--local-port 18081`. If you use a containerized reverse proxy, it **must share the chosen Docker network** with the Remnaum app; a Docker container generally cannot reach the host's `127.0.0.1`.
+Ожидаемый JSON содержит `"status":"ok"`. Это проверяет приложение, но **не** публичный HTTPS.
 
-After installation the `generated/` directory contains four sample site blocks:
+Если порт `18080` занят другой службой, для **новой** установки выберите другой, например:
 
-- `remnaum.docker.caddy` — existing Caddy container on the shared Docker network
-- `remnaum.docker.nginx.conf` — existing Nginx container on the shared Docker network
-- `remnaum.host.caddy` — native host Caddy pointing at loopback
-- `remnaum.host.nginx.conf` — native host Nginx pointing at loopback
+```bash
+sudo sh install.sh --mode panel --local-port 18081
+```
 
-**Manually add the correct site block to your existing proxy**; do not replace the Panel's Caddyfile or Nginx file. Configure TLS for your new domains using that proxy's normal certificate method. Validate the combined config before reloading the existing proxy. The snippets are examples; installer deliberately does not edit existing Remnawave files, restart the Panel, or assume a particular existing proxy container name.
+При повторном запуске установщик сохраняет ранее выбранные параметры и данные; изменение порта на используемой установке требует проверки прокси.
 
-Example for an existing Dockerized Caddy reverse proxy on the official network:
+### Шаг 3. Настройте существующий Caddy/Nginx
+
+Установщик создаст каталог `generated/` с примерами отдельных сайтов для новых доменов:
+
+| Конфигурация | Когда выбирать |
+| --- | --- |
+| `remnaum.docker.caddy` | Caddy находится в Docker и использует общую сеть |
+| `remnaum.docker.nginx.conf` | Nginx находится в Docker и использует общую сеть |
+| `remnaum.host.caddy` | Caddy установлен на хосте |
+| `remnaum.host.nginx.conf` | Nginx установлен на хосте |
+
+При использовании Caddy-контейнера в сети `remnawave-network` добавляемый блок может выглядеть так:
 
 ```caddyfile
-https://bot.example.net, https://app.example.net {
+https://bot.myvpn.ru, https://app.myvpn.ru {
     encode zstd gzip
     reverse_proxy http://remnaum-api:8080
 }
 ```
 
-Example for native host Caddy, with the default loopback port:
+**Внимание:** это только новый блок сайта. Не затирайте им конфигурацию панели и не меняйте адрес панели. Сначала выполните проверку полной конфигурации вашего Caddy, затем штатно перезагрузите уже существующий прокси.
+
+Если прокси в Docker использует другую сеть, узнайте её точное имя:
+
+```bash
+docker network ls
+```
+
+Перезапустите мастер с указанной сетью:
+
+```bash
+sudo sh install.sh --mode panel --proxy-network ИМЯ_СЕТИ
+```
+
+Если прокси установлен **на самом хосте**, используйте файл `generated/remnaum.host.caddy` или `generated/remnaum.host.nginx.conf` с локальным upstream:
 
 ```caddyfile
-https://bot.example.net, https://app.example.net {
+https://bot.myvpn.ru, https://app.myvpn.ru {
     reverse_proxy http://127.0.0.1:18080
 }
 ```
 
-Keep existing Panel site entries and their original Panel domain intact. **Do not forward the Remnawave Panel's domain to Remnaum**; use separate hostnames. Before enabling Telegram webhooks, confirm `https://YOUR_WEBHOOK_DOMAIN/health` returns `status: ok`.
+Для отказа от подключения Remnaum к общей Docker-сети доступен:
 
-### Mode 2 — separate VPS (`standalone`)
+```bash
+sudo sh install.sh --mode panel --proxy-network none
+```
 
-Choose **2** at the installer prompt, or run:
+> **Важно:** контейнер Nginx/Caddy не должен проксировать в `127.0.0.1:18080`, так как `127.0.0.1` внутри контейнера — **не** адрес хоста. Контейнерному прокси нужен общий Docker network и `remnaum-api:8080`.
+
+### Шаг 4. Проверьте публичный адрес
+
+После интеграции маршрута и выдачи сертификата:
+
+```bash
+curl https://app.myvpn.ru/health
+curl https://bot.myvpn.ru/health
+```
+
+Замените домены на собственные. Оба ответа должны содержать `"status":"ok"`.
+
+## 4. Установка на отдельном сервере
+
+### Шаг 1. Подготовьте сеть
+
+Проверьте, что DNS ваших доменов указывает на **отдельный VPS**. Публичные порты `80/tcp` и `443/tcp` должны быть свободны и доступны извне (для HTTP/3 дополнительно `443/udp`). Не закрывайте доступ к HTTPS через firewall.
+
+### Шаг 2. Запустите самостоятельный режим
 
 ```bash
 sudo sh install.sh --mode standalone
 ```
 
-The installer checks that TCP 80/443 (and UDP 443) are free before deploying:
+На поддерживаемой Ubuntu/Debian установщик может установить официальный Docker Engine/Compose, **если Docker отсутствует**. Если Docker уже установлен без Compose v2, установщик остановится, чтобы не менять существующий движок без вашего участия.
+
+Используются:
 
 ```text
-Internet 80/443 → Caddy (automatic TLS) → internal Nginx → FastAPI:8080
-                                                          ↘ PostgreSQL / Redis
+Интернет → Caddy :80/:443 (HTTPS) → Nginx (внутри Docker) → FastAPI :8080
+                                                           ├─ PostgreSQL
+                                                           └─ Redis
 ```
 
-Only Caddy binds the host's public 80/443; Nginx, FastAPI, PostgreSQL and Redis stay inside the Compose network. DNS must resolve to this VPS, and ports 80/443 must be reachable to obtain HTTPS certificates. Connect to the **remote** Remnawave panel using its existing HTTPS API URL/token. The Panel's own server and ports are untouched.
+Публично порты занимает **только Caddy**. Домен панели на другом сервере задаётся при установке в виде `https://panel.myvpn.ru`.
 
-If port 80 or 443 is already in use, the installer refuses standalone mode and suggests panel/shared-proxy mode; it does **not** stop the existing service.
+### Шаг 3. Дождитесь готовности HTTPS и проверьте
 
-## Endpoint URLs (both modes)
+```bash
+docker compose ps
+docker compose logs --tail=100 caddy
+curl https://app.myvpn.ru/health
+```
 
-| Purpose | URL |
-| --- | --- |
-| Telegram Bot API updates | `https://WEBHOOK_DOMAIN/telegram/webhook` |
-| Remnawave outgoing events | `https://WEBHOOK_DOMAIN/webhooks/remnawave` |
-| Telegram Mini App | `https://WEBAPP_DOMAIN/app` |
-| Owner dashboard via Telegram | `https://WEBAPP_DOMAIN/admin` |
-| Public health check | `https://WEBAPP_DOMAIN/health` |
+Если HTTPS не появился, проверьте записи DNS, сетевой экран и сообщения Caddy. При конфликте портов `80` или `443` установщик не отключает существующие службы.
 
-Telegram Bot API webhook registration is retried while public HTTPS is being prepared; register the Mini App domain via BotFather. Incoming Telegram requests require the configured Telegram secret. `/admin` API requests require signed Telegram Mini App initData from an allowed `ADMIN_IDS` entry.
+## 5. Telegram-бот и Mini App
 
-## Remnawave outgoing webhook
+После появления рабочего HTTPS откройте [@BotFather](https://t.me/BotFather). Выберите своего бота и настройте пункт **Menu Button / Main Mini App** с адресом:
 
-The installer generates `REMNAWAVE_WEBHOOK_SECRET` and enables an authenticated **receiving** endpoint. You still need to configure the Panel's outgoing webhook using the matching secret and:
+```text
+https://app.myvpn.ru/app
+```
+
+Меню и команды бот пытается зарегистрировать при запуске. Telegram webhook приложение регистрирует через Bot API; при ошибке связи повторяет попытку.
+
+Чтобы войти в админку:
+1. Откройте **своего** бота в Telegram под аккаунтом владельца.
+2. Напишите `/admin`.
+3. Нажмите кнопку открытия панели.
+
+ID этого Telegram-аккаунта должен находиться в `ADMIN_IDS`. Простое открытие `/admin` во внешнем браузере не заменяет авторизацию Telegram.
+
+## 6. Вебхук Remnawave
+
+Параметры **API панели** нужны для управления пользователями. Параметры **исходящего вебхука панели** — отдельно для передачи событий в Remnaum.
+
+В `.env` Remnaum создаётся значение `REMNAWAVE_WEBHOOK_SECRET`. В конфигурации исходящих событий вашей версии Remnawave нужно указать соответствующий общий секрет и URL:
 
 ```dotenv
 WEBHOOK_ENABLED=true
-WEBHOOK_URL=https://WEBHOOK_DOMAIN/webhooks/remnawave
-WEBHOOK_SECRET_HEADER=THE_VALUE_OF_REMNAWAVE_WEBHOOK_SECRET
+WEBHOOK_URL=https://bot.myvpn.ru/webhooks/remnawave
+WEBHOOK_SECRET_HEADER=ВАШ_СЕКРЕТ_ИЗ_REMNAUM_ENV
 ```
 
-Follow the environment variable names and deployment instructions supported by **your installed Remnawave version**. The receiver currently verifies the signature and acknowledges events; automatic event reconciliation into subscriptions is not yet implemented.
+**Сверьте названия переменных и способ применения с документацией установленной Remnawave**: эта конфигурация служит примером. Не изменяйте вебхуки панели вслепую и не публикуйте секрет.
 
-## First-run database, updates and diagnostics
+Получатель Remnaum проверяет подпись HMAC и подтверждает событие. **Автоматическая сверка всех событий с локальными подписками ещё не завершена**.
 
-The install creates tables and default configuration but **does not seed test users, orders or payments**. PostgreSQL and Redis volumes are independent of the Panel and persist across app restarts and updates. A repeated install preserves existing credentials and uses the previous deployment mode by default. `sudo sh install.sh --mode panel` allows migrating an older Remnaum deployment without deleting volumes.
+## 7. Проверка работоспособности
 
-Commands work in both modes because the selected Compose overlays are stored in `.env` via `COMPOSE_FILE`:
+### Быстрый чек-лист
+
+- [ ] `docker compose ps` показывает запущенное приложение и здоровую PostgreSQL;
+- [ ] локальный адрес в режиме `panel` отвечает `/health`;
+- [ ] внешний домен Mini App отвечает `/health` по HTTPS без ошибки сертификата;
+- [ ] бот отвечает на `/start`;
+- [ ] администратор открывает `/admin` из Telegram;
+- [ ] тестовый тариф отображается в боте и Mini App;
+- [ ] API Remnawave доступен и корректно подключён;
+- [ ] вебхук Remnawave настроен на новый домен;
+- [ ] тестовая оплата Stars проверена без реальных клиентов.
+
+**Куда смотреть логи:**
 
 ```bash
-docker compose config --services
 docker compose ps
 docker compose logs --tail=100 app
-bash backup.sh
-bash update.sh
+docker compose logs --tail=100 postgres
+docker compose logs --tail=100 redis
 ```
 
-Panel mode diagnostic: `curl http://127.0.0.1:18080/health`, then `curl https://YOUR_WEBAPP_DOMAIN/health` after integrating the existing proxy.
+Только для режима `standalone`:
 
-Standalone diagnostic: `curl https://YOUR_WEBAPP_DOMAIN/health` after DNS and Caddy TLS are ready.
+```bash
+docker compose logs --tail=100 caddy
+docker compose logs --tail=100 nginx
+```
 
-Do not run `docker compose down -v` on production. Preserve a secure copy of `.env` (especially `APP_SECRET_KEY`) together with database backups. Remnaum still needs versioned Alembic migrations and real end-to-end payment validation before a stable production 1.0.0 release.
+### Проверка пустой базы на новой установке
+
+Новая БД должна содержать **0 покупателей, 0 подписок и 0 платежей**. Проверить можно так:
+
+```bash
+docker compose exec -T postgres psql -U remnaum -d remnaum -c "SELECT COUNT(*) AS users FROM users;"
+docker compose exec -T postgres psql -U remnaum -d remnaum -c "SELECT COUNT(*) AS subscriptions FROM subscriptions;"
+docker compose exec -T postgres psql -U remnaum -d remnaum -c "SELECT COUNT(*) AS payments FROM payments;"
+```
+
+Установщик не создаёт демонстрационных пользователей. На повторной установке **старые данные остаются**, как и должно быть.
+
+## 8. Обновления и резервные копии
+
+Выполняйте команды из каталога проекта:
+
+```bash
+# Резервная копия базы PostgreSQL в backups/
+bash backup.sh
+
+# Получить обновления текущей ветки с предварительной копией БД
+bash update.sh
+
+# Перезапустить приложение
+docker compose restart app
+
+# Убедиться, что нужный режим сохранён в .env
+grep -E '^(DEPLOY_MODE|COMPOSE_FILE)=' .env
+```
+
+> [!CAUTION]
+> Не запускайте `docker compose down -v`: это удалит volumes с данными магазина. Не удаляйте `.env` и не меняйте `APP_SECRET_KEY` без плана восстановления: он нужен для расшифровки сохранённых платёжных реквизитов.
+
+Полная процедура восстановления и миграции схемы через Alembic пока остаются задачами до стабильной версии 1.0.0.
+
+## 9. Типичные ошибки
+
+| Проблема | Что проверить |
+| --- | --- |
+| Порт 80/443 занят | На сервере с панелью используйте `--mode panel`, не выключайте её прокси |
+| `curl 127.0.0.1:18080/health` не отвечает | `docker compose ps`, `docker compose logs --tail=100 app`; выбранный порт |
+| Локально работает, по домену — нет | DNS, HTTPS, сертификаты и отдельный блок Caddy/Nginx |
+| Ошибка 502 от прокси | Правильный upstream; для Docker-прокси — одна сеть с Remnaum |
+| Mini App не открывается | HTTPS, ссылка `/app`, настройки BotFather |
+| Админке отказано в доступе | ID владельца в `ADMIN_IDS`, вход из Telegram |
+| VPN не выдаётся | Доступность Panel API, токен, UUID групп, логи подтверждения оплаты |
+| После повторной установки данные остались | Это защита данных; база очищается только при **новом** развёртывании |
+
+## 💬 Обратная связь
+
+- 🐛 [Сообщить об ошибке](https://t.me/remnaum/3)
+- 💡 [Предложить функцию](https://t.me/remnaum/5)
+- 🆘 [Помощь с установкой и настройкой](https://t.me/remnaum/6)
+
+При отправке логов **удалите из них токены, пароли, webhook-секреты и персональные данные покупателей**.
+
+[← Вернуться в README](../README.md)
