@@ -581,7 +581,7 @@ def config_for_install(existing: dict[str, str], mode: str,
     if panel_env is not None:
         previous = panel_webhook_secret(panel_env)
         if previous and previous != cfg.get("REMNAWAVE_WEBHOOK_SECRET"):
-            allowed = not existing or prompt(
+            allowed = not existing.get("REMNAWAVE_WEBHOOK_SECRET") or prompt(
                 "Синхронизировать секрет вебхука из локальной панели? (Д/н)",
                 default="Д",
             ).lower() in ("д", "да", "y", "yes")
