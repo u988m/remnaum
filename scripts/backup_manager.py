@@ -114,35 +114,52 @@ def _crypt_key(password: bytes) -> bytes:
 def pack_encrypted(plaintext: Path, destination: Path, password: bytes) -> None:
     if not shutil.which("openssl"):
         raise RuntimeError("Нужен OpenSSL: apt-get install openssl")
-    with tempfile.TemporaryDirectory(prefix="remnaum-encrypt-") as tmp:
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="remnaum-encrypt-", dir=destination.parent) as tmp:
         encrypted = Path(tmp) / "payload.enc"
         subprocess.run([
             "openssl", "enc", "-aes-256-cbc", "-salt", "-pbkdf2",
             "-iter", "280000", "-md", "sha256",
             "-pass", "stdin", "-in", str(plaintext), "-out", str(encrypted),
         ], input=password + b"\n", check=True, capture_output=True)
-        ciphertext = encrypted.read_bytes()
-    digest = hmac.new(_crypt_key(password), ciphertext, hashlib.sha256).digest()
-    _secure_write(destination, MAGIC + digest + ciphertext)
+        digest = hmac.new(_crypt_key(password), digestmod=hashlib.sha256)
+        with encrypted.open("rb") as src:
+            for chunk in iter(lambda: src.read(1024 * 1024), b""):
+                digest.update(chunk)
+        target = destination.with_name("." + destination.name + ".tmp")
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as out, encrypted.open("rb") as src:
+                out.write(MAGIC + digest.digest())
+                shutil.copyfileobj(src, out, length=1024 * 1024)
+                out.flush()
+                os.fsync(out.fileno())
+            os.replace(target, destination)
+            os.chmod(destination, 0o600)
+        finally:
+            target.unlink(missing_ok=True)
 
 
 def unpack_encrypted(archive: Path, plaintext: Path, password: bytes) -> None:
     if archive.is_symlink() or not archive.is_file():
         raise ValueError("Архив не найден или является ссылкой")
-    with archive.open("rb") as handle:
-        prefix = handle.read(len(MAGIC))
-        mac = handle.read(32)
-        ciphertext = handle.read()
-    if prefix != MAGIC or len(mac) != 32 or len(ciphertext) < 32:
-        raise ValueError("Неизвестный или повреждённый формат резервной копии")
-    digest = hmac.new(_crypt_key(password), ciphertext, hashlib.sha256).digest()
-    if not hmac.compare_digest(mac, digest):
-        raise ValueError("Неверный ключ восстановления или архив повреждён")
     if not shutil.which("openssl"):
         raise RuntimeError("Для восстановления требуется OpenSSL")
     with tempfile.TemporaryDirectory(prefix="remnaum-decrypt-") as tmp:
         payload = Path(tmp) / "payload.enc"
-        payload.write_bytes(ciphertext)
+        digest = hmac.new(_crypt_key(password), digestmod=hashlib.sha256)
+        with archive.open("rb") as handle:
+            prefix, mac = handle.read(len(MAGIC)), handle.read(32)
+            if prefix != MAGIC or len(mac) != 32:
+                raise ValueError("Неизвестный или повреждённый формат резервной копии")
+            with payload.open("wb") as ciphertext:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                    ciphertext.write(chunk)
+        if payload.stat().st_size < 32:
+            raise ValueError("Повреждённый архив Remnaum")
+        if not hmac.compare_digest(mac, digest.digest()):
+            raise ValueError("Неверный ключ восстановления или архив повреждён")
         subprocess.run([
             "openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2",
             "-iter", "280000", "-md", "sha256",
