@@ -2,6 +2,22 @@ const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
 let data=null;
 const $=id=>document.getElementById(id);
 function api(path,body){return fetch(path,{method:body?"POST":"GET",headers:{"Content-Type":"application/json","X-Telegram-Init-Data":tg?.initData||""},body:body?JSON.stringify(body):undefined}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.detail||"Ошибка запроса");return d})}
+function showScreen(name){
+  const valid=["home","plans","account","bonuses"];
+  if(!valid.includes(name))name="home";
+  document.querySelectorAll("[data-screen]").forEach(section=>{
+    section.hidden=section.dataset.screen!==name;
+  });
+  document.querySelectorAll("[data-open-screen]").forEach(button=>{
+    const active=button.dataset.openScreen===name;
+    button.classList.toggle("nav-active",active);
+    button.setAttribute("aria-current",active?"page":"false");
+  });
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+document.querySelectorAll("[data-open-screen]").forEach(button=>{
+  button.addEventListener("click",()=>showScreen(button.dataset.openScreen));
+});
 async function loadOffers(){
   try{
     const d=await api("/api/v1/webapp/offers");
