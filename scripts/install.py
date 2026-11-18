@@ -367,10 +367,10 @@ def main() -> int:
     print("\n[1/4] Способ установки")
     mode = choose_mode(existing, args.mode)
     if existing.get("DEPLOY_MODE") and existing["DEPLOY_MODE"] != mode:
-        answer = prompt(f"Switch installation from {existing['DEPLOY_MODE']} to {mode}? Type YES")
-        if answer != "YES":
-            print("No changes were made")
-            return 0
+        raise ValueError(
+            "Нельзя автоматически менять режим действующей установки: сначала перенесите прокси "
+            "и проверьте сохранность БД. Текущий режим: " + existing["DEPLOY_MODE"]
+        )
 
     print("\n[2/4] Проверяем Docker и порты")
     if not docker_ready():
