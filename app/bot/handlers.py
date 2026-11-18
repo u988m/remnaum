@@ -22,6 +22,8 @@ from app.services.store_profile import get_terms_url
 from app.services.store_profile import get_store_profile
 from app.services.referrals import parse_referral_start, register_referral, referral_count, referral_code, reward_balance, get_referral_settings
 from app.services.plans import list_plans, choose_plan, selected_stars_price, clear_selected_plan
+from app.services.trials import get_trial_settings, trial_eligible, claim_trial
+from app.services.promos import redeem_promo, promo_balance
 from app.db.models import Payment, User
 from app.db.session import SessionLocal
 from sqlalchemy import select
@@ -37,6 +39,8 @@ def main_menu() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="📱 Устройства", callback_data="menu:devices")],
         [InlineKeyboardButton(text="🧾 Мои покупки", callback_data="menu:purchases"),
          InlineKeyboardButton(text="🎁 Пригласить друга", callback_data="menu:referral")],
+        [InlineKeyboardButton(text="🎟 Промокод", callback_data="menu:promo"),
+         InlineKeyboardButton(text="🎁 Пробный доступ", callback_data="menu:trial")],
         [InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support")],
     ]
     if settings.webapp_url:
@@ -342,6 +346,97 @@ async def payment_support_handler(message: Message) -> None:
     profile = await get_store_profile()
     support = escape(profile["support_contact"]) if profile["support_contact"] else "Контакт поддержки ещё не настроен."
     await message.answer(f"Поддержка по оплате: {support}")
+
+
+@router.message(Command("promo"))
+async def promo_command_handler(message: Message) -> None:
+    if message.from_user is None:
+        return
+    chunks = (message.text or "").split(maxsplit=1)
+    if len(chunks) != 2:
+        await message.answer("🎟 Введите промокод: <code>/promo ВАШ_КОД</code>")
+        return
+    try:
+        result = await redeem_promo(message.from_user.id, chunks[1])
+    except ValueError as exc:
+        await message.answer("🎟 " + escape(str(exc)))
+        return
+    await message.answer(
+        f"✅ Промокод <b>{escape(result['code'])}</b> активирован. "
+        f"+{result['bonus_days']} дней при следующей оплаченной подписке.",
+        reply_markup=main_menu(),
+    )
+
+
+@router.callback_query(F.data == "menu:promo")
+async def promo_menu_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    balance = await promo_balance(callback.from_user.id)
+    if callback.message:
+        await callback.message.edit_text(
+            "🎟 <b>Промокоды</b>\n\n"
+            "Введите в этом чате: <code>/promo ВАШ_КОД</code>\n\n"
+            f"Бонусных дней: <b>{balance['days']}</b>. "
+            "Они добавятся к следующей оплаченной подписке.",
+            reply_markup=back_menu(),
+        )
+
+
+@router.callback_query(F.data == "menu:trial")
+async def trial_menu_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.message:
+        return
+    config = await get_trial_settings()
+    if not config["enabled"]:
+        await callback.message.edit_text("🎁 Пробный доступ пока отключён.", reply_markup=back_menu())
+        return
+    if not await trial_eligible(callback.from_user.id):
+        await callback.message.edit_text(
+            "🎁 Пробный доступ доступен только один раз до первой подписки.",
+            reply_markup=back_menu(),
+        )
+        return
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎁 Получить пробный доступ", callback_data="trial:claim")],
+        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
+    ])
+    await callback.message.edit_text(
+        "🎁 <b>Пробный доступ</b>\n\n"
+        f"{config['days']} дней · {config['traffic_gb']} ГБ · "
+        f"{config['device_limit']} устройств.\n"
+        "Выдаётся один раз.",
+        reply_markup=keyboard,
+    )
+
+
+@router.callback_query(F.data == "trial:claim")
+async def trial_claim_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.message:
+        return
+    try:
+        result = await claim_trial(callback.from_user.id)
+    except (ValueError, RuntimeError) as exc:
+        await callback.message.edit_text("🎁 " + escape(str(exc)), reply_markup=back_menu())
+        return
+    except Exception:
+        await callback.message.edit_text(
+            "Пробный доступ временно недоступен. Попробуйте позже.", reply_markup=back_menu(),
+        )
+        return
+    link = result.get("subscription_url")
+    keyboard = back_menu()
+    if isinstance(link, str) and link.startswith("https://"):
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔗 Подключить VPN", url=link)],
+            [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
+        ])
+    await callback.message.edit_text(
+        f"✅ Доступ выдан: {result['days']} дней, {result['traffic_gb']} ГБ, "
+        f"{result['device_limit']} устройств.",
+        reply_markup=keyboard,
+    )
 
 
 @router.callback_query(F.data == "menu:profile")
