@@ -296,6 +296,7 @@ async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=Non
     return {
         "user": {"id": identity["id"], "first_name": identity.get("first_name", "")},
         "profile": await public_store_profile(),
+        "is_admin": int(identity["id"]) in settings.admin_id_set,
         "pricing": pricing,
         "stars_enabled": await is_payment_method_enabled("telegram_stars"),
         "payment_methods": await _get_public_checkout_methods(),
@@ -745,7 +746,8 @@ async def webapp_referrals(x_telegram_init_data: str | None = Header(default=Non
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     identity = await _webapp_user(x_telegram_init_data)
     telegram_id = int(identity["id"])
-    username = settings.telegram_bot_username.lstrip("@")
+    from app.services.bot_identity import bot_username
+    username = bot_username()
     return {
         "link": f"https://t.me/{username}?start={referral_code(telegram_id)}" if username else None,
         "count": await referral_count(telegram_id),
