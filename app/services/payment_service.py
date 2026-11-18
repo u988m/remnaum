@@ -5,10 +5,15 @@ from sqlalchemy import select
 
 from app.db.models import Payment, TariffDraft, User
 from app.db.session import SessionLocal
+from app.config import settings
 from app.services.payment_providers import VerifiedPayment, get_provider
 
 
 async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple[Payment, Any]:
+    if not settings.remnawave_base_url or not settings.remnawave_api_token:
+        raise RuntimeError("Remnawave is not configured; payment checkout is disabled")
+    if not settings.remnawave_internal_squad_ids:
+        raise RuntimeError("Set REMNAWAVE_ACTIVE_INTERNAL_SQUADS before accepting payments")
     async with SessionLocal() as session:
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
         if user is None:
@@ -27,7 +32,7 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
             user_id=user.id,
             provider=provider_name,
             amount=draft.amount_minor,
-            currency="RUB" if provider_name == "yoomoney" else _tariff_currency(),
+            currency=_tariff_currency(),
             status="pending",
             payload=json.dumps({
                 "tariff": {
@@ -64,7 +69,7 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
         stored = await session.get(Payment, payment_id)
         if stored is None:
             raise RuntimeError("Local payment record disappeared")
-        stored.provider_payment_id = link.payment_id
+        if stored.status == "pending":\n            stored.provider_payment_id = link.payment_id
         await session.commit()
     return payment, link
 
