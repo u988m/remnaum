@@ -170,16 +170,15 @@ systemctl status remnaum-update-check.timer
 
 ## 💬 Сообщество
 
-<div align="center">
+<p align="center"><strong>Следите за обновлениями, делитесь идеями и задавайте вопросы</strong></p>
 
-**Присоединяйтесь к сообществу Remnaum**
-
-| Обсудить ошибку | Узнать об обновлениях |
-| :---: | :---: |
-| [![Баги](https://img.shields.io/badge/%D0%91%D0%B0%D0%B3%D0%B8-D94A5B?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/remnaum/3) | [![Обновления](https://img.shields.io/badge/%D0%9E%D0%B1%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F-3978E6?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/remnaum/4) |
-| Предложить функцию | Получить помощь |
-| [![Предложения](https://img.shields.io/badge/%D0%9F%D1%80%D0%B5%D0%B4%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B8%D1%8F-8A56CF?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/remnaum/5) | [![Помощь](https://img.shields.io/badge/%D0%9F%D0%BE%D0%BC%D0%BE%D1%89%D1%8C-159B84?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/remnaum/6) |
-
-</div>
+<p align="center">
+  <a href="https://t.me/remnaum/3"><img alt="Баги" src="https://img.shields.io/badge/%D0%91%D0%B0%D0%B3%D0%B8-D94A5B?style=for-the-badge&amp;logo=telegram&amp;logoColor=white"></a>
+  <a href="https://t.me/remnaum/4"><img alt="Обновления" src="https://img.shields.io/badge/%D0%9E%D0%B1%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F-3978E6?style=for-the-badge&amp;logo=telegram&amp;logoColor=white"></a>
+</p>
+<p align="center">
+  <a href="https://t.me/remnaum/5"><img alt="Предложения" src="https://img.shields.io/badge/%D0%9F%D1%80%D0%B5%D0%B4%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B8%D1%8F-8A56CF?style=for-the-badge&amp;logo=telegram&amp;logoColor=white"></a>
+  <a href="https://t.me/remnaum/6"><img alt="Помощь" src="https://img.shields.io/badge/%D0%9F%D0%BE%D0%BC%D0%BE%D1%89%D1%8C-159B84?style=for-the-badge&amp;logo=telegram&amp;logoColor=white"></a>
+</p>
 
 [← Вернуться в README](../README.md)
