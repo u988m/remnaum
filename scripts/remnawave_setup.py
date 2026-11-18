@@ -218,13 +218,15 @@ def apply_env_changes(path: Path, changes: dict[str, str]) -> Path:
     for key, value in changes.items():
         if key not in done:
             result.append(f"{key}={value}")
+    original_stat = path.stat()
     fd, temp = tempfile.mkstemp(prefix=".remnaum-env-", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as output:
             output.write("\n".join(result) + "\n")
             output.flush()
             os.fsync(output.fileno())
-        os.chmod(temp, path.stat().st_mode & 0o777)
+        os.chmod(temp, original_stat.st_mode & 0o777)
+        os.chown(temp, original_stat.st_uid, original_stat.st_gid)
         os.replace(temp, path)
     finally:
         if os.path.exists(temp):
