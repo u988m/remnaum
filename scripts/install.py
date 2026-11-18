@@ -21,7 +21,7 @@ NETWORK_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 
 
 def valid_domain(value: str) -> bool:
-    return bool(DOMAIN_RE.fullmatch(value)) and value.lower() not in {"localhost", "example.com"}
+    return (bool(DOMAIN_RE.fullmatch(value)) and not value.lower().endswith((".example.com", ".example.net", ".example.org", ".test", ".invalid", ".localhost")) and value.lower() not in {"example.com", "example.net", "example.org"})
 
 
 def clean(value: str) -> str:
