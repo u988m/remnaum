@@ -95,7 +95,7 @@ async function loadBrand(){
   $("brand-support").value=d.support_contact;$("brand-terms").value=d.terms_url||"";$("brand-color").value=d.accent_color;
   $("admin-shop-name").textContent=d.name;
   renderWelcomePhoto(d.welcome_image_url);
-  await loadBotIdentity();
+  loadBotIdentity();
 }
 $("brand-form").onsubmit=async e=>{
   e.preventDefault();try{
