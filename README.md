@@ -4,11 +4,12 @@ Remnaum is a Telegram-first VPN subscription platform built around the Remnawave
 
 ## Current status
 
-**Current milestone: 0.3.0.** The bot registers Telegram users and provides a starter menu for plans, profile, subscription and support. Billing, subscription provisioning and the customer Web App are not production-ready yet.
+**Current milestone: 0.4.0.** Users can configure a personal tariff by choosing duration, traffic allowance and device count. The bot calculates and stores a price quote. Payment, subscription provisioning and the customer Web App are not production-ready yet.
 
 ## Planned modules
 
 - Telegram bot: onboarding, plans, subscription status and support.
+- Tariff builder: user-selected duration, traffic and device limits, bounded by operator settings and priced from configurable rates.
 - Billing: provider adapters, payment verification, idempotent webhook processing and refunds.
 - Subscription service: lifecycle, renewals, expiry jobs and panel synchronization.
 - Remnawave adapter: isolated client for creating users, reading user/subscription data, enabling/disabling accounts and extending expiry. API calls use Bearer-token authentication.
@@ -41,6 +42,7 @@ See [`.env.example`](.env.example). Keep secrets in `.env`; never commit it.
 - For webhook mode, set `TELEGRAM_USE_WEBHOOK=true`, `TELEGRAM_WEBHOOK_URL` and a long random `TELEGRAM_WEBHOOK_SECRET`. Put the service behind HTTPS.
 - Set `REMNAWAVE_BASE_URL` to the panel root URL (without `/api`) and `REMNAWAVE_API_TOKEN` to the panel API token. The adapter currently implements the documented `/api/users` and `/api/subscriptions` operations.
 - Set `SUPPORT_CONTACT` to the text or contact link shown in the support section.
+- Configure `TARIFF_MIN_*`, `TARIFF_MAX_*`, `TARIFF_PRICE_PER_*` and `TARIFF_CURRENCY` to control the custom tariff builder. Prices are stored in minor currency units (for EUR, cents).
 - Payment integration is intentionally disabled until a provider is selected and verified.
 
 ## Operations
