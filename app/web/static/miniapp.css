@@ -25,3 +25,39 @@ button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible{ou
 #trial-offer{background:linear-gradient(155deg,var(--tg-theme-secondary-bg-color,#151d29),rgba(79,119,195,.14))}
 @media(max-width:390px){main{padding-inline:12px}.panel{padding:15px}.metric{padding:10px 5px}.metric b{font-size:15px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
+/* Remnaum 1.1 — purposeful mobile information architecture. */
+:root{--brand-accent:var(--tg-theme-button-color,#548cf4);--brand-border:rgba(137,164,201,.16)}
+body{background:radial-gradient(ellipse 90% 30% at 50% -9%,rgba(56,106,189,.23),transparent 77%),var(--tg-theme-bg-color,#090f1a)}
+main{max-width:640px;padding:20px 16px calc(104px + env(safe-area-inset-bottom));min-height:100dvh}
+header{margin:0 0 24px;gap:14px}
+.brand{display:flex;align-items:center;gap:10px;font-size:21px;min-width:0;overflow-wrap:anywhere}
+.brand-mark{display:grid;place-items:center;width:35px;height:35px;flex:none;border-radius:11px;background:linear-gradient(140deg,#16d9d6 0%,#4684fc 65%,#8159e5 100%);font-size:23px;font-weight:900;color:#071322;letter-spacing:-1px}
+.tag{font-size:10px;letter-spacing:1px;white-space:nowrap}
+.hero{position:relative;overflow:hidden;background:linear-gradient(125deg,rgba(29,58,97,.72),rgba(20,29,49,.82));border:1px solid var(--brand-border);padding:24px 21px;border-radius:24px;margin-bottom:18px;min-height:156px}
+.hero:before{content:"";position:absolute;width:180px;height:180px;right:-70px;top:-110px;border:1px solid rgba(91,144,237,.26);border-radius:50%;box-shadow:0 0 0 39px rgba(91,144,237,.05),0 0 0 78px rgba(91,144,237,.025)}
+.hero-eyebrow{font-size:10px;letter-spacing:1.4px;font-weight:750;color:#91b9ed}
+.hero h1{font-size:clamp(25px,6vw,33px);font-weight:850;line-height:1.15;max-width:440px;position:relative;margin:14px 0 11px}
+.hero .muted{font-size:13px;max-width:430px;position:relative}
+.panel{background:var(--tg-theme-secondary-bg-color,#141e2c);border:1px solid var(--brand-border);border-radius:20px;padding:20px;margin-top:13px;box-shadow:none}
+.panel h2{font-size:17px;letter-spacing:-.25px;font-weight:750}
+.panel .panel{border-radius:15px;background:rgba(18,32,52,.65);padding:16px;margin-top:12px}
+.metric{border:1px solid var(--brand-border);background:rgba(8,16,30,.48);border-radius:13px;padding:15px 7px}
+.metric b{font-size:19px;font-variant-numeric:tabular-nums}
+.row{gap:14px;border-bottom:1px solid rgba(142,164,195,.075)}
+.row:last-child{border-bottom:0}
+select,#promo-input{width:100%;min-height:46px;border:1px solid rgba(125,150,186,.28);border-radius:11px;background:rgba(8,15,27,.75);color:inherit;padding:12px;font-size:14px}
+button:not(.bottom-nav button){border-radius:12px;min-height:45px}
+#sub-link{display:inline-block;padding:12px 15px;background:rgba(70,128,232,.16);border:1px solid rgba(70,128,232,.3);border-radius:11px;font-weight:650;text-decoration:none;margin-top:15px}
+#connection-guide p{margin:10px 0;font-size:13px}
+#account-referral-link{overflow-wrap:anywhere}
+.price{font-size:29px}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:50;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;padding:9px max(12px,env(safe-area-inset-left)) calc(9px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-right));background:rgba(10,17,29,.96);border-top:1px solid rgba(125,149,178,.2);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+.bottom-nav button{width:100%;margin:0;padding:8px 2px 6px;border:0;min-height:54px;border-radius:12px;background:transparent;color:#8d9bb3;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:10px;font-weight:680}
+.bottom-nav .nav-icon{display:block;font-size:24px;line-height:1}
+.bottom-nav button.nav-active{color:#e3f0ff;background:rgba(75,128,226,.18)}
+.screen[hidden]{display:none!important}
+body:has(.bottom-nav) .status{overflow-wrap:anywhere}
+@media (min-width:760px){.bottom-nav{left:calc(50% - 320px);right:calc(50% - 320px);border:1px solid var(--brand-border);border-radius:20px 20px 0 0}.hero{padding:30px}}
+@media (max-width:390px){main{padding-left:12px;padding-right:12px}.hero{padding:20px 16px}.panel{padding:16px}.bottom-nav{padding-left:6px;padding-right:6px}}
+@media(prefers-reduced-motion:reduce){.bottom-nav{backdrop-filter:none}}
