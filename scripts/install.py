@@ -16,6 +16,8 @@ import sys
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
+import terminal_ui as ui
+import backup_manager as backups
 from remnawave_setup import (
     discover_squads, select_squads, validate_uuid_list,
     local_panel_for_url, panel_webhook_secret, apply_local_panel_webhook,
@@ -346,6 +348,143 @@ def scrub_migrated_legacy_payment_keys(path: Path = ENV_PATH) -> bool:
     return True
 
 
+def install_global_command() -> None:
+    """Keep one safe launcher pointing to the actual installation directory."""
+    if os.geteuid() != 0:
+        return
+    location = str(ROOT.resolve())
+    if not re.fullmatch(r"/[A-Za-z0-9_./-]+", location):
+        ui.warning("Путь содержит необычные символы; глобальная команда не настроена")
+        return
+    path = Path("/usr/local/bin/remnaum")
+    wrapper = (
+        "#!/bin/sh\n"
+        "set -eu\n"
+        "if [ \"$(id -u)\" -ne 0 ]; then exec sudo /usr/local/bin/remnaum \"$@\"; fi\n"
+        f"cd {location}\n"
+        "exec sh ./install.sh \"$@\"\n"
+    )
+    temporary = path.with_name(".remnaum-launcher.tmp")
+    temporary.write_text(wrapper, encoding="utf-8")
+    os.chmod(temporary, 0o755)
+    os.replace(temporary, path)
+    ui.ok("Команда remnaum работает из любой папки")
+
+
+def offer_backup_key() -> None:
+    """Owners can set a recovery key or accept a strong generated one."""
+    if backups.KEY.exists():
+        return
+    ui.section(5, 5, "Защита резервных копий")
+    print("  Резервные копии будут зашифрованы. Ключ понадобится при восстановлении на другом сервере.")
+    answer = prompt("Установить свой ключ восстановления? (д/Н)", default="Н")
+    if answer.lower() in ("д", "да", "y", "yes"):
+        secret = prompt("Ключ восстановления (минимум 24 символа)", hidden=True)
+        if len(secret) < 24:
+            raise ValueError("Ключ восстановления должен содержать минимум 24 символа")
+        confirmation = prompt("Повторите ключ", hidden=True)
+        if secret != confirmation:
+            raise ValueError("Ключи не совпадают")
+        backups._secure_write(backups.KEY, secret.encode() + b"\n")
+        ui.ok("Ваш собственный ключ восстановления сохранён с правами 600")
+    else:
+        backups.key_bytes(create=True)
+
+
+def show_backup_menu(existing: dict[str, str]) -> int:
+    ui.header("Полные копии · Восстановление · Расписание")
+    if not existing:
+        print("  Магазин ещё не настроен. Можно восстановить существующий архив.")
+        choice = "2"
+    else:
+        ui.menu("Резервное копирование", [
+            ("1", "Создать полную копию сейчас"),
+            ("2", "Восстановить архив"),
+            ("3", "Настроить ежедневные / ежечасные копии"),
+            ("4", "Показать сохранённые архивы"),
+            ("0", "Вернуться"),
+        ])
+        choice = prompt("Выберите действие", default="1")
+    if choice == "0":
+        return 0
+    if choice == "1":
+        ui.section(1, 2, "Снимаем согласованный снимок PostgreSQL и Redis")
+        result = backups.create_backup()
+        ui.section(2, 2, "Шифрование завершено")
+        ui.ok("Сохранено в " + str(result))
+    elif choice == "2":
+        if existing:
+            archives = sorted(backups.BACKUPS.glob("remnaum-full-*.rmb"), reverse=True)
+            for number, item in enumerate(archives[:10], 1):
+                print(f"  {number}. {item.name}")
+        archive_name = prompt("Полный путь к файлу .rmb")
+        archive = Path(archive_name).expanduser().resolve()
+        if archive.suffix != ".rmb":
+            raise ValueError("Выберите зашифрованный архив Remnaum (.rmb)")
+        secret = None
+        if not backups.KEY.exists():
+            secret = prompt("Ключ восстановления с прежнего сервера", hidden=True)
+        info = backups.inspect_backup(archive, supplied_key=secret)
+        print(f"  Архив создан: {info['created_utc']}")
+        print(f"  Исходная папка: {info['original_path']}")
+        print(f"  Текущая папка: {ROOT}")
+        if info["original_path"] != str(ROOT.resolve()):
+            ui.warning("Исходная папка отличается. Файлы будут восстановлены в текущую папку.")
+        print("  Восстановление заменит базу и настройки текущего магазина!")
+        if prompt("Для подтверждения введите ВОССТАНОВИТЬ", required=True) != "ВОССТАНОВИТЬ":
+            ui.warning("Восстановление отменено")
+            return 0
+        if existing:
+            print("  Сохраняем аварийную копию текущего состояния...")
+            backups.create_backup()
+        ui.section(1, 2, "Проверяем архив и восстанавливаем данные")
+        backups.restore_backup(archive, supplied_key=secret)
+        if secret and not backups.KEY.exists():
+            backups._secure_write(backups.KEY, secret.encode() + b"\n")
+        ui.section(2, 2, "Восстановление завершено")
+        install_global_command()
+        backups.configure_timer()
+        install_update_timer()
+        ui.ok("Remnaum восстановлен. Проверьте DNS и подключение к панели.")
+    elif choice == "3":
+        ui.menu("Как часто создавать резервные копии?", [
+            ("1", "Каждый час"),
+            ("2", "Каждый день"),
+            ("3", "Отключить автоматические копии"),
+        ])
+        period = prompt("Период", default="2")
+        schedules = {"1": "hourly", "2": "daily", "3": "off"}
+        if period not in schedules:
+            raise ValueError("Выберите 1, 2 или 3")
+        keep = int(prompt("Сколько последних копий хранить", default="7"))
+        send = prompt("Отправлять зашифрованные архивы в Telegram? (д/Н)", default="Н").lower() in (
+            "д", "да", "y", "yes",
+        )
+        chat_id = ""
+        if send:
+            admins = existing.get("ADMIN_IDS", "").split(",")
+            default_chat = admins[0].strip() if admins else ""
+            chat_id = prompt("Telegram chat ID получателя", default=default_chat)
+            print("  Сначала напишите своему боту /start. Ключ восстановления в Telegram НЕ отправляется.")
+        if not backups.KEY.exists():
+            offer_backup_key()
+        backups.save_settings({
+            "schedule": schedules[period], "keep": keep, "telegram": send, "chat_id": chat_id,
+        })
+        backups.configure_timer()
+        ui.ok("Параметры резервного копирования сохранены")
+    elif choice == "4":
+        archives = sorted(backups.BACKUPS.glob("remnaum-full-*.rmb"), reverse=True)
+        if not archives:
+            ui.warning("Пока нет резервных копий")
+        for archive in archives[:30]:
+            mb = archive.stat().st_size / 1048576
+            print(f"  • {archive.name} — {mb:.1f} МиБ")
+    else:
+        raise ValueError("Неизвестный пункт меню")
+    return 0
+
+
 def choose_mode(existing: dict[str, str], requested: str | None) -> str:
     if requested:
         return requested
@@ -365,15 +504,18 @@ def choose_action(existing: dict[str, str], requested: str | None) -> str:
         if requested == "update" and not existing:
             raise ValueError("Сначала установите Remnaum.")
         return requested
-    print("\n===== Remnaum =====")
-    print("  1 — Установить / настроить")
-    print("  2 — Обновить")
-    choice = prompt("Выберите действие (1/2)", default="1")
-    if choice not in ("1", "2"):
-        raise ValueError("Выберите 1 или 2")
+    ui.header()
+    ui.menu("Выберите действие", [
+        ("1", "Установить / настроить"),
+        ("2", "Обновить до новой версии"),
+        ("3", "Резервные копии и восстановление"),
+    ])
+    choice = prompt("Ваш выбор (1/2/3)", default="1")
+    if choice not in ("1", "2", "3"):
+        raise ValueError("Выберите 1, 2 или 3")
     if choice == "2" and not existing:
         raise ValueError("Сначала установите Remnaum.")
-    return "install" if choice == "1" else "update"
+    return {"1": "install", "2": "update", "3": "backup"}[choice]
 
 
 def wait_for_app_health(max_attempts: int = 35) -> bool:
@@ -403,8 +545,10 @@ def perform_update(existing: dict[str, str]) -> int:
     if not wait_for_app_health():
         raise RuntimeError("API не отвечает. Проверьте docker compose logs --tail=100 app")
     scrub_migrated_legacy_payment_keys()
+    install_global_command()
+    backups.configure_timer()
     install_update_timer()
-    print("\nRemnaum обновлён. База и секреты сохранены.")
+    ui.ok("Remnaum обновлён. База, секреты и резервные копии сохранены.")
     return 0
 
 
@@ -623,7 +767,7 @@ def config_for_install(existing: dict[str, str], mode: str,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Мастер установки и обновления Remnaum.")
-    parser.add_argument("--action", choices=("install", "update"), help="Выбор без меню")
+    parser.add_argument("--action", choices=("install", "update", "backup"), help="Выбор без меню")
     parser.add_argument("--mode", choices=("panel", "standalone"),
                         help="Optional topology selection (otherwise guided interactive prompt)")
     parser.add_argument("--proxy-network",
@@ -641,8 +785,10 @@ def main() -> int:
     action = choose_action(existing, args.action)
     if action == "update":
         return perform_update(existing)
+    if action == "backup":
+        return show_backup_menu(existing)
     choose_install_dir(existing, args.install_dir, no_relocate=args.no_relocate)
-    print("\n[1/4] Способ установки")
+    ui.section(1, 5, "Режим установки")
     mode = choose_mode(existing, args.mode)
     if existing.get("DEPLOY_MODE") and existing["DEPLOY_MODE"] != mode:
         raise ValueError(
@@ -650,7 +796,7 @@ def main() -> int:
             "и проверьте сохранность БД. Текущий режим: " + existing["DEPLOY_MODE"]
         )
 
-    print("\n[2/4] Проверяем Docker и порты")
+    ui.section(2, 5, "Docker и свободные порты")
     offer_docker_setup()
     port = args.local_port or int(existing.get("REMNAUM_LOCAL_PORT") or "18080")
     if not 1024 <= port <= 65535:
@@ -668,7 +814,7 @@ def main() -> int:
             print(f"Порт {port} занят. Выбран свободный 127.0.0.1:{chosen_port}.")
         port = chosen_port
 
-    print("\n[3/4] Настройки магазина")
+    ui.section(3, 5, "Настройки Remnaum")
     cfg = config_for_install(existing, mode, args.proxy_network, port)
     if not existing:
         base = ROOT / ".env.example"
@@ -692,9 +838,17 @@ def main() -> int:
     else:
         print("\nStandalone mode: Remnaum Caddy will own 80/443; Nginx stays private.")
 
-    print("\n[4/4] Сборка и запуск контейнеров")
+    ui.section(4, 5, "Сборка и запуск Docker")
     run(["docker", "compose", "config", "--quiet"])
-    run(["docker", "compose", "up", "-d", "--build"])
+    if sys.stdout.isatty():
+        code = ui.animated_call(
+            ["docker", "compose", "up", "-d", "--build"],
+            str(ROOT), log_path=str(ROOT / "data" / "installer.log"),
+        )
+        if code:
+            raise RuntimeError("Ошибка сборки Docker. Подробности: data/installer.log")
+    else:
+        run(["docker", "compose", "up", "-d", "--build"])
     if not wait_for_app_health():
         raise RuntimeError("API не отвечает. Проверьте docker compose logs --tail=100 app")
     if mode == "panel":
@@ -719,8 +873,12 @@ def main() -> int:
                     print("Проверьте состояние панели и повторите настройку.")
         else:
             print("Локальная панель не совпадает с адресом API; её настройки не меняем.")
+    offer_backup_key()
+    install_global_command()
+    backups.configure_timer()
     install_update_timer()
-    print("\nRemnaum запущен. Тестовые данные не создавались.")
+    ui.ok("Remnaum запущен. База создана без тестовых пользователей.")
+
     print("Telegram webhook: " + cfg["TELEGRAM_WEBHOOK_URL"])
     print("Mini App: " + cfg["WEBAPP_URL"])
     print("Remnawave events: https://" + cfg["PUBLIC_DOMAIN"] + "/webhooks/remnawave")
