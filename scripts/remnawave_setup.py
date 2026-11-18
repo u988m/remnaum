@@ -93,27 +93,22 @@ def discover_squads(base_url: str, token: str) -> list[dict[str, str]]:
 
 def select_squads(
     squads: list[dict[str, str]],
-    ask,
+    ask=None,
     *,
-    default_all: bool = False,
+    default_all: bool = True,
 ) -> str:
+    """Assign every discovered Internal Squad automatically, without prompts.
+
+    Internal Squads can grant different access (including premium nodes).
+    The operator explicitly opted into the all-squads policy in Remnaum.
+    """
     if not squads:
         raise ValueError("У панели пока нет внутренних групп. Создайте Internal Squad в Remnawave.")
-    if len(squads) == 1:
-        print(f"✅ Найдена внутренняя группа: {squads[0]['name']}")
-        return squads[0]["uuid"]
-    print("\nВнутренние группы Remnawave:")
-    for index, squad in enumerate(squads, start=1):
-        print(f"  {index}. {squad['name']}")
-    # We never silently assign all squads; some may be privileged.
-    label = "Номера групп для продажи (например 1,2)"
-    answer = ask(label, default="1")
-    if not re.fullmatch(r"[0-9]+(?:\s*,\s*[0-9]+)*", answer):
-        raise ValueError("Нужно указать номера групп через запятую")
-    indices = [int(part.strip()) for part in answer.split(",")]
-    if any(i < 1 or i > len(squads) for i in indices):
-        raise ValueError("Такого номера группы нет")
-    return ",".join(dict.fromkeys(squads[i - 1]["uuid"] for i in indices))
+    identifiers = validate_uuid_list(",".join(squad["uuid"] for squad in squads))
+    print(f"✅ Автоматически выбраны все внутренние группы Remnawave ({len(identifiers.split(','))}):")
+    for squad in squads:
+        print(f"    • {squad['name']} ({squad['uuid']})")
+    return identifiers
 
 
 def validate_uuid_list(value: str) -> str:
