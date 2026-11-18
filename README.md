@@ -4,7 +4,7 @@ Remnaum is a Telegram-first VPN subscription platform built around the Remnawave
 
 ## Current status
 
-**Current milestone: 0.2.0.** The bot registers Telegram users and provides a starter menu for plans, profile, subscription and support. Billing, subscription provisioning and the customer Web App are not production-ready yet.
+**Current milestone: 0.3.0.** The bot registers Telegram users and provides a starter menu for plans, profile, subscription and support. Billing, subscription provisioning and the customer Web App are not production-ready yet.
 
 ## Planned modules
 
