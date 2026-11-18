@@ -2,12 +2,21 @@ from html import escape
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message, PreCheckoutQuery, WebAppInfo
 
 from app.config import settings
 from app.services.tariffs import TariffQuote, format_price, get_tariff_draft, update_tariff_draft
-from app.services.payment_service import create_payment_for_user
-from app.services.subscriptions import get_user_subscription
+from app.services.payment_service import (
+    accept_current_terms,
+    create_stars_payment_for_user,
+    has_accepted_current_terms,
+    retry_paid_payments_for_user,
+    validate_stars_pre_checkout,
+)
+from app.services.payment_providers import VerifiedPayment
+from app.services.payment_service import settle_payment
+from app.services.tariffs import calculate_stars_price
+from app.services.subscriptions import get_user_subscription, provision_paid_payment
 from app.services.users import get_or_create_user
 
 router = Router(name="user")
@@ -122,45 +131,136 @@ async def tariff_update_handler(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "payment:choose")
 async def payment_choose_handler(callback: CallbackQuery) -> None:
     await callback.answer()
+    if not settings.telegram_terms_url:
+        if callback.message:
+            await callback.message.edit_text(
+                "Продажи пока не включены: администратору нужно опубликовать условия и указать TELEGRAM_TERMS_URL.",
+                reply_markup=back_menu(),
+            )
+        return
+    if await has_accepted_current_terms(callback.from_user.id):
+        await show_stars_checkout(callback)
+        return
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="ЮKassa", callback_data="payment:create:yookassa")],
-        [InlineKeyboardButton(text="ЮMoney", callback_data="payment:create:yoomoney")],
-        [InlineKeyboardButton(text="Crypto Pay", callback_data="payment:create:cryptopay")],
+        [InlineKeyboardButton(text="📄 Прочитать условия", url=settings.telegram_terms_url)],
+        [InlineKeyboardButton(text="Принимаю условия", callback_data="payment:terms:accept")],
         [InlineKeyboardButton(text="⬅️ Назад к тарифу", callback_data="menu:plans")],
     ])
     if callback.message:
-        quote = await get_tariff_draft(callback.from_user.id)
         await callback.message.edit_text(
-            f"💳 <b>Выберите способ оплаты</b>\n\n"
-            f"К оплате: <b>{escape(format_price(quote.amount_minor, quote.currency))}</b>",
+            "Перед оплатой прочитайте и примите условия оказания услуги.",
             reply_markup=keyboard,
         )
 
 
-@router.callback_query(F.data.startswith("payment:create:"))
-async def payment_create_handler(callback: CallbackQuery) -> None:
-    provider_name = callback.data.rsplit(":", 1)[-1]
-    await callback.answer("Создаю счёт…")
-    try:
-        _, link = await create_payment_for_user(callback.from_user.id, provider_name)
-    except (ValueError, RuntimeError) as exc:
-        if callback.message:
-            await callback.message.answer(f"Не удалось создать счёт: {escape(str(exc))}")
-        return
-    except Exception:
-        if callback.message:
-            await callback.message.answer("Платёжный сервис временно недоступен. Попробуйте позже.")
-        return
-
+async def show_stars_checkout(callback: CallbackQuery) -> None:
+    quote = await get_tariff_draft(callback.from_user.id)
+    stars = calculate_stars_price(quote.duration_days, quote.traffic_gb, quote.device_limit)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Перейти к оплате", url=link.url)],
-        [InlineKeyboardButton(text="⬅️ К способам оплаты", callback_data="payment:choose")],
+        [InlineKeyboardButton(text=f"⭐ Оплатить {stars} Stars", callback_data="payment:create:stars")],
+        [InlineKeyboardButton(text="⬅️ Назад к тарифу", callback_data="menu:plans")],
     ])
     if callback.message:
-        await callback.message.answer(
-            f"Счёт создан. После оплаты дождитесь подтверждения платёжной системы.",
+        await callback.message.edit_text(
+            f"💳 <b>Оплата Telegram Stars</b>\\n\\n"
+            f"Тариф: {quote.duration_days} дней, {quote.traffic_gb} ГБ, {quote.device_limit} устройств.\\n"
+            f"К оплате: <b>{stars} ⭐</b>",
             reply_markup=keyboard,
         )
+
+
+@router.callback_query(F.data == "payment:terms:accept")
+async def payment_terms_accept_handler(callback: CallbackQuery) -> None:
+    try:
+        await accept_current_terms(callback.from_user.id)
+    except (ValueError, RuntimeError) as exc:
+        await callback.answer(str(exc), show_alert=True)
+        return
+    await callback.answer("Условия приняты")
+    await show_stars_checkout(callback)
+
+
+@router.callback_query(F.data == "payment:create:stars")
+async def stars_payment_create_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    try:
+        payment, stars = await create_stars_payment_for_user(callback.from_user.id)
+    except (ValueError, RuntimeError) as exc:
+        if callback.message:
+            await callback.message.answer(escape(str(exc)))
+        return
+    if callback.message:
+        await callback.message.answer_invoice(
+            title="Remnaum VPN",
+            description="VPN-подписка с выбранными вами параметрами.",
+            payload=f"remnaum:{payment.id}",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label="Remnaum VPN subscription", amount=stars)],
+        )
+
+
+@router.pre_checkout_query()
+async def stars_pre_checkout_handler(query: PreCheckoutQuery) -> None:
+    try:
+        payment_id = int(query.invoice_payload.removeprefix("remnaum:"))
+        valid = await validate_stars_pre_checkout(
+            telegram_id=query.from_user.id,
+            payment_id=payment_id,
+            amount=query.total_amount,
+            currency=query.currency,
+            payload=query.invoice_payload,
+        )
+    except (ValueError, TypeError):
+        valid = False
+    await query.answer(
+        ok=valid,
+        error_message=None if valid else "Счёт недействителен или уже оплачен. Создайте новый.",
+    )
+
+
+@router.message(F.successful_payment)
+async def stars_successful_payment_handler(message: Message) -> None:
+    successful = message.successful_payment
+    if successful is None:
+        return
+    try:
+        payment_id = int(successful.invoice_payload.removeprefix("remnaum:"))
+        verified = VerifiedPayment(
+            local_payment_id=payment_id,
+            provider_payment_id=successful.telegram_payment_charge_id,
+            amount_minor=successful.total_amount,
+            currency=successful.currency,
+        )
+        await settle_payment(verified, "telegram_stars")
+        await provision_paid_payment(payment_id)
+    except Exception:
+        await message.answer(
+            "⭐ Платёж подтверждён Telegram. Выдача VPN-доступа задерживается; "
+            "откройте «Моя подписка» через несколько секунд или обратитесь в поддержку."
+        )
+        return
+    await message.answer(
+        "✅ Оплата подтверждена! VPN-подписка активирована. "
+        "Откройте раздел «Моя подписка», чтобы получить ссылку подключения.",
+        reply_markup=main_menu(),
+    )
+
+
+@router.message(Command("terms"))
+async def terms_handler(message: Message) -> None:
+    if settings.telegram_terms_url:
+        await message.answer(
+            f"Условия Remnaum: <a href=\"{escape(settings.telegram_terms_url, quote=True)}\">прочитать</a>"
+        )
+    else:
+        await message.answer("Условия ещё не опубликованы.")
+
+
+@router.message(Command("paysupport"))
+async def payment_support_handler(message: Message) -> None:
+    support = escape(settings.support_contact) if settings.support_contact else "Контакт поддержки ещё не настроен."
+    await message.answer(f"Поддержка по оплате: {support}")
 
 
 @router.callback_query(F.data == "menu:profile")
@@ -182,6 +282,10 @@ async def subscription_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     if not callback.message:
         return
+    try:
+        await retry_paid_payments_for_user(callback.from_user.id)
+    except Exception:
+        pass
     subscription = await get_user_subscription(callback.from_user.id)
     if subscription is None:
         await callback.message.edit_text(
