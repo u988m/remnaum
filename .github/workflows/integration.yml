@@ -94,8 +94,12 @@ jobs:
           import urllib.error
           import urllib.request
           base = 'http://127.0.0.1:8080'
-          def request(path, method='GET', host='miniapp.example.com'):
-              req = urllib.request.Request(base + path, method=method, headers={'Host': host})
+          def request(path, method='GET', host='miniapp.example.com', payload=None):
+              headers={'Host': host}
+              if payload is not None:
+                  headers['Content-Type']='application/json'
+              req = urllib.request.Request(base + path, method=method, headers=headers,
+                                           data=payload.encode() if payload is not None else None)
               try:
                   return urllib.request.urlopen(req, timeout=5)
               except urllib.error.HTTPError as exc:
@@ -112,8 +116,8 @@ jobs:
           assert request('/admin/api/trial').status == 401
           assert request('/admin/api/promos').status == 401
           assert request('/api/v1/webapp/offers').status == 401
-          assert request('/api/v1/webapp/external/checkout', 'POST').status == 401
-          assert request('/api/v1/webapp/plans/external/checkout', 'POST').status == 401
+          assert request('/api/v1/webapp/external/checkout', 'POST', payload='{"provider":"yookassa","days":30,"traffic":50,"devices":1}').status == 401
+          assert request('/api/v1/webapp/plans/external/checkout', 'POST', payload='{"provider":"cryptopay","plan_id":1}').status == 401
           assert request('/api/v1/webapp/trial', 'POST').status == 401
           assert request('/webhooks/remnawave', 'POST', 'webhook.example.com').status == 401
           print('Public storefront/miniapp and unauthenticated protected routes verified')
