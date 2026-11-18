@@ -162,8 +162,8 @@ async def show_stars_checkout(callback: CallbackQuery) -> None:
     ])
     if callback.message:
         await callback.message.edit_text(
-            f"💳 <b>Оплата Telegram Stars</b>\\n\\n"
-            f"Тариф: {quote.duration_days} дней, {quote.traffic_gb} ГБ, {quote.device_limit} устройств.\\n"
+            f"💳 <b>Оплата Telegram Stars</b>\n\n"
+            f"Тариф: {quote.duration_days} дней, {quote.traffic_gb} ГБ, {quote.device_limit} устройств.\n"
             f"К оплате: <b>{stars} ⭐</b>",
             reply_markup=keyboard,
         )
