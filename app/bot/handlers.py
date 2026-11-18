@@ -18,6 +18,7 @@ from app.services.payment_service import settle_payment
 from app.services.subscriptions import get_user_subscription, provision_paid_payment
 from app.services.users import get_or_create_user
 from app.services.store_settings import is_payment_method_enabled
+from app.services.store_profile import get_store_profile
 from app.services.referrals import parse_referral_start, register_referral, referral_count, referral_code
 from app.services.plans import list_plans, choose_plan, selected_stars_price, clear_selected_plan
 from app.db.models import Payment, User
@@ -93,9 +94,10 @@ async def start_handler(message: Message) -> None:
     is_new_user = await get_or_create_user(message.from_user)
     if is_new_user and inviter is not None:
         await register_referral(message.from_user.id, inviter)
+    profile = await get_store_profile()
     await message.answer(
-        "Добро пожаловать в <b>Remnaum</b>! 🚀\n\n"
-        "Соберите VPN-тариф под себя: выберите срок, трафик и количество устройств.",
+        f"Добро пожаловать в <b>{escape(profile['name'])}</b>! 🚀\\n\\n"
+        f"{escape(profile['description']) or 'Выберите подходящую подписку.'}",
         reply_markup=main_menu(),
     )
 
@@ -334,7 +336,8 @@ async def terms_handler(message: Message) -> None:
 
 @router.message(Command("paysupport"))
 async def payment_support_handler(message: Message) -> None:
-    support = escape(settings.support_contact) if settings.support_contact else "Контакт поддержки ещё не настроен."
+    profile = await get_store_profile()
+    support = escape(profile["support_contact"]) if profile["support_contact"] else "Контакт поддержки ещё не настроен."
     await message.answer(f"Поддержка по оплате: {support}")
 
 
