@@ -25,9 +25,20 @@ class RemnawaveSetupTests(unittest.TestCase):
         self.assertEqual(setup.parse_squads(payload), [
             {"uuid": A, "name": "Standard"}, {"uuid": B, "name": "Premium"},
         ])
-        self.assertEqual(setup.select_squads(setup.parse_squads(payload), lambda _, default: "2"), B)
-        self.assertEqual(setup.select_squads(setup.parse_squads(payload), lambda _, default: "1,2"), A + "," + B)
-        self.assertEqual(setup.select_squads([{"uuid": A, "name": "One"}], lambda *a, **kw: ""), A)
+        with patch.object(installer, "prompt") as ask:
+            self.assertEqual(setup.select_squads(setup.parse_squads(payload), ask), A + "," + B)
+            ask.assert_not_called()
+        self.assertEqual(setup.select_squads([{"uuid": A, "name": "One"}]), A)
+        # An optional explicit manual API remains available for maintenance.
+        self.assertEqual(setup.select_squads(setup.parse_squads(payload),
+                         lambda _, default: "2", default_all=False), B)
+
+    def test_all_existing_squads_selected_without_keyboard_input(self):
+        squads = [{"uuid": A, "name": "Basic"}, {"uuid": B, "name": "Premium"}]
+        with patch.object(installer, "prompt") as ask:
+            selection = setup.select_squads(squads, ask)
+        self.assertEqual(selection, A + "," + B)
+        ask.assert_not_called()
 
     def test_api_discovery_uses_bearer_token(self):
         with patch.object(setup, "_fetch_json", return_value={
@@ -71,6 +82,17 @@ class RemnawaveSetupTests(unittest.TestCase):
         self.assertEqual(cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"], A)
         prompt.assert_not_called()
 
+        # An existing shop keeps its valid squads during temporary API outages.
+        with patch.object(installer, "network_exists", return_value=False), \
+             patch.object(installer, "local_panel_for_url", return_value=None), \
+             patch.object(installer, "discover_squads", side_effect=OSError("offline")), \
+             patch.object(installer, "prompt") as ask:
+            cfg = installer.config_for_install(existing | {
+                "REMNAWAVE_ACTIVE_INTERNAL_SQUADS": A
+            }, "panel", "none", 18080)
+        self.assertEqual(cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"], A)
+        ask.assert_not_called()
+        # A genuinely new installation without saved IDs may still enter a UUID.
         with patch.object(installer, "network_exists", return_value=False), \
              patch.object(installer, "local_panel_for_url", return_value=None), \
              patch.object(installer, "discover_squads", side_effect=OSError("offline")), \
