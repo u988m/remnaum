@@ -134,6 +134,19 @@ def discover_local_panel(root: Path = PANEL_ROOT) -> Path | None:
     return env_file
 
 
+def local_panel_for_url(base_url: str, root: Path = PANEL_ROOT) -> Path | None:
+    """Never modify an unrelated local Panel if API points to a remote server."""
+    env = discover_local_panel(root)
+    if env is None:
+        return None
+    hostname = urlsplit(base_url).hostname
+    current = read_panel_env(env).get("FRONT_END_DOMAIN", "").strip()
+    panel_hostname = urlsplit(
+        current if "://" in current else "https://" + current
+    ).hostname
+    return env if hostname and hostname.lower() == (panel_hostname or "").lower() else None
+
+
 def _unquote(value: str) -> str:
     value = value.strip()
     if value.startswith(("'", '"')) and len(value) >= 2 and value[-1] == value[0]:
