@@ -93,6 +93,48 @@ class RemnawaveSetupTests(unittest.TestCase):
         )
         return root, env
 
+    def test_installer_reuses_local_panel_webhook_secret(self):
+        existing = {
+            "PUBLIC_DOMAIN": "hook.myvpn.site",
+            "WEBAPP_DOMAIN": "miniapp.myvpn.site",
+            "TELEGRAM_BOT_USERNAME": "test_bot",
+            "TELEGRAM_BOT_TOKEN": "123:ABC",
+            "ADMIN_IDS": "123456789",
+            "REMNAWAVE_BASE_URL": "https://panel.myvpn.site",
+            "REMNAWAVE_API_TOKEN": "remote-secret",
+            "REMNAWAVE_ACTIVE_INTERNAL_SQUADS": A,
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            root, env = self._panel(temp)
+            with patch.object(installer, "network_exists", return_value=False), \
+                 patch.object(installer, "local_panel_for_url", return_value=env), \
+                 patch.object(installer, "prompt") as prompt:
+                config = installer.config_for_install(existing, "panel", "none", 18080)
+            self.assertEqual(config["REMNAWAVE_WEBHOOK_SECRET"], SECRET)
+            prompt.assert_not_called()
+
+    def test_installer_detects_official_panel_domain(self):
+        existing = {
+            "PUBLIC_DOMAIN": "hook.myvpn.site",
+            "WEBAPP_DOMAIN": "miniapp.myvpn.site",
+            "TELEGRAM_BOT_USERNAME": "test_bot",
+            "TELEGRAM_BOT_TOKEN": "123:ABC",
+            "ADMIN_IDS": "123456789",
+            "REMNAWAVE_BASE_URL": "",
+            "REMNAWAVE_API_TOKEN": "remote-secret",
+            "REMNAWAVE_ACTIVE_INTERNAL_SQUADS": A,
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            _, env = self._panel(temp)
+            with patch.object(installer, "network_exists", return_value=False), \
+                 patch.object(installer, "discover_local_panel", return_value=env), \
+                 patch.object(installer, "local_panel_for_url", return_value=env), \
+                 patch.object(installer, "prompt") as prompt:
+                config = installer.config_for_install(existing, "panel", "none", 18080)
+            self.assertEqual(config["REMNAWAVE_BASE_URL"], "https://panel.myvpn.site")
+            self.assertEqual(config["REMNAWAVE_WEBHOOK_SECRET"], SECRET)
+            prompt.assert_not_called()
+
     def test_local_panel_detected_only_for_matching_domain(self):
         with tempfile.TemporaryDirectory() as temp:
             root, env = self._panel(temp)
