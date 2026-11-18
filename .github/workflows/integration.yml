@@ -66,11 +66,6 @@ jobs:
       - name: Validate Nginx configuration (standalone only)
         if: matrix.mode == 'standalone'
         run: docker compose run --rm --no-deps --entrypoint nginx nginx -t
-      - name: Test active Nginx proxy (standalone)
-        if: matrix.mode == 'standalone'
-        run: |
-          docker compose up -d nginx
-          docker compose exec -T app python -c "import urllib.request; assert urllib.request.urlopen('http://nginx/health').status == 200"
       - name: Verify health and clean data
         run: |
           for i in $(seq 1 40); do
@@ -88,6 +83,19 @@ jobs:
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM users;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM payments;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM subscriptions;')" = "0"
+      - name: Test active Nginx proxy after application is healthy
+        if: matrix.mode == 'standalone'
+        run: |
+          docker compose up -d nginx
+          for i in $(seq 1 20); do
+            if docker compose exec -T app python -c "import urllib.request; assert urllib.request.urlopen('http://nginx/health', timeout=3).status == 200" >/dev/null 2>&1; then
+              echo "Nginx proxy to Remnaum is healthy"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Nginx did not proxy a healthy Remnaum API" >&2
+          exit 1
       - name: Verify restart preserves empty database
         run: |
           docker compose restart app
