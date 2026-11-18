@@ -15,8 +15,10 @@ from app.services.store_profile import get_terms_url
 
 async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple[Payment, Any]:
     methods, credentials = await get_store_payment_settings()
-    if provider_name == "telegram_stars" or not methods.get(provider_name):
-        raise ValueError("This payment method is not enabled for the standalone storefront")
+    if provider_name not in {"yookassa", "yoomoney", "cryptopay"} or not methods.get(provider_name):
+        raise ValueError("Выбранный способ оплаты отключён администратором")
+    if not await get_terms_url() or not await has_accepted_current_terms(telegram_id):
+        raise ValueError("Перед покупкой примите опубликованные условия продажи")
     quote = await ensure_tariff_draft(telegram_id)
     if not settings.remnawave_base_url or not settings.remnawave_api_token:
         raise RuntimeError("Remnawave is not configured; payment checkout is disabled")
