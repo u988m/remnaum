@@ -10,6 +10,7 @@ from app.services.payment_providers import VerifiedPayment, get_provider
 from app.services.tariffs import calculate_store_stars_price, ensure_tariff_draft
 from app.services.store_settings import get_store_payment_settings
 from app.services.plans import selected_plan_for_user
+from app.services.store_profile import get_terms_url
 
 
 async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple[Payment, Any]:
@@ -144,7 +145,7 @@ async def has_accepted_current_terms(telegram_id: int) -> bool:
 
 
 async def accept_current_terms(telegram_id: int) -> None:
-    if not settings.telegram_terms_url:
+    if not await get_terms_url():
         raise RuntimeError("Terms URL is not configured")
     async with SessionLocal() as session:
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))

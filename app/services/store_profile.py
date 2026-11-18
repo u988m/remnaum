@@ -11,6 +11,7 @@ DEFAULT_PROFILE = {
     "description": "Выберите подходящую подписку.",
     "accent_color": "#4b8bea",
     "support_contact": settings.support_contact,
+    "terms_url": settings.telegram_terms_url,
 }
 
 
@@ -18,10 +19,13 @@ def validate_profile(data: dict) -> dict:
     if set(data) - set(DEFAULT_PROFILE):
         raise ValueError("Unknown store profile field")
     next_values = DEFAULT_PROFILE | data
-    for key in ("name", "tagline", "description", "support_contact"):
+    for key in ("name", "tagline", "description", "support_contact", "terms_url"):
         value = next_values[key]
         if not isinstance(value, str) or len(value) > (80 if key == "name" else 300):
             raise ValueError(f"Invalid {key}")
+    terms_url = next_values["terms_url"]
+    if terms_url and (not terms_url.startswith("https://") or len(terms_url) > 300):
+        raise ValueError("Terms URL must be a public HTTPS address")
     if not next_values["name"].strip():
         raise ValueError("Store name is required")
     color = next_values["accent_color"]
@@ -47,3 +51,8 @@ async def update_store_profile(values: dict) -> dict:
             row.data = updated
         await session.commit()
     return updated
+
+
+async def get_terms_url() -> str:
+    profile = await get_store_profile()
+    return str(profile.get("terms_url") or "")

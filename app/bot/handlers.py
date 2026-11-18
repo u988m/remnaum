@@ -18,8 +18,9 @@ from app.services.payment_service import settle_payment
 from app.services.subscriptions import get_user_subscription, provision_paid_payment
 from app.services.users import get_or_create_user
 from app.services.store_settings import is_payment_method_enabled
+from app.services.store_profile import get_terms_url
 from app.services.store_profile import get_store_profile
-from app.services.referrals import parse_referral_start, register_referral, referral_count, referral_code
+from app.services.referrals import parse_referral_start, register_referral, referral_count, referral_code, reward_balance, get_referral_settings
 from app.services.plans import list_plans, choose_plan, selected_stars_price, clear_selected_plan
 from app.db.models import Payment, User
 from app.db.session import SessionLocal
@@ -206,10 +207,11 @@ async def payment_choose_handler(callback: CallbackQuery) -> None:
         if callback.message:
             await callback.message.edit_text("Оплата временно отключена администратором.", reply_markup=back_menu())
         return
-    if not settings.telegram_terms_url:
+    terms_url = await get_terms_url()
+    if not terms_url:
         if callback.message:
             await callback.message.edit_text(
-                "Продажи пока не включены: администратору нужно опубликовать условия и указать TELEGRAM_TERMS_URL.",
+                "Продажи пока не включены: администратору нужно опубликовать условия в разделе оформления админки.",
                 reply_markup=back_menu(),
             )
         return
@@ -217,7 +219,7 @@ async def payment_choose_handler(callback: CallbackQuery) -> None:
         await show_stars_checkout(callback)
         return
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📄 Прочитать условия", url=settings.telegram_terms_url)],
+        [InlineKeyboardButton(text="📄 Прочитать условия", url=terms_url)],
         [InlineKeyboardButton(text="Принимаю условия", callback_data="payment:terms:accept")],
         [InlineKeyboardButton(text="⬅️ Назад к тарифу", callback_data="menu:plans")],
     ])
@@ -326,9 +328,10 @@ async def stars_successful_payment_handler(message: Message) -> None:
 
 @router.message(Command("terms"))
 async def terms_handler(message: Message) -> None:
-    if settings.telegram_terms_url:
+    terms_url = await get_terms_url()
+    if terms_url:
         await message.answer(
-            f"Условия Remnaum: <a href=\"{escape(settings.telegram_terms_url, quote=True)}\">прочитать</a>"
+            f"Условия Remnaum: <a href=\"{escape(terms_url, quote=True)}\">прочитать</a>"
         )
     else:
         await message.answer("Условия ещё не опубликованы.")
@@ -394,7 +397,9 @@ async def subscription_handler(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "menu:support")
 async def support_handler(callback: CallbackQuery) -> None:
     await callback.answer()
-    support = escape(settings.support_contact) if settings.support_contact else "Контакт поддержки ещё не настроен."
+    from app.services.store_profile import get_store_profile
+    profile = await get_store_profile()
+    support = escape(profile["support_contact"]) if profile["support_contact"] else "Контакт поддержки ещё не настроен."
     if callback.message:
         await callback.message.edit_text(f"🆘 <b>Поддержка</b>\n\n{support}", reply_markup=back_menu())
 
@@ -463,11 +468,17 @@ async def referral_handler(callback: CallbackQuery) -> None:
     else:
         link = f"https://t.me/{settings.telegram_bot_username.lstrip('@')}?start={referral_code(callback.from_user.id)}"
         count = await referral_count(callback.from_user.id)
+        balance = await reward_balance(callback.from_user.id)
+        config = await get_referral_settings()
         text = (
             "🎁 <b>Пригласить друга</b>\\n\\n"
             f"Ваша ссылка: {escape(link)}\\n"
             f"Приглашено пользователей: <b>{count}</b>\\n\\n"
-            "Реферальные вознаграждения пока не подключены."
+            f"Начислено бонусов: <b>{balance['earned']}</b>\\n"
+            f"Доступно бонусных дней: <b>{balance['days']}</b>\\n"
+            + (f"За первую оплаченную покупку друга: {config['reward_days']} бонусных дней. "
+               "Бонус применяется к вашему следующему продлению."
+               if config["enabled"] else "Реферальная программа пока отключена владельцем.")
         )
     if callback.message:
         await callback.message.edit_text(text.replace(chr(92) + "n", chr(10)), reply_markup=back_menu())

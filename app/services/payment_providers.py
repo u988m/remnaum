@@ -54,8 +54,8 @@ class YooKassaProvider(PaymentProvider):
 
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None, credentials: dict[str, str] | None = None):
         credentials = credentials or {}
-        self.shop_id = credentials.get("shop_id") or settings.yookassa_shop_id
-        self.secret = credentials.get("secret_key") or settings.yookassa_secret_key
+        self.shop_id = credentials.get("shop_id", "")
+        self.secret = credentials.get("secret_key", "")
         self.currency = settings.yookassa_currency
         self.transport = transport
 
@@ -126,8 +126,8 @@ class YooMoneyProvider(PaymentProvider):
 
     def __init__(self, credentials: dict[str, str] | None = None):
         credentials = credentials or {}
-        self.receiver = credentials.get("receiver") or settings.yoomoney_receiver
-        self.secret = credentials.get("notification_secret") or settings.yoomoney_notification_secret
+        self.receiver = credentials.get("receiver", "")
+        self.secret = credentials.get("notification_secret", "")
 
     async def create_payment(
         self, *, local_payment_id: int, amount_minor: int, currency: str, description: str
@@ -174,7 +174,7 @@ class CryptoPayProvider(PaymentProvider):
 
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None, credentials: dict[str, str] | None = None):
         credentials = credentials or {}
-        self.token = credentials.get("api_token") or settings.cryptopay_api_token
+        self.token = credentials.get("api_token", "")
         self.assets = [item.strip().upper() for item in settings.cryptopay_accepted_assets.split(",") if item.strip()]
         self.transport = transport
 

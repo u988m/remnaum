@@ -314,7 +314,7 @@ async function loadAccountPanels(){
   }else $("account-purchase-info").textContent="История покупок временно недоступна";
   if(results[2].status==="fulfilled"){
     const d=results[2].value;
-    $("account-referral-info").textContent="Приглашено: "+d.count+". Бонусная программа пока не включена.";
+    $("account-referral-info").textContent="Приглашено: "+d.count+" · Бонусных дней: "+(d.reward?.days||0)+" · Начислено: "+(d.reward?.earned||0)+(d.rewards_enabled?" · Бонусы применятся при следующем продлении.":" · Программа пока отключена.");
     if(d.link){$("account-referral-link").href=d.link;$("account-referral-link").textContent=d.link;$("account-referral-link").style.display="block"}
   }else $("account-referral-info").textContent="Реферальная информация временно недоступна";
 }
@@ -345,85 +345,6 @@ function limits(){return {days:+$("days").value,traffic:+$("traffic").value,devi
 function recalc(){if(!data)return;const v=limits(),p=data.pricing;const stars=v.days*p.stars_per_day+v.traffic*p.stars_per_gb+v.devices*p.stars_per_device;$("stars-price").textContent=stars+" ⭐";$("buy").textContent="Оплатить "+stars+" Stars";$("buy").disabled=!$("terms").checked||!data.stars_enabled||!data.terms_url||stars<1}
 ["days","traffic","devices"].forEach(k=>$(k).addEventListener("change",recalc));$("terms").addEventListener("change",recalc);
 $("buy").onclick=async()=>{try{$("buy").disabled=true;$("status").textContent="Создаём счёт…";await api("/api/v1/webapp/terms/accept",{accepted:true});const result=await api("/api/v1/webapp/checkout",limits());if(!tg?.openInvoice)throw Error("Откройте магазин из Telegram, чтобы оплатить счёт");tg.openInvoice(result.invoice_url,(status)=>{$("status").textContent=status==="paid"?"Оплата подтверждена. Обновляем подписку…":status==="cancelled"?"Оплата отменена":"Статус оплаты: "+status;if(status==="paid")setTimeout(()=>location.reload(),1800);else recalc()})}catch(e){$("status").textContent=e.message;recalc()}};
-async function adminApi(method,path,body){const r=await fetch(path,{method,headers:{"X-Telegram-Init-Data":tg?.initData||"","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(typeof d.detail==="string"?d.detail:"Ошибка запроса");return d}
-let cachedPlans=[];
-async function loadPlans(){
-  const d=await adminApi("GET","/admin/api/plans");cachedPlans=d.items;$("plans-table").replaceChildren();
-  d.items.forEach(p=>{
-    row("plans-table",[p.title,p.duration_days+" д / "+p.traffic_gb+" ГБ / "+p.device_limit+" уст.",(p.price_rub_minor/100).toFixed(2),p.price_stars,p.is_active?"Активен":"Скрыт"]);
-    const td=cell("");const button=document.createElement("button");button.className="action";button.textContent="Изменить";
-    button.onclick=()=>fillPlan(p);td.appendChild(button);$("plans-table").lastElementChild.appendChild(td);
-  });
-}
-function fillPlan(p){
-  $("plan-id").value=p.id;$("plan-title").value=p.title;$("plan-description").value=p.description||"";
-  $("plan-days").value=p.duration_days;$("plan-traffic").value=p.traffic_gb;$("plan-devices").value=p.device_limit;
-  $("plan-rub").value=p.price_rub_minor;$("plan-stars").value=p.price_stars;
-  $("plan-order").value=p.sort_order;$("plan-active").checked=p.is_active;
-}
-$("plan-new").onclick=()=>{$("plan-form").reset();$("plan-id").value="";};
-$("plans-refresh").onclick=()=>loadPlans().catch(e=>$("status").textContent=e.message);
-$("plan-form").onsubmit=async e=>{
-  e.preventDefault();try{
-    const payload={title:$("plan-title").value,description:$("plan-description").value,
-      duration_days:+$("plan-days").value,traffic_gb:+$("plan-traffic").value,device_limit:+$("plan-devices").value,
-      price_rub_minor:+$("plan-rub").value,price_stars:+$("plan-stars").value,
-      sort_order:+$("plan-order").value,is_active:$("plan-active").checked};
-    const id=$("plan-id").value;
-    await adminApi(id?"PUT":"POST",id?"/admin/api/plans/"+id:"/admin/api/plans",payload);
-    $("status").textContent="Тариф сохранён";await loadPlans();
-  }catch(e){$("status").textContent=e.message}
-};
-async function loadBrand(){
-  const d=await adminApi("GET","/admin/api/store-profile");
-  $("brand-name").value=d.name;$("brand-tagline").value=d.tagline;$("brand-description").value=d.description;
-  $("brand-support").value=d.support_contact;$("brand-color").value=d.accent_color;
-}
-$("brand-form").onsubmit=async e=>{
-  e.preventDefault();try{
-    await adminApi("PUT","/admin/api/store-profile",{
-      name:$("brand-name").value,tagline:$("brand-tagline").value,
-      description:$("brand-description").value,support_contact:$("brand-support").value,
-      accent_color:$("brand-color").value
-    });$("status").textContent="Оформление сохранено";
-  }catch(e){$("status").textContent=e.message}
-};
-const paymentNames=["telegram_stars","yookassa","yoomoney","cryptopay"];
-async function loadPaymentSettings(){
-  const d=await adminApi("GET","/admin/api/payment-settings");
-  $("method-list").replaceChildren();
-  paymentNames.forEach(name=>{
-    const label=document.createElement("label");label.style.display="block";label.style.margin="10px";
-    const check=document.createElement("input");check.type="checkbox";check.id="method-"+name;check.checked=!!d.methods[name];
-    label.append(check,document.createTextNode(" "+name));$("method-list").appendChild(label);
-  });
-  $("provider-status").textContent=Object.keys(d.configured).map(k=>k+": "+(d.configured[k]?"настроен":"не настроен")).join(" · ");
-}
-$("payment-settings-save").onclick=async()=>{
-  try{const methods={};paymentNames.forEach(n=>methods[n]=$("method-"+n).checked);
-    const credentials={yookassa:{shop_id:$("pay-yookassa-id").value,secret_key:$("pay-yookassa-secret").value},
-    yoomoney:{receiver:$("pay-yoomoney-receiver").value,notification_secret:$("pay-yoomoney-secret").value},
-    cryptopay:{api_token:$("pay-crypto-token").value}};
-    await adminApi("PUT","/admin/api/payment-settings",{methods,credentials});
-    ["pay-yookassa-secret","pay-yoomoney-secret","pay-crypto-token"].forEach(k=>$(k).value="");
-    $("status").textContent="Платёжные настройки сохранены";await loadPaymentSettings();
-  }catch(e){$("status").textContent=e.message}
-};
-const pricingKeys=["rub_per_day_minor","rub_per_gb_minor","rub_per_device_minor","stars_per_day","stars_per_gb","stars_per_device","currency"];
-async function loadPricing(){
-  const data=await adminApi("GET","/admin/api/tariff-pricing");
-  $("pricing-fields").replaceChildren();
-  pricingKeys.forEach(k=>{
-    const label=document.createElement("label");label.textContent=k;
-    const input=document.createElement("input");input.id="pricing-"+k;input.type=k==="currency"?"text":"number";
-    input.value=data[k];if(k!=="currency")input.min="0";
-    label.appendChild(input);$("pricing-fields").appendChild(label);
-  });
-}
-$("pricing-save").onclick=async()=>{try{
-  const pricing={};pricingKeys.forEach(k=>pricing[k]=k==="currency"?$("pricing-"+k).value:+$("pricing-"+k).value);
-  await adminApi("PUT","/admin/api/tariff-pricing",{pricing});$("status").textContent="Формула цен сохранена";
-}catch(e){$("status").textContent=e.message}};
 async function start(){try{if(!tg?.initData)throw Error("Откройте Mini App через кнопку в Telegram");data=await api("/api/v1/webapp/bootstrap");if(data.profile){$("store-name").textContent=data.profile.name;$("store-tagline").textContent=data.profile.tagline||"Ваш VPN";document.documentElement.style.setProperty("--tg-theme-button-color",data.profile.accent_color)}$("loading").style.display="none";$("app").style.display="block";$("welcome").textContent=data.user.first_name?"Здравствуйте, "+data.user.first_name+"! Настройте подписку под себя.":"Выберите параметры подписки.";if(data.terms_url){$("terms-link").href=data.terms_url}else{$("terms-link").textContent="условия не настроены";$("terms-link").removeAttribute("href");$("buy").disabled=true}
 fillOptions("days",data.limits.days_min,data.limits.days_max,1,data.limits.days_default,"дней");fillOptions("traffic",data.limits.traffic_min,data.limits.traffic_max,1,data.limits.traffic_default,"ГБ");fillOptions("devices",data.limits.devices_min,data.limits.devices_max,1,data.limits.devices_default,"устройств");if(data.subscription){const s=data.subscription;$("subscription").style.display="block";$("sub-status").textContent=s.status;$("sub-expiry").textContent=s.expires_at?new Date(s.expires_at).toLocaleString():"—";$("sub-traffic").textContent=s.traffic_gb??"—";$("sub-devices").textContent=s.device_limit??"—";$("sub-days").textContent=s.days_left??"—";if(s.subscription_url){$("sub-link").href=s.subscription_url;$("sub-link").style.display="inline-block"}}
 $("buy").disabled=!data.stars_enabled;recalc();loadAccountPanels();await loadReadyPlans()}catch(e){$("loading").textContent=e.message}}
@@ -457,7 +378,7 @@ async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=Non
         "profile": await get_store_profile(),
         "pricing": {key: value for key, value in pricing.items() if key.startswith("stars_")},
         "stars_enabled": await is_payment_method_enabled("telegram_stars"),
-        "terms_url": settings.telegram_terms_url,
+        "terms_url": await get_terms_url(),
         "limits": {
             "days_min": settings.tariff_min_days, "days_max": settings.tariff_max_days,
             "traffic_min": settings.tariff_min_traffic_gb, "traffic_max": settings.tariff_max_traffic_gb,
@@ -580,7 +501,7 @@ th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflo
 <div class="card"><span>Успешные платежи</span><b id="paid-count">—</b></div>
 <div class="card"><span>Ожидают оплаты</span><b id="pending-count">—</b></div>
 </div>
-<nav><button class="active" data-tab="users">Клиенты</button><button data-tab="payments">Платежи</button><button data-tab="plans">Готовые тарифы</button><button data-tab="brand">Оформление</button><button data-tab="settings">Оплата</button><button data-tab="tariffs">Конструктор</button></nav>
+<nav><button class="active" data-tab="users">Клиенты</button><button data-tab="payments">Платежи</button><button data-tab="plans">Готовые тарифы</button><button data-tab="brand">Оформление</button><button data-tab="settings">Оплата</button><button data-tab="referrals">Рефералы</button><button data-tab="tariffs">Конструктор</button></nav>
 <section class="section" id="users-view"><div class="toolbar"><h2>Клиенты и подписки</h2><button class="action" id="users-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>Telegram ID</th><th>Username</th><th>Подписка</th><th>До</th><th>Регистрация</th><th>Действие</th></tr></thead><tbody id="users-table"></tbody></table></div><div id="customer-detail" class="section" hidden aria-live="polite"><div class="toolbar"><h2 id="customer-title">Карточка клиента</h2><button class="action" id="customer-close">Закрыть</button></div><p class="muted" id="customer-summary"></p><h3>Подписки</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Статус</th><th>Действует до</th><th>Создана</th></tr></thead><tbody id="customer-subscriptions"></tbody></table></div><h3>Платежи</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="customer-payments"></tbody></table></div></div><div class="toolbar" style="margin-top:12px"><button class="action" id="users-prev">Назад</button><span id="users-page" class="muted">Страница 1</span><button class="action" id="users-next">Далее</button></div></section>
 <section class="section" id="payments-view" hidden><div class="toolbar"><h2>История платежей</h2><button class="action" id="payments-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Клиент</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="payments-table"></tbody></table></div><div class="toolbar" style="margin-top:12px"><button class="action" id="payments-prev">Назад</button><span id="payments-page" class="muted">Страница 1</span><button class="action" id="payments-next">Далее</button></div></section>
 <section class="section" id="plans-view" hidden>
@@ -603,6 +524,15 @@ th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflo
 </form>
 <div class="table-wrap"><table><thead><tr><th>Тариф</th><th>Параметры</th><th>Рубли</th><th>Stars</th><th>Статус</th><th>Действие</th></tr></thead><tbody id="plans-table"></tbody></table></div>
 </section>
+<section class="section" id="referrals-view" hidden>
+<h2>Реферальная программа</h2>
+<p class="muted">Друг получает вашу ссылку. Бонусные дни начисляются пригласившему после первой успешно выданной платной подписки друга. Бонус автоматически продлевает следующую оплаченную подписку пригласившего.</p>
+<form id="referral-form">
+<label><input id="referral-enabled" type="checkbox"> Включить реферальные бонусы</label>
+<label>Бонус за первого оплатившего друга (дней)<input id="referral-days" type="number" min="1" max="90" required value="3"></label>
+<button class="action primary" type="submit">Сохранить настройки</button>
+</form>
+</section>
 <section class="section" id="brand-view" hidden>
 <h2>Оформление магазина</h2>
 <p class="muted">Настройки видны покупателям в боте и Mini App без перезапуска сервиса.</p>
@@ -611,6 +541,7 @@ th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflo
 <label>Заголовок<input id="brand-tagline" maxlength="300"></label>
 <label>Описание<input id="brand-description" maxlength="300"></label>
 <label>Контакт поддержки<input id="brand-support" maxlength="300"></label>
+<label>Ссылка на условия продажи (HTTPS)<input id="brand-terms" maxlength="300" placeholder="https://..."></label>
 <label>Основной цвет<input id="brand-color" type="color" value="#4b8bea"></label>
 <button type="submit" class="action primary">Сохранить оформление</button>
 </form>
@@ -648,8 +579,97 @@ async function loadUsers(){const d=await api("/admin/api/users?limit="+pageSize+
 async function showCustomer(id){$("status").textContent="";try{const d=await api("/admin/api/users/"+encodeURIComponent(id));$("customer-title").textContent="Клиент "+d.telegram_id;$("customer-summary").textContent=(d.username?"@"+d.username+" · ":"")+"Зарегистрирован: "+new Date(d.created_at).toLocaleString();$("customer-subscriptions").replaceChildren();$("customer-payments").replaceChildren();d.subscriptions.forEach(x=>row("customer-subscriptions",[x.id,x.status,x.expires_at?new Date(x.expires_at).toLocaleString():"—",new Date(x.created_at).toLocaleString()]));d.payments.forEach(x=>row("customer-payments",[x.id,x.provider,x.amount+" "+x.currency,x.status,new Date(x.created_at).toLocaleString()]));$("customer-detail").hidden=false;$("customer-detail").scrollIntoView({behavior:"smooth",block:"nearest"})}catch(e){$("status").textContent=e.message}}
 $("customer-close").onclick=()=>{$("customer-detail").hidden=true};
 async function loadPayments(){const d=await api("/admin/api/payments?limit="+pageSize+"&offset="+paymentOffset);$("payments-table").replaceChildren();d.items.forEach(p=>row("payments-table",[p.id,p.telegram_id,p.provider,p.amount+" "+p.currency,p.status,new Date(p.created_at).toLocaleString()]));$("payments-page").textContent="Показано "+(d.total?paymentOffset+1:0)+"–"+Math.min(paymentOffset+d.items.length,d.total)+" из "+d.total;$("payments-prev").disabled=paymentOffset===0;$("payments-next").disabled=paymentOffset+pageSize>=d.total}
+async function adminApi(method,path,body){const r=await fetch(path,{method,headers:{"X-Telegram-Init-Data":tg?.initData||"","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(typeof d.detail==="string"?d.detail:"Ошибка запроса");return d}
+let cachedPlans=[];
+async function loadPlans(){
+  const d=await adminApi("GET","/admin/api/plans");cachedPlans=d.items;$("plans-table").replaceChildren();
+  d.items.forEach(p=>{
+    row("plans-table",[p.title,p.duration_days+" д / "+p.traffic_gb+" ГБ / "+p.device_limit+" уст.",(p.price_rub_minor/100).toFixed(2),p.price_stars,p.is_active?"Активен":"Скрыт"]);
+    const td=cell("");const button=document.createElement("button");button.className="action";button.textContent="Изменить";
+    button.onclick=()=>fillPlan(p);td.appendChild(button);$("plans-table").lastElementChild.appendChild(td);
+  });
+}
+function fillPlan(p){
+  $("plan-id").value=p.id;$("plan-title").value=p.title;$("plan-description").value=p.description||"";
+  $("plan-days").value=p.duration_days;$("plan-traffic").value=p.traffic_gb;$("plan-devices").value=p.device_limit;
+  $("plan-rub").value=p.price_rub_minor;$("plan-stars").value=p.price_stars;
+  $("plan-order").value=p.sort_order;$("plan-active").checked=p.is_active;
+}
+$("plan-new").onclick=()=>{$("plan-form").reset();$("plan-id").value="";};
+$("plans-refresh").onclick=()=>loadPlans().catch(e=>$("status").textContent=e.message);
+$("plan-form").onsubmit=async e=>{
+  e.preventDefault();try{
+    const payload={title:$("plan-title").value,description:$("plan-description").value,
+      duration_days:+$("plan-days").value,traffic_gb:+$("plan-traffic").value,device_limit:+$("plan-devices").value,
+      price_rub_minor:+$("plan-rub").value,price_stars:+$("plan-stars").value,
+      sort_order:+$("plan-order").value,is_active:$("plan-active").checked};
+    const id=$("plan-id").value;
+    await adminApi(id?"PUT":"POST",id?"/admin/api/plans/"+id:"/admin/api/plans",payload);
+    $("status").textContent="Тариф сохранён";await loadPlans();
+  }catch(e){$("status").textContent=e.message}
+};
+async function loadBrand(){
+  const d=await adminApi("GET","/admin/api/store-profile");
+  $("brand-name").value=d.name;$("brand-tagline").value=d.tagline;$("brand-description").value=d.description;
+  $("brand-support").value=d.support_contact;$("brand-terms").value=d.terms_url||"";$("brand-color").value=d.accent_color;
+}
+$("brand-form").onsubmit=async e=>{
+  e.preventDefault();try{
+    await adminApi("PUT","/admin/api/store-profile",{
+      name:$("brand-name").value,tagline:$("brand-tagline").value,
+      description:$("brand-description").value,support_contact:$("brand-support").value,terms_url:$("brand-terms").value,
+      accent_color:$("brand-color").value
+    });$("status").textContent="Оформление сохранено";
+  }catch(e){$("status").textContent=e.message}
+};
+const paymentNames=["telegram_stars","yookassa","yoomoney","cryptopay"];
+async function loadPaymentSettings(){
+  const d=await adminApi("GET","/admin/api/payment-settings");
+  $("method-list").replaceChildren();
+  paymentNames.forEach(name=>{
+    const label=document.createElement("label");label.style.display="block";label.style.margin="10px";
+    const check=document.createElement("input");check.type="checkbox";check.id="method-"+name;check.checked=!!d.methods[name];
+    label.append(check,document.createTextNode(" "+name));$("method-list").appendChild(label);
+  });
+  $("provider-status").textContent=Object.keys(d.configured).map(k=>k+": "+(d.configured[k]?"настроен":"не настроен")).join(" · ");
+}
+$("payment-settings-save").onclick=async()=>{
+  try{const methods={};paymentNames.forEach(n=>methods[n]=$("method-"+n).checked);
+    const credentials={yookassa:{shop_id:$("pay-yookassa-id").value,secret_key:$("pay-yookassa-secret").value},
+    yoomoney:{receiver:$("pay-yoomoney-receiver").value,notification_secret:$("pay-yoomoney-secret").value},
+    cryptopay:{api_token:$("pay-crypto-token").value}};
+    await adminApi("PUT","/admin/api/payment-settings",{methods,credentials});
+    ["pay-yookassa-secret","pay-yoomoney-secret","pay-crypto-token"].forEach(k=>$(k).value="");
+    $("status").textContent="Платёжные настройки сохранены";await loadPaymentSettings();
+  }catch(e){$("status").textContent=e.message}
+};
+const pricingKeys=["rub_per_day_minor","rub_per_gb_minor","rub_per_device_minor","stars_per_day","stars_per_gb","stars_per_device","currency"];
+async function loadPricing(){
+  const data=await adminApi("GET","/admin/api/tariff-pricing");
+  $("pricing-fields").replaceChildren();
+  pricingKeys.forEach(k=>{
+    const label=document.createElement("label");label.textContent=k;
+    const input=document.createElement("input");input.id="pricing-"+k;input.type=k==="currency"?"text":"number";
+    input.value=data[k];if(k!=="currency")input.min="0";
+    label.appendChild(input);$("pricing-fields").appendChild(label);
+  });
+}
+$("pricing-save").onclick=async()=>{try{
+  const pricing={};pricingKeys.forEach(k=>pricing[k]=k==="currency"?$("pricing-"+k).value:+$("pricing-"+k).value);
+  await adminApi("PUT","/admin/api/tariff-pricing",{pricing});$("status").textContent="Формула цен сохранена";
+}catch(e){$("status").textContent=e.message}};
+async function loadReferrals(){
+  const d=await adminApi("GET","/admin/api/referrals");
+  $("referral-enabled").checked=d.enabled;$("referral-days").value=d.reward_days;
+}
+$("referral-form").onsubmit=async e=>{
+  e.preventDefault();try{
+    await adminApi("PUT","/admin/api/referrals",{enabled:$("referral-enabled").checked,reward_days:+$("referral-days").value});
+    $("status").textContent="Реферальная программа сохранена";
+  }catch(err){$("status").textContent=err.message}
+};
 async function start(){try{if(!tg?.initData)throw Error("Откройте панель через Telegram Mini App");const d=await api("/admin/api/overview");$("loading").hidden=true;$("dashboard").hidden=false;$("welcome").textContent="Здравствуйте, "+(d.admin_name||"администратор");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments;await loadUsers()}catch(e){$("loading").textContent=e.message}}
-document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const tab=b.dataset.tab;$("users-view").hidden=tab!=="users";$("payments-view").hidden=tab!=="payments";$("plans-view").hidden=tab!=="plans";$("brand-view").hidden=tab!=="brand";$("payment-settings-view").hidden=tab!=="settings";$("pricing-view").hidden=tab!=="tariffs";try{if(tab==="payments")await loadPayments();if(tab==="plans")await loadPlans();if(tab==="brand")await loadBrand();if(tab==="settings")await loadPaymentSettings();if(tab==="tariffs")await loadPricing()}catch(e){$("status").textContent=e.message}}));
+document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const tab=b.dataset.tab;$("users-view").hidden=tab!=="users";$("payments-view").hidden=tab!=="payments";$("plans-view").hidden=tab!=="plans";$("brand-view").hidden=tab!=="brand";$("referrals-view").hidden=tab!=="referrals";$("payment-settings-view").hidden=tab!=="settings";$("pricing-view").hidden=tab!=="tariffs";try{if(tab==="payments")await loadPayments();if(tab==="plans")await loadPlans();if(tab==="brand")await loadBrand();if(tab==="referrals")await loadReferrals();if(tab==="settings")await loadPaymentSettings();if(tab==="tariffs")await loadPricing()}catch(e){$("status").textContent=e.message}}));
 $("users-refresh").onclick=()=>loadUsers().catch(e=>$("status").textContent=e.message);$("payments-refresh").onclick=()=>loadPayments().catch(e=>$("status").textContent=e.message);
 $("users-prev").onclick=()=>{userOffset=Math.max(0,userOffset-pageSize);loadUsers()};$("users-next").onclick=()=>{userOffset+=pageSize;loadUsers()};
 $("payments-prev").onclick=()=>{paymentOffset=Math.max(0,paymentOffset-pageSize);loadPayments()};$("payments-next").onclick=()=>{paymentOffset+=pageSize;loadPayments()};
@@ -788,14 +808,15 @@ async def admin_user_detail(
 @router.post("/webhooks/remnawave")
 async def remnawave_webhook(request: Request, x_remnawave_signature: str | None = Header(default=None)):
     from app.services.remnawave_webhooks import verify_remnawave_webhook
+    from app.services.remnawave_events import record_and_reconcile
 
     body = await request.body()
     try:
         event = verify_remnawave_webhook(body, x_remnawave_signature, settings.remnawave_webhook_secret)
+        is_new = await record_and_reconcile(body, event)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
-    # No automatic subscription changes until event reconciliation is implemented.
-    return {"ok": True, "event": event["event"]}
+    return {"ok": True, "event": event["event"], "duplicate": not is_new}
 
 
 # Fixed plans share the existing Telegram-authenticated admin dashboard.
@@ -882,7 +903,7 @@ async def webapp_checkout_ready_plan(data: WebAppFixedPlanCheckout, x_telegram_i
     return {"payment_id": payment.id, "stars": stars, "invoice_url": url}
 
 
-from app.services.store_profile import get_store_profile, update_store_profile
+from app.services.store_profile import get_store_profile, update_store_profile, get_terms_url
 
 
 class StoreProfilePayload(BaseModel):
@@ -891,6 +912,7 @@ class StoreProfilePayload(BaseModel):
     description: str = Field(default="", max_length=300)
     accent_color: str = Field(default="#4b8bea", pattern=r"^#[a-fA-F0-9]{6}$")
     support_contact: str = Field(default="", max_length=300)
+    terms_url: str = Field(default="", max_length=300)
 
 
 @router.get("/api/v1/store-profile")
@@ -955,7 +977,7 @@ async def webapp_hwid_devices(x_telegram_init_data: str | None = Header(default=
 
 @router.get("/api/v1/webapp/referrals")
 async def webapp_referrals(x_telegram_init_data: str | None = Header(default=None)):
-    from app.services.referrals import referral_code, referral_count
+    from app.services.referrals import referral_code, referral_count, get_referral_settings, reward_balance
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     identity = await _webapp_user(x_telegram_init_data)
@@ -964,5 +986,32 @@ async def webapp_referrals(x_telegram_init_data: str | None = Header(default=Non
     return {
         "link": f"https://t.me/{username}?start={referral_code(telegram_id)}" if username else None,
         "count": await referral_count(telegram_id),
-        "rewards_enabled": False,
+        "rewards_enabled": (await get_referral_settings())["enabled"],
+        "reward": await reward_balance(telegram_id),
     }
+
+
+
+from app.services.referrals import get_referral_settings, update_referral_settings
+
+
+class ReferralSettingsPayload(BaseModel):
+    enabled: bool
+    reward_days: int = Field(ge=1, le=90)
+
+
+@router.get("/admin/api/referrals")
+async def admin_referrals(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    return await get_referral_settings()
+
+
+@router.put("/admin/api/referrals")
+async def admin_update_referrals(
+    data: ReferralSettingsPayload, x_telegram_init_data: str | None = Header(default=None)
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    try:
+        return await update_referral_settings(data.enabled, data.reward_days)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

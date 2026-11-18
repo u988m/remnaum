@@ -73,7 +73,7 @@ class RemnawaveClient:
         payload.update({key: value for key, value in optional.items() if value is not None})
         return await self.request("POST", "/api/users", json=payload)
 
-    async def get_user(self, user_id: int) -> Any:
+    async def get_user(self, user_id: int | str) -> Any:
         return await self.request("GET", f"/api/users/{user_id}")
 
     async def get_user_by_username(self, username: str) -> Any:
@@ -81,15 +81,17 @@ class RemnawaveClient:
 
     async def update_user(
         self,
-        user_id: int,
+        user_id: int | str,
         *,
         traffic_limit_bytes: int,
         hwid_device_limit: int,
         expire_at: datetime | str | None = None,
         description: str | None = None,
     ) -> Any:
+        identity: dict[str, Any] = ({"id": int(user_id)} if str(user_id).isdigit()
+                                     else {"uuid": str(user_id)})
         payload: dict[str, Any] = {
-            "id": user_id,
+            **identity,
             "status": "ACTIVE",
             "trafficLimitBytes": traffic_limit_bytes,
             "hwidDeviceLimit": hwid_device_limit,
@@ -100,13 +102,13 @@ class RemnawaveClient:
             payload["description"] = description
         return await self.request("PATCH", "/api/users", json=payload)
 
-    async def enable_user(self, user_id: int) -> Any:
+    async def enable_user(self, user_id: int | str) -> Any:
         return await self.request("POST", f"/api/users/{user_id}/actions/enable")
 
-    async def disable_user(self, user_id: int) -> Any:
+    async def disable_user(self, user_id: int | str) -> Any:
         return await self.request("POST", f"/api/users/{user_id}/actions/disable")
 
-    async def extend_user(self, user_id: int, days: int) -> Any:
+    async def extend_user(self, user_id: int | str, days: int) -> Any:
         if days < 1:
             raise ValueError("days must be greater than or equal to 1")
         return await self.request(
@@ -115,8 +117,9 @@ class RemnawaveClient:
             json={"days": days},
         )
 
-    async def get_subscription(self, user_id: int) -> Any:
-        return await self.request("GET", f"/api/subscriptions/by-id/{user_id}")
+    async def get_subscription(self, user_id: int | str) -> Any:
+        endpoint = ("by-id" if str(user_id).isdigit() else "by-uuid")
+        return await self.request("GET", f"/api/subscriptions/{endpoint}/{user_id}")
 
 
     async def get_hwid_devices(self, user_id: int | str) -> Any:

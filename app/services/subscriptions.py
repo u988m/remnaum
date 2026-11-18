@@ -9,6 +9,7 @@ from app.config import settings
 from app.db.models import Payment, Subscription, SubscriptionDetails, User
 from app.db.session import SessionLocal
 from app.services.remnawave import RemnawaveClient
+from app.services.referrals import pending_rewards_for_payment, grant_referral_reward
 
 
 def _unwrap(data: Any) -> dict[str, Any]:
@@ -17,6 +18,13 @@ def _unwrap(data: Any) -> dict[str, Any]:
         if isinstance(value, dict):
             return value
     return {}
+
+
+def _panel_identity(user: dict[str, Any]) -> int | str:
+    value = user.get("id") if user.get("id") is not None else user.get("uuid")
+    if value is None or value == "":
+        raise RuntimeError("Remnawave user has no id/uuid")
+    return int(value) if str(value).isdigit() else str(value)
 
 
 async def provision_paid_payment(payment_id: int) -> bool:
@@ -40,6 +48,9 @@ async def provision_paid_payment(payment_id: int) -> bool:
         device_limit = int(snapshot.get("device_limit", 0))
         if min(days, traffic_gb, device_limit) < 1:
             raise RuntimeError("Payment does not contain a valid tariff snapshot")
+        pending_rewards = await pending_rewards_for_payment(session, user.id)
+        bonus_days = sum(reward.days for reward in pending_rewards)
+        total_days = days + bonus_days
         if not settings.remnawave_base_url or not settings.remnawave_api_token:
             raise RuntimeError("Remnawave is not configured")
 
@@ -62,7 +73,7 @@ async def provision_paid_payment(payment_id: int) -> bool:
 
         marker = f"remnaum-payment:{payment_id}"
         if panel_user:
-            panel_user_id = int(panel_user["id"])
+            panel_user_id = _panel_identity(panel_user)
             description = str(panel_user.get("description") or "")
             if marker not in description:
                 expire_value = panel_user.get("expireAt")
@@ -72,7 +83,7 @@ async def provision_paid_payment(payment_id: int) -> bool:
                         current_expiry = current_expiry.replace(tzinfo=timezone.utc)
                 else:
                     current_expiry = datetime.now(timezone.utc)
-                new_expiry = max(current_expiry, datetime.now(timezone.utc)) + timedelta(days=days)
+                new_expiry = max(current_expiry, datetime.now(timezone.utc)) + timedelta(days=total_days)
                 new_description = f"{description} | {marker}".strip(" |")
                 await panel.update_user(
                     panel_user_id,
@@ -90,7 +101,7 @@ async def provision_paid_payment(payment_id: int) -> bool:
                 )
             panel_user = _unwrap(await panel.get_user(panel_user_id))
         else:
-            expire_at = datetime.now(timezone.utc) + timedelta(days=days)
+            expire_at = datetime.now(timezone.utc) + timedelta(days=total_days)
             created = await panel.create_user(
                 username,
                 expire_at,
@@ -111,7 +122,7 @@ async def provision_paid_payment(payment_id: int) -> bool:
         expires_at = (
             datetime.fromisoformat(expire_value.replace("Z", "+00:00"))
             if isinstance(expire_value, str)
-            else datetime.now(timezone.utc) + timedelta(days=days)
+            else datetime.now(timezone.utc) + timedelta(days=total_days)
         )
         subscription_url = panel_user.get("subscriptionUrl")
 
@@ -147,6 +158,9 @@ async def provision_paid_payment(payment_id: int) -> bool:
             details.traffic_gb = traffic_gb
             details.device_limit = device_limit
 
+        for reward in pending_rewards:
+            reward.redeemed_payment_id = payment_id
+        await grant_referral_reward(session, user.id, payment_id)
         payment.status = "succeeded"
         await session.commit()
         return True

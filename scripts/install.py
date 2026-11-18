@@ -197,6 +197,47 @@ def generate_proxy_snippets(cfg: dict[str, str]) -> None:
     print("Proxy examples generated in generated/ for both Docker and host proxies")
 
 
+LEGACY_PAYMENT_KEYS = {
+    "YOOKASSA_SHOP_ID", "YOOKASSA_SECRET_KEY",
+    "YOOMONEY_RECEIVER", "YOOMONEY_NOTIFICATION_SECRET",
+    "CRYPTOPAY_API_TOKEN",
+}
+
+
+def scrub_migrated_legacy_payment_keys(path: Path = ENV_PATH) -> bool:
+    """Remove plaintext legacy provider keys only after DB verification."""
+    current = read_env(path)
+    if not any(current.get(key) for key in LEGACY_PAYMENT_KEYS):
+        return False
+    verification = run(
+        ["docker", "compose", "exec", "-T", "app",
+         "python", "-m", "scripts.verify_legacy_credentials"],
+        check=False, quiet=True,
+    )
+    if verification.returncode != 0:
+        print("В старом .env остались реквизиты платежей. Проверьте перенос в БД через админку.")
+        return False
+    original = path.read_text(encoding="utf-8").splitlines()
+    filtered = [line for line in original if line.split("=", 1)[0] not in LEGACY_PAYMENT_KEYS]
+    temporary = path.with_name(".env.cleanup.tmp")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write("\n".join(filtered) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        os.chmod(path, 0o600)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    run(["docker", "compose", "up", "-d", "--no-deps", "--force-recreate", "app"])
+    if not wait_for_app_health():
+        raise RuntimeError("Платежные настройки перенесены, но API не запустился после очистки .env")
+    print("Устаревшие реквизиты платежей перенесены в БД и очищены из .env.")
+    return True
+
+
 def choose_mode(existing: dict[str, str], requested: str | None) -> str:
     if requested:
         return requested
@@ -253,6 +294,7 @@ def perform_update(existing: dict[str, str]) -> int:
     print("[3/3] Проверка приложения")
     if not wait_for_app_health():
         raise RuntimeError("API не отвечает. Проверьте docker compose logs --tail=100 app")
+    scrub_migrated_legacy_payment_keys()
     print("\nRemnaum обновлён. База и секреты сохранены.")
     return 0
 
@@ -310,9 +352,7 @@ def config_for_install(existing: dict[str, str], mode: str,
     for key, label, hidden in required:
         if not cfg.get(key):
             cfg[key] = prompt(label, hidden=hidden)
-    if not existing:
-        cfg["TELEGRAM_TERMS_URL"] = prompt("Ссылка на условия продажи (необязательно для теста)", required=False)
-        cfg["SUPPORT_CONTACT"] = prompt("Контакт поддержки (необязательно)", required=False)
+    # Legal terms, support, tariffs and payment providers are configured in the admin DB.
     cfg["TELEGRAM_BOT_USERNAME"] = cfg["TELEGRAM_BOT_USERNAME"].lstrip("@")
     if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", cfg.get("TELEGRAM_BOT_USERNAME", "")):
         raise ValueError("Bot username must use 5-32 ASCII letters, digits or underscores")
