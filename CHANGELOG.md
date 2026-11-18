@@ -2,6 +2,17 @@
 
 All notable project changes are documented here.
 
+## [0.3.0] - 2026-11-18
+
+### Added
+- Remnawave panel API client with Bearer authentication.
+- User creation, lookup, enable/disable and expiry extension operations.
+- Subscription lookup by numeric panel user ID.
+- Unit tests for API request paths, payloads and authentication.
+
+### Notes
+- The adapter follows the published Remnawave API schema. The live compatibility check against the user's 3.4.10 panel still requires their panel URL and a scoped API token.
+
 ## [0.2.0] - 2026-11-18
 
 ### Added
