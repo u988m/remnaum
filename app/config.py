@@ -48,9 +48,9 @@ class Settings(BaseSettings):
     tariff_max_traffic_gb: int = Field(default=1000, ge=1)
     tariff_min_devices: int = Field(default=1, ge=1)
     tariff_max_devices: int = Field(default=10, ge=1)
-    tariff_price_per_day_minor: int = Field(default=5, ge=0)
-    tariff_price_per_gb_minor: int = Field(default=2, ge=0)
-    tariff_price_per_device_minor: int = Field(default=100, ge=0)
+    tariff_price_per_day_minor: int = Field(default=500, ge=0)
+    tariff_price_per_gb_minor: int = Field(default=10, ge=0)
+    tariff_price_per_device_minor: int = Field(default=1000, ge=0)
     tariff_currency: str = Field(default="RUB", min_length=3, max_length=8)
 
     @model_validator(mode="after")
