@@ -1,39 +1,81 @@
 name: Integration smoke
 on:
   push:
-    branches: ["main", "feat/payment-settings-constructor"]
+    branches: ["main", "feat/dual-deployment-modes"]
   pull_request:
 
 jobs:
   clean-install:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [standalone, panel, panel-network]
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare isolated installation config
+      - name: Prepare isolated topology
         run: |
           cp .env.example .env
           chmod 600 .env
-      - name: Validate shell and proxy configuration
+          if [ "${{ matrix.mode }}" = panel ]; then
+            sed -i 's|^DEPLOY_MODE=.*|DEPLOY_MODE=panel|' .env
+            sed -i 's|^COMPOSE_FILE=.*|COMPOSE_FILE=compose.yaml:compose.panel.yaml|' .env
+          elif [ "${{ matrix.mode }}" = panel-network ]; then
+            docker network create remnawave-network
+            sed -i 's|^DEPLOY_MODE=.*|DEPLOY_MODE=panel|' .env
+            sed -i 's|^COMPOSE_FILE=.*|COMPOSE_FILE=compose.yaml:compose.panel.yaml:compose.panel-network.yaml|' .env
+            sed -i 's|^REMNAUM_PROXY_NETWORK=.*|REMNAUM_PROXY_NETWORK=remnawave-network|' .env
+          fi
+      - name: Validate scripts, installer and Compose isolation
         run: |
-          bash -n install.sh update.sh backup.sh
+          sh -n install.sh
+          bash -n update.sh backup.sh
+          python3 -m py_compile scripts/install.py
+          python3 -m unittest discover -s tests -p 'test_installer.py' -v
           docker compose config --quiet
-          docker compose run --rm --no-deps --entrypoint caddy caddy validate --config /etc/caddy/Caddyfile
+          python3 - <<'PY'
+          import json
+          import subprocess
+          import os
+          data = json.loads(subprocess.check_output(["docker", "compose", "config", "--format", "json"], text=True))
+          mode = "${{ matrix.mode }}"
+          services = data["services"]
+          if mode == "standalone":
+              assert "caddy" in services and "nginx" in services, services
+              assert {str(p["published"]) for p in services["caddy"]["ports"]} >= {"80","443"}
+              assert not services["app"].get("ports")
+          else:
+              assert "caddy" not in services and "nginx" not in services
+              ports = services["app"]["ports"]
+              assert len(ports) == 1 and ports[0]["host_ip"] == "127.0.0.1", ports
+              assert str(ports[0]["published"]) == "18080"
+              if mode == "panel-network":
+                  assert "panel_proxy" in services["app"]["networks"]
+          print("Deployment mode", mode, "validated")
+          PY
+      - name: Validate Caddy configuration (standalone only)
+        if: matrix.mode == 'standalone'
+        run: docker compose run --rm --no-deps --entrypoint caddy caddy validate --config /etc/caddy/Caddyfile
       - name: Start empty database and API
         run: docker compose up -d --build postgres redis app
-      - name: Validate Nginx with running API DNS
+      - name: Validate Nginx configuration (standalone only)
+        if: matrix.mode == 'standalone'
         run: docker compose run --rm --no-deps --entrypoint nginx nginx -t
       - name: Verify health and clean data
         run: |
-          for i in $(seq 1 30); do
+          for i in $(seq 1 40); do
             if docker compose exec -T app python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8080/health').status)" >/dev/null 2>&1; then break; fi
             sleep 2
           done
-          docker compose exec -T postgres psql -U remnaum -d remnaum -Atc "SELECT 'users:' || COUNT(*) FROM users;"
+          docker compose exec -T app python -c "import urllib.request; assert urllib.request.urlopen('http://localhost:8080/health').status == 200"
+          if [ "${{ matrix.mode }}" != standalone ]; then
+            curl -fsS http://127.0.0.1:18080/health
+          fi
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM users;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM payments;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM subscriptions;')" = "0"
-      - name: Verify restart does not seed data
+      - name: Verify restart preserves empty database
         run: |
           docker compose restart app
           sleep 5
