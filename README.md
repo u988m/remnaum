@@ -1,93 +1,99 @@
 # Remnaum
 
-Remnaum is a Telegram-first VPN subscription platform built around the Remnawave panel API.
+**Self-hosted VPN storefront constructor for [Remnawave](https://github.com/remnawave/panel)**
 
-## Current status
+Remnaum combines a Telegram bot, Telegram Mini App, admin dashboard, pricing engine and Remnawave Panel integration in one deployable service. One installation runs one independent store; the database is empty on first deployment.
 
-**Current milestone: 0.8.0.** Users configure a personal tariff and purchase VPN access with Telegram Stars (XTR) inside the bot. Verified payments trigger Remnawave provisioning. YooKassa, YooMoney wallet and Crypto Pay adapters are implemented for a separate external storefront; they are not offered inside Telegram for this digital service.
+> **Release status: 1.0.0 release candidate.** Suitable for installation testing. Do not treat as production-audited until real Telegram Stars payments, Remnawave provisioning and deployment on a public HTTPS domain have been validated end to end.
 
-## Planned modules
+## Features
 
-- Telegram bot: onboarding, plans, subscription status and support.
-- Tariff builder: user-selected duration, traffic and device limits, bounded by operator settings and priced from configurable rates.
-- Billing: Telegram Stars (XTR) checkout for in-bot digital services; separate YooKassa, YooMoney wallet and Crypto Pay adapters are reserved for a standalone external storefront.
-- Subscription service: payment-triggered Remnawave provisioning, renewals, tariff limit updates and stored connection URL.
-- Remnawave adapter: isolated client for creating users, reading user/subscription data, enabling/disabling accounts and extending expiry. API calls use Bearer-token authentication.
-- Admin: Telegram-authenticated owner dashboard with customer and payment lists, store settings and tariff pricing controls.
-- Web App: Telegram-authenticated customer dashboard, tariff builder, Stars invoice checkout and subscription management.
-- Operations: installer, updater, backups, migrations, health checks and release notes.
+| Component | What it does |
+| --- | --- |
+| Telegram bot | Start/menu, profile, fixed plans and flexible tariff builder, Stars invoices, subscription status, device list, last 10 purchases, referrals and support |
+| Mini App | Telegram-authorized customer view, active subscription, choose a fixed or custom tariff, accept terms and pay with Stars |
+| Owner dashboard | Telegram-signed admin access, metrics, customers and payment history, customer detail, fixed-plan CRUD, pricing and payment settings, branding |
+| Remnawave | Provision or extend VPN access after a verified payment; read subscription URL and HWID devices; verify signed outgoing panel webhooks |
+| Billing | Telegram Stars in Telegram; YooKassa, YooMoney and Crypto Pay adapters for use by a **separate** future external storefront |
+| Operations | Guided install, Caddy automatic HTTPS, internal Nginx, Docker Compose, persistent PostgreSQL/Redis, backup script, smoke-test CI |
+| Referrals | Individual deep links and referral attribution/count; **no rewards or payouts yet** |
+| Branding | Store name, short description, accent color and support contact editable in the admin dashboard |
 
-## Architecture
+### Telegram menu
 
-A modular monolith keeps deployment simple while separating domain boundaries. FastAPI hosts HTTP endpoints and the Telegram webhook. Aiogram supports webhook and polling operation. PostgreSQL is the source of truth; Redis is reserved for cache, FSM and background-job coordination. External panel and payment systems are accessed through adapters.
+- **📦 Тарифы** — fixed plans and custom tariff builder
+- **👤 Профиль** — Telegram account details
+- **🔐 Подписка** — status, expiry, limits and connection link
+- **📱 Устройства** — hardware-bound devices reported by Remnawave
+- **🧾 Мои покупки** — latest 10 payment statuses
+- **🎁 Пригласить друга** — unique deep link and referral count
+- **🆘 Поддержка** — owner-provided contact
+- **🌐 Mini App** — subscription overview and checkout
+- **⚙️ /admin** — owner-only settings
 
-## Quick start
+## First installation
 
-Requirements: Linux server, Docker Engine and Docker Compose plugin.
+Requirements: Linux Ubuntu/Debian VPS, Docker access, public A/AAAA DNS records, ports 80 and 443, Telegram bot token and Remnawave Panel API token.
 
 ```bash
 git clone https://github.com/u988m/remnaum.git
 cd remnaum
-chmod +x install.sh update.sh
-./install.sh
+sudo bash install.sh
 ```
 
-The installer creates `.env`, generates application and database secrets, and optionally asks for the Telegram token, admin Telegram IDs and Remnawave connection. You can edit `.env` later and restart with `docker compose up -d`.
+The installer requests your webhook domain, Mini App domain, certificate email, bot username/token, Telegram admin IDs, Remnawave URL/token, and squad IDs. It creates `.env` with restrictive permissions. Caddy obtains TLS certificates and Nginx privately forwards requests to FastAPI.
 
-## Configuration
+- Telegram updates: `https://WEBHOOK_DOMAIN/telegram/webhook`
+- Remnawave outgoing events: `https://WEBHOOK_DOMAIN/webhooks/remnawave`
+- Telegram Mini App: `https://WEBAPP_DOMAIN/app`
+- Admin dashboard: `https://WEBAPP_DOMAIN/admin`
+- Health: `https://WEBAPP_DOMAIN/health`
 
-See [`.env.example`](.env.example). Keep secrets in `.env`; never commit it.
+**The Remnawave panel's outbound webhook settings must be configured separately** with the generated `REMNAWAVE_WEBHOOK_SECRET`; see [installation guide](docs/INSTALL.md). The installer does not change your panel server remotely.
 
-- Set `TELEGRAM_USE_WEBHOOK=false` to use polling.
-- For webhook mode, set `TELEGRAM_USE_WEBHOOK=true`, `TELEGRAM_WEBHOOK_URL` and a long random `TELEGRAM_WEBHOOK_SECRET`. Put the service behind HTTPS.
-- Set `REMNAWAVE_BASE_URL` to the panel root URL (without `/api`) and `REMNAWAVE_API_TOKEN` to the panel API token. Set `REMNAWAVE_ACTIVE_INTERNAL_SQUADS` to the comma-separated internal squad UUIDs assigned to new users.
-- Set `SUPPORT_CONTACT` to the text or contact link shown in the support section.
-- Configure `TARIFF_MIN_*`, `TARIFF_MAX_*` and `TARIFF_PRICE_PER_*` to control tariff limits and fiat price quotes. Set `TARIFF_STARS_PRICE_PER_DAY`, `TARIFF_STARS_PRICE_PER_GB` and `TARIFF_STARS_PRICE_PER_DEVICE` for the in-bot Stars price.
-- Publish your terms of service and set `TELEGRAM_TERMS_URL` plus `TELEGRAM_TERMS_VERSION`. The bot requires the user to accept the current terms before showing the Telegram Stars invoice.
-- YooMoney wallet checkout requires `YOOMONEY_RECEIVER` and `YOOMONEY_NOTIFICATION_SECRET`; configure its HTTP notification URL as `/webhooks/payments/yoomoney`. This uses the wallet collection/Quickpay flow, not the YooKassa merchant API.
-- Crypto Pay requires `CRYPTOPAY_API_TOKEN`; configure its Crypto Pay app webhook URL as `/webhooks/payments/cryptopay`. Supported invoice assets are configurable with `CRYPTOPAY_ACCEPTED_ASSETS`.
-- Set `PUBLIC_BASE_URL` to the public HTTPS origin so payment redirects and hosted YooMoney checkout work. Keep all provider credentials in `.env`.
+Configure the Mini App URL in @BotFather. On app startup the bot also registers the private-chat menu button and command list.
 
-## Admin payment settings
+### Data safety
 
-Open `/admin/payments` over HTTPS. Set `ADMIN_API_TOKEN` in `.env`, enter it in the admin page, and configure provider credentials and enablement. Credentials are encrypted at rest using a key derived from `APP_SECRET_KEY`; keep that key stable across restarts and backups. Public endpoints expose enabled/configured flags only, never secrets. Telegram Stars are enabled by default and can be disabled. Third-party provider credentials are stored for the standalone storefront integration; they are not offered in Telegram bot or Mini App checkout for digital VPN access.
-
-The admin page currently manages payment-method settings. The full visual tariff constructor and standalone external checkout are subsequent milestones.
-
-## Operations
+New installations contain **zero fake customers, subscriptions, orders and revenue**. Only schema and default configuration are created. Existing PostgreSQL and Redis Docker volumes persist across restarts and updates. Do not use `docker compose down -v` against a live store.
 
 ```bash
-docker compose logs -f app
+bash backup.sh
+bash update.sh
 docker compose ps
-./update.sh
+docker compose logs -f app
 ```
 
-The updater fetches and fast-forward pulls the currently checked-out branch, then rebuilds containers. Back up PostgreSQL before production updates. Database migrations and automated rollback are not wired yet.
+Backups contain PostgreSQL data. Store your `.env` (particularly `APP_SECRET_KEY`) separately and securely to recover encrypted payment settings.
 
-## Releases
+## Configuration and payment requirements
 
-Every release must update `CHANGELOG.md`, the application version, and a Git tag. Use semantic versioning:
+Secrets must never be committed. Review [`.env.example`](.env.example) and [docs/INSTALL.md](docs/INSTALL.md). `ADMIN_IDS` lists authorized Telegram numeric IDs. Login to admin APIs uses verified Telegram Mini App initData, not a manually copied admin API token.
 
-- **MAJOR**: incompatible API or data changes.
-- **MINOR**: backward-compatible features.
-- **PATCH**: fixes and security updates.
+All in-bot and Telegram Mini App digital subscription payments use Telegram Stars (XTR) in accordance with Telegram's bot platform rules. External payment adapters do **not** authorize payment buttons for the same digital goods inside Telegram.
 
-## Security baseline
+## Architecture
 
-- Never expose PostgreSQL or Redis ports publicly.
-- Use HTTPS for Telegram and payment webhooks.
-- Verify provider signatures and make payment callbacks idempotent before enabling external storefront payments.\n- For in-bot digital services, use Telegram Stars (XTR); do not substitute third-party checkout buttons.
-- Verify Telegram Web App init data server-side before trusting user identity.
-- Use role-based admin checks and audit sensitive actions.
-- Restrict and rotate panel/API tokens; do not log secrets.
+- Python 3, FastAPI, Aiogram 3
+- PostgreSQL as source of truth; Redis for infrastructure support
+- Async SQLAlchemy models and isolated Remnawave/payment adapters
+- Caddy (public HTTPS) → Nginx (internal proxy) → FastAPI (internal)
+- Telegram-signed admin and Mini App API authentication
+- HMAC verification of Remnawave and provider webhook signatures
 
-## Telegram Mini App
+## Known release-candidate limitations
 
-Set `WEBAPP_URL` to the public HTTPS URL ending in `/app`, then add the Web App button to your bot menu or use the bot's personal-account button. The Mini App validates Telegram's signed `initData` on every API request, checks its age, and never trusts a client-supplied Telegram ID. It shows the active subscription, configurable tariff dimensions and the current Stars price. Checkout creates a Telegram Stars invoice link and opens it with Telegram's native invoice interface. Configure `TELEGRAM_TERMS_URL` before enabling checkout.
+- **Alembic versioned migrations are not yet wired**; current schema bootstrap uses `create_all`. Test upgrades against a backup.
+- Automatic configuration of outbound webhook settings on the remote Remnawave server is not implemented; configure it in the panel.
+- Remnawave webhook payloads are authenticated and acknowledged but are **not yet reconciled** into local subscription status.
+- Fixed plans and custom tariffs are supported; automatic recurring billing and referral bonuses are not implemented.
+- External web shop checkout is not yet a complete standalone purchasing interface.
+- HWID device deletion is not enabled from the bot.
+- A clean Docker smoke test does not replace real payment/provisioning tests. No claim of production readiness is made.
+- Public GitHub visibility and Awesome Remnawave submission require separate publication/review steps.
 
+## Open source / Awesome Remnawave
 
-## Administrator dashboard
+Remnaum is licensed under [MIT](LICENSE). After the repository is made public and a production smoke test passes, the project can be proposed for [Awesome Remnawave](https://github.com/remnawave/panel/blob/main/docs/awesome-remnawave.mdx). See [submission notes](docs/AWESOME_REMNAWAVE.md).
 
-Add the numeric Telegram account IDs of store owners to `ADMIN_IDS` in `.env`. Set `PUBLIC_BASE_URL` to the public HTTPS origin. An authorized owner can send `/admin` to the bot and open the dashboard from its Web App button. The dashboard validates Telegram Web App init data on every API request and checks the Telegram ID against `ADMIN_IDS`.
-
-The dashboard currently includes customer counts, active subscriptions, successful and pending payments, paginated customer records and payment history. Payment provider settings remain at `/admin/payments`; tariff pricing remains at `/admin/tariffs`.
+Contributions, feedback, bug reports and PRs are welcome.
