@@ -328,13 +328,21 @@ def inspect_backup(archive: Path, *, supplied_key: str | None = None) -> dict:
             return info
 
 
-def restore_backup(archive: Path, *, supplied_key: str | None = None) -> None:
+def restore_backup(archive: Path, *, supplied_key: str | None = None, target_root: Path | None = None) -> None:
     """Restore in the current install location, selected by bootstrap/installer.
 
     PostgreSQL is restored from its consistent snapshot. External Panel/Caddy
     configurations are never overwritten by a shop restoration.
     """
     password = key_bytes(supplied=supplied_key)
+    target = (target_root or ROOT).resolve()
+    if not re.fullmatch(r"/[A-Za-z0-9_./-]+", str(target)):
+        raise ValueError("Небезопасный путь восстановления")
+    if target == Path("/") or target == Path("/etc") or str(target).startswith(("/etc/", "/usr/", "/dev/", "/proc/", "/sys/")):
+        raise ValueError("Нельзя восстанавливать в системный каталог")
+    if target != ROOT.resolve() and target.exists() and any(target.iterdir()):
+        raise ValueError("Внешняя папка восстановления уже содержит данные")
+    target.mkdir(parents=True, exist_ok=True)
     with _lock():
         with tempfile.TemporaryDirectory(prefix="remnaum-restore-") as tmp:
             folder = Path(tmp)
@@ -349,26 +357,26 @@ def restore_backup(archive: Path, *, supplied_key: str | None = None) -> None:
             install_dir = extracted / "install"
             if not (install_dir / ".env").is_file() or not (install_dir / "compose.yaml").exists():
                 raise ValueError("В архиве нет .env или Docker Compose")
-            print("Восстанавливаем данные и настройки в", ROOT)
-            subprocess.run(["docker", "compose", "stop", "app"], cwd=ROOT,
+            print("Восстанавливаем данные и настройки в", target)
+            subprocess.run(["docker", "compose", "stop", "app"], cwd=target,
                            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             for entry in sorted(install_dir.iterdir()):
                 if entry.name in {"backups"}:
                     continue
-                destination = ROOT / entry.name
+                destination = target / entry.name
                 if entry.is_dir():
                     shutil.copytree(entry, destination, dirs_exist_ok=True)
                 else:
                     shutil.copy2(entry, destination)
-            os.chmod(ROOT / ".env", 0o600)
+            os.chmod(target / ".env", 0o600)
             subprocess.run(
                 ["docker", "compose", "up", "-d", "postgres", "redis"],
-                cwd=ROOT, check=True, capture_output=True, timeout=180,
+                cwd=target, check=True, capture_output=True, timeout=180,
             )
             for _ in range(30):
                 health = subprocess.run(
                     ["docker", "compose", "exec", "-T", "postgres", "pg_isready", "-U", "remnaum", "-d", "remnaum"],
-                    cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    cwd=target, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
                 if health.returncode == 0:
                     break
@@ -382,20 +390,20 @@ def restore_backup(archive: Path, *, supplied_key: str | None = None) -> None:
                     "pg_restore", "-U", "remnaum", "-d", "remnaum",
                     "--no-owner", "--no-acl", "--clean", "--if-exists",
                     "--single-transaction",
-                ], cwd=ROOT, stdin=dump, check=True, timeout=360)
-            subprocess.run(["docker", "compose", "stop", "redis"], cwd=ROOT, check=True,
+                ], cwd=target, stdin=dump, check=True, timeout=360)
+            subprocess.run(["docker", "compose", "stop", "redis"], cwd=target, check=True,
                            stdout=subprocess.DEVNULL, timeout=60)
             subprocess.run([
                 "docker", "compose", "run", "--rm", "-T", "--no-deps",
                 "-v", str(extracted) + ":/restore:ro",
                 "--entrypoint", "sh", "redis", "-c",
                 "rm -rf /data/appendonlydir && cp /restore/redis.rdb /data/dump.rdb",
-            ], cwd=ROOT, check=True, capture_output=True, timeout=120)
-            subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=ROOT,
+            ], cwd=target, check=True, capture_output=True, timeout=120)
+            subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=target,
                            check=True, timeout=360)
             print("✓ Данные, настройки и контейнеры Remnaum восстановлены")
             print("Исходный путь архива:", metadata.get("original_path"))
-            print("Текущий путь:", ROOT)
+            print("Текущий путь:", target)
             print("Если домены переехали на другой VPS, обновите DNS. Внешнюю панель Remnawave не перезаписывали.")
 
 
