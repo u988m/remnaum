@@ -76,6 +76,26 @@ class RemnawaveClient:
     async def get_user(self, user_id: int) -> Any:
         return await self.request("GET", f"/api/users/{user_id}")
 
+    async def get_user_by_username(self, username: str) -> Any:
+        return await self.request("GET", f"/api/users/by-username/{username}")
+
+    async def update_user(
+        self,
+        user_id: int,
+        *,
+        traffic_limit_bytes: int,
+        hwid_device_limit: int,
+    ) -> Any:
+        return await self.request(
+            "PATCH",
+            "/api/users",
+            json={
+                "id": user_id,
+                "trafficLimitBytes": traffic_limit_bytes,
+                "hwidDeviceLimit": hwid_device_limit,
+            },
+        )
+
     async def enable_user(self, user_id: int) -> Any:
         return await self.request("POST", f"/api/users/{user_id}/actions/enable")
 
