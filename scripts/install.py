@@ -654,6 +654,12 @@ def config_for_install(existing: dict[str, str], mode: str,
             "REMNAWAVE_WEBHOOK_SECRET": secrets.token_hex(32),
             "ADMIN_API_TOKEN": "",
         })
+        print("  База данных: remnaum. Надёжный пароль будет сгенерирован автоматически.")
+        user_password = prompt("Свой пароль PostgreSQL? Введите пароль или нажмите Enter для автоматического", required=False, hidden=True)
+        if user_password:
+            if not re.fullmatch(r"[A-Za-z0-9._~-]{12,128}", user_password):
+                raise ValueError("Пароль PostgreSQL: от 12 символов, латиница, цифры и . _ ~ -")
+            cfg["POSTGRES_PASSWORD"] = user_password
         cfg["DATABASE_URL"] = (f"postgresql+asyncpg://remnaum:{cfg['POSTGRES_PASSWORD']}"
                                "@postgres:5432/remnaum")
 
