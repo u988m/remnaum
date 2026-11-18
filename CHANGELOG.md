@@ -2,6 +2,19 @@
 
 All notable project changes are documented here.
 
+## [0.4.0] - 2026-11-18
+
+### Added
+- User-facing tariff builder for duration, traffic allowance and device count.
+- Persistent per-user tariff drafts and server-side price calculation.
+- Operator-configurable tariff limits, rates and currency.
+- Unit tests for tariff price calculation and validation.
+
+### Notes
+- Users can customize tariff parameters within operator-defined limits.
+- Payment and VPN access activation remain disabled until payment verification and subscription provisioning are implemented.
+- The new tariff draft table is created by the existing metadata initialization; no existing table columns are altered.
+
 ## [0.3.0] - 2026-11-18
 
 ### Added
