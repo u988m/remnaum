@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0-rc.3 — Storefront, encrypted settings and referrals
+
+- Independent `/store` storefront for regular browsers using signed Telegram Login Widget and short-lived secure sessions.
+- External payment methods YooKassa, YooMoney and Crypto Pay are configured only through encrypted PostgreSQL settings (not read from .env for live checkout).
+- Optional one-time import of legacy provider secrets into encrypted database during upgrade; old plaintext values removed only after verification.
+- Owner-controlled referral rewards in PostgreSQL: one credit per referred first fulfilled purchase, automatic bonus days on inviter's next paid VPN purchase.
+- Signed Remnawave webhook receipt ledger, de-duplication and reconciliation of a limited, explicitly mapped set of subscription status events.
+- Terms-of-service URL moved into admin-managed store branding.
+- Fixed a previously misplaced admin JavaScript block that could break the Mini App and editor.
+- Separate documented examples `webhook.example.com` (webhooks) and `miniapp.example.com` (app/admin/standalone site).
+- Shortened public README and removed all payment provider secret fields from .env.example.
+- Remaining blockers: live end-to-end billing/panel tests, robust migrations, full device management and more advanced automation.
+
+
 ## 1.0.0-rc.2 — Two installation topologies
 
 - Add `sudo sh install.sh` wizard for standalone VPS or co-hosted Remnawave Panel.
