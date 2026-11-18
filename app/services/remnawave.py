@@ -117,3 +117,8 @@ class RemnawaveClient:
 
     async def get_subscription(self, user_id: int) -> Any:
         return await self.request("GET", f"/api/subscriptions/by-id/{user_id}")
+
+
+    async def get_hwid_devices(self, user_id: int | str) -> Any:
+        """List hardware-bound devices for a user (Panel 3.x)."""
+        return await self.request("GET", f"/api/hwid/devices/{user_id}")
