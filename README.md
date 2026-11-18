@@ -4,14 +4,14 @@ Remnaum is a Telegram-first VPN subscription platform built around the Remnawave
 
 ## Current status
 
-**Current milestone: 0.4.0.** Users can configure a personal tariff by choosing duration, traffic allowance and device count. The bot calculates and stores a price quote. Payment, subscription provisioning and the customer Web App are not production-ready yet.
+**Current milestone: 0.5.0.** Users can configure a personal tariff, pay through YooKassa, YooMoney wallet notifications or Telegram Crypto Pay, and receive a Remnawave subscription after a verified payment. Live provider credentials and the exact Remnawave 3.4.10 panel still require deployment testing.
 
 ## Planned modules
 
 - Telegram bot: onboarding, plans, subscription status and support.
 - Tariff builder: user-selected duration, traffic and device limits, bounded by operator settings and priced from configurable rates.
-- Billing: provider adapters, payment verification, idempotent webhook processing and refunds.
-- Subscription service: lifecycle, renewals, expiry jobs and panel synchronization.
+- Billing: YooKassa, YooMoney wallet and Crypto Pay adapters with signed/remote-verified notifications and idempotent local payment states.
+- Subscription service: payment-triggered Remnawave provisioning, renewals, tariff limit updates and stored connection URL.
 - Remnawave adapter: isolated client for creating users, reading user/subscription data, enabling/disabling accounts and extending expiry. API calls use Bearer-token authentication.
 - Admin: role-based access, users, plans, payments, announcements and audit log.
 - Web App: authenticated customer dashboard and subscription management.
@@ -40,10 +40,10 @@ See [`.env.example`](.env.example). Keep secrets in `.env`; never commit it.
 
 - Set `TELEGRAM_USE_WEBHOOK=false` to use polling.
 - For webhook mode, set `TELEGRAM_USE_WEBHOOK=true`, `TELEGRAM_WEBHOOK_URL` and a long random `TELEGRAM_WEBHOOK_SECRET`. Put the service behind HTTPS.
-- Set `REMNAWAVE_BASE_URL` to the panel root URL (without `/api`) and `REMNAWAVE_API_TOKEN` to the panel API token. The adapter currently implements the documented `/api/users` and `/api/subscriptions` operations.
+- Set `REMNAWAVE_BASE_URL` to the panel root URL (without `/api`) and `REMNAWAVE_API_TOKEN` to the panel API token. Set `REMNAWAVE_ACTIVE_INTERNAL_SQUADS` to the comma-separated internal squad UUIDs assigned to new users.
 - Set `SUPPORT_CONTACT` to the text or contact link shown in the support section.
 - Configure `TARIFF_MIN_*`, `TARIFF_MAX_*`, `TARIFF_PRICE_PER_*` and `TARIFF_CURRENCY` to control the custom tariff builder. Prices are stored in minor currency units (for EUR, cents).
-- Payment integration is intentionally disabled until a provider is selected and verified.
+- Set `TARIFF_CURRENCY=RUB` for the Russian payment methods. YooKassa requires `YOOKASSA_SHOP_ID` and `YOOKASSA_SECRET_KEY`; set the webhook URL to `/webhooks/payments/yookassa` and subscribe to `payment.succeeded`.\n- YooMoney wallet checkout requires `YOOMONEY_RECEIVER` and `YOOMONEY_NOTIFICATION_SECRET`; configure its HTTP notification URL as `/webhooks/payments/yoomoney`. This uses the wallet collection/Quickpay flow, not the YooKassa merchant API.\n- Crypto Pay requires `CRYPTOPAY_API_TOKEN`; configure its Crypto Pay app webhook URL as `/webhooks/payments/cryptopay`. Supported invoice assets are configurable with `CRYPTOPAY_ACCEPTED_ASSETS`.\n- Set `PUBLIC_BASE_URL` to the public HTTPS origin so payment redirects and hosted YooMoney checkout work. Keep all provider credentials in `.env`.
 
 ## Operations
 
