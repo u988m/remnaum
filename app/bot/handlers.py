@@ -34,19 +34,19 @@ router = Router(name="user")
 
 def main_menu() -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="📦 Собрать тариф", callback_data="menu:plans"),
-         InlineKeyboardButton(text="👤 Мой профиль", callback_data="menu:profile")],
-        [InlineKeyboardButton(text="🔐 Подписка", callback_data="menu:subscription"),
+        [InlineKeyboardButton(text="💎 Тарифы", callback_data="menu:plans"),
+         InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile")],
+        [InlineKeyboardButton(text="🔑 Подписка", callback_data="menu:subscription"),
          InlineKeyboardButton(text="📱 Устройства", callback_data="menu:devices")],
         [InlineKeyboardButton(text="🧾 Мои покупки", callback_data="menu:purchases"),
-         InlineKeyboardButton(text="🎁 Пригласить друга", callback_data="menu:referral")],
+         InlineKeyboardButton(text="🤝 Друзья", callback_data="menu:referral")],
         [InlineKeyboardButton(text="🎟 Промокод", callback_data="menu:promo"),
-         InlineKeyboardButton(text="🎁 Пробный доступ", callback_data="menu:trial")],
-        [InlineKeyboardButton(text="📖 Как подключиться", callback_data="menu:connect"),
-         InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu:support")],
+         InlineKeyboardButton(text="✨ Пробный доступ", callback_data="menu:trial")],
+        [InlineKeyboardButton(text="📖 Подключение", callback_data="menu:connect"),
+         InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support")],
     ]
     if settings.webapp_url:
-        rows.append([InlineKeyboardButton(text="🌐 Личный кабинет", web_app=WebAppInfo(url=settings.webapp_url))])
+        rows.append([InlineKeyboardButton(text="🌐 Открыть Mini App", web_app=WebAppInfo(url=settings.webapp_url))])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -102,9 +102,20 @@ async def start_handler(message: Message) -> None:
     if is_new_user and inviter is not None:
         await register_referral(message.from_user.id, inviter)
     profile = await get_store_profile()
+    photo_id = profile.get("welcome_photo_file_id")
+    if photo_id:
+        try:
+            # The image is a separate message above the text with the menu.
+            # Callback pages still edit a plain text message normally.
+            await message.answer_photo(photo=photo_id)
+        except Exception:
+            # A revoked Telegram file_id must never break /start.
+            import logging
+            logging.getLogger(__name__).warning("Could not display configured welcome photo")
     await message.answer(
-        f"Добро пожаловать в <b>{escape(profile['name'])}</b>! 🚀\n\n"
-        f"{escape(profile['description']) or 'Выберите подходящую подписку.'}",
+        f"<b>{escape(profile['name'])}</b>  ·  VPN-магазин\n\n"
+        f"{escape(profile['description']) or 'Выберите тариф и подключите свои устройства.'}\n\n"
+        "Выберите, что хотите сделать:",
         reply_markup=main_menu(),
     )
 
@@ -134,7 +145,8 @@ async def help_handler(message: Message) -> None:
 async def home_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
-        await callback.message.edit_text("Главное меню Remnaum. Выберите раздел:", reply_markup=main_menu())
+        profile = await get_store_profile()
+        await callback.message.edit_text(f"<b>{escape(profile['name'])}</b>  ·  Главное меню\n\nВыберите раздел:", reply_markup=main_menu())
 
 
 @router.callback_query(F.data == "menu:plans")
