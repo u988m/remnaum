@@ -106,6 +106,8 @@ jobs:
                   return exc
           assert request('/store').status == 200
           assert request('/app').status == 200
+          assert request('/admin').status == 200
+          assert request('/api/v1/store-profile/welcome-image').status == 404
           assert request('/static/miniapp.js').status == 200
           assert request('/static/miniapp.css').status == 200
           assert request('/static/admin.js').status == 200
@@ -115,6 +117,8 @@ jobs:
           assert request('/admin/api/referrals').status == 401
           assert request('/admin/api/trial').status == 401
           assert request('/admin/api/promos').status == 401
+          assert request('/admin/api/bot-identity').status == 401
+          assert request('/admin/api/store-profile/welcome-image', 'PUT', payload='{"data_base64":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}').status == 401
           assert request('/api/v1/webapp/offers').status == 401
           assert request('/api/v1/webapp/external/checkout', 'POST', payload='{"provider":"yookassa","days":30,"traffic":50,"devices":1}').status == 401
           assert request('/api/v1/webapp/plans/external/checkout', 'POST', payload='{"provider":"cryptopay","plan_id":1}').status == 401
