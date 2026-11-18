@@ -44,7 +44,7 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch("app.web.storefront.settings.public_base_url", "https://miniapp.example.com"):
             store = (await store_page(Request(scope))).body.decode()
         self.assertIn('src="/static/store.js"', store)
-        self.assertIn("telegram-widget.js", store)
+        self.assertIn('id="login"', store)
         for name in ("miniapp", "admin", "store"):
             js = (STATIC / f"{name}.js").read_text(encoding="utf-8")
             check = subprocess.run(["node", "--check"], input=js, text=True, capture_output=True)
