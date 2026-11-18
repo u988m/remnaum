@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     admin_ids: str = ""
     remnawave_base_url: str = ""
     remnawave_api_token: str = ""
+    remnawave_webhook_secret: str = ""
+    referral_reward_days: int = Field(default=0, ge=0, le=365)
     remnawave_active_internal_squads: str = ""
     payment_provider: str = "stub"
     payment_webhook_secret: str = ""
