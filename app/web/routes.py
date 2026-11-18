@@ -699,7 +699,11 @@ async def webapp_hwid_devices(x_telegram_init_data: str | None = Header(default=
     if not subscription or not subscription.get("panel_user_id"):
         return {"limit": None, "items": []}
     try:
-        result = await RemnawaveClient().get_hwid_devices(subscription["panel_user_id"])
+        client = RemnawaveClient()
+        panel_id = await client.resolve_user_id(
+            subscription["panel_user_id"], username=f"tg_{identity['id']}"
+        )
+        result = await client.get_hwid_devices(panel_id)
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Device list temporarily unavailable") from exc
     data = result.get("response", result) if isinstance(result, dict) else result

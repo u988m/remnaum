@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0-rc.8 — Remnawave 3.x compatibility and automatic squad synchronization
+
+- Installer now auto-selects **every** existing Internal Squad from `GET /api/internal-squads` with no manual choice; all found UUIDs are assigned to new VPN subscribers.
+- Installer reconfiguration and `remnaum → Обновить` resync the squad list, including newly added groups. If the Panel cannot be reached, existing UUIDs are preserved.
+- When a legacy Remnawave 2.x customer subscription stores a UUID, Mini App resolves its current numeric user ID by stable username before listing HWID devices on Remnawave 3.x.
+- Local official Panel webhooks are still configured only after an explicit prompt, with existing receivers and signing secret preserved and backed up.
+- Added regression tests and refreshed the Russian installation instructions.
+
+
 ## 1.0.0-rc.7 — Unified bot, Mini App, admin and owner branding
 
 - Telegram bot: compact symmetric two-column menu, grouped bonus activities, direct Mini App entry and administrator-only owner button and /admin command scope.

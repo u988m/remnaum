@@ -25,9 +25,10 @@ class RemnawaveSetupTests(unittest.TestCase):
         self.assertEqual(setup.parse_squads(payload), [
             {"uuid": A, "name": "Standard"}, {"uuid": B, "name": "Premium"},
         ])
-        self.assertEqual(setup.select_squads(setup.parse_squads(payload), lambda _, default: "2"), B)
-        self.assertEqual(setup.select_squads(setup.parse_squads(payload), lambda _, default: "1,2"), A + "," + B)
-        self.assertEqual(setup.select_squads([{"uuid": A, "name": "One"}], lambda *a, **kw: ""), A)
+        def do_not_prompt(*args, **kwargs):
+            raise AssertionError("Выбирать UUID вручную нельзя")
+        self.assertEqual(setup.select_squads(setup.parse_squads(payload), do_not_prompt), A + "," + B)
+        self.assertEqual(setup.select_squads([{"uuid": A, "name": "One"}], do_not_prompt), A)
 
     def test_api_discovery_uses_bearer_token(self):
         with patch.object(setup, "_fetch_json", return_value={
@@ -36,6 +37,19 @@ class RemnawaveSetupTests(unittest.TestCase):
             result = setup.discover_squads("https://panel.myvpn.site", "secret")
         self.assertEqual(result[0]["uuid"], A)
         fetch.assert_called_once_with("https://panel.myvpn.site/api/internal-squads", "secret")
+
+    def test_refresh_all_squads_on_update_and_keep_previous_on_outage(self):
+        initial = {"REMNAWAVE_BASE_URL": "https://panel.myvpn.site",
+                   "REMNAWAVE_API_TOKEN": "secret", "REMNAWAVE_ACTIVE_INTERNAL_SQUADS": A}
+        with patch.object(installer, "discover_squads",
+                          return_value=[{"uuid": A, "name": "Free"}, {"uuid": B, "name": "Premium"}]), \
+             patch.object(installer, "write_env") as write:
+            self.assertTrue(installer.refresh_all_remnawave_squads(initial))
+            write.assert_called_once_with({"REMNAWAVE_ACTIVE_INTERNAL_SQUADS": A + "," + B})
+        with patch.object(installer, "discover_squads", side_effect=OSError("offline")), \
+             patch.object(installer, "write_env") as write:
+            self.assertFalse(installer.refresh_all_remnawave_squads(initial))
+            write.assert_not_called()
 
     def test_empty_squads_is_a_configuration_error(self):
         with self.assertRaisesRegex(ValueError, "нет внутренних групп"):
@@ -108,6 +122,7 @@ class RemnawaveSetupTests(unittest.TestCase):
             root, env = self._panel(temp)
             with patch.object(installer, "network_exists", return_value=False), \
                  patch.object(installer, "local_panel_for_url", return_value=env), \
+                 patch.object(installer, "discover_squads", return_value=[{"uuid": A, "name": "Default"}]), \
                  patch.object(installer, "prompt") as prompt:
                 config = installer.config_for_install(existing, "panel", "none", 18080)
             self.assertEqual(config["REMNAWAVE_WEBHOOK_SECRET"], SECRET)
@@ -129,6 +144,7 @@ class RemnawaveSetupTests(unittest.TestCase):
             with patch.object(installer, "network_exists", return_value=False), \
                  patch.object(installer, "discover_local_panel", return_value=env), \
                  patch.object(installer, "local_panel_for_url", return_value=env), \
+                 patch.object(installer, "discover_squads", return_value=[{"uuid": A, "name": "Default"}]), \
                  patch.object(installer, "prompt") as prompt:
                 config = installer.config_for_install(existing, "panel", "none", 18080)
             self.assertEqual(config["REMNAWAVE_BASE_URL"], "https://panel.myvpn.site")
