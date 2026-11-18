@@ -1,12 +1,20 @@
 import asyncio
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
-from app.config import settings
-from app.web.routes import router as api_router
+
 from app.bot.runtime import bot, dispatcher, setup_bot
+from app.config import settings
+from app.db.base import Base
+from app.db.session import engine
+from app.web.routes import router as api_router
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
     polling_task = None
     if settings.telegram_bot_token:
         await setup_bot()
@@ -27,9 +35,12 @@ async def lifespan(_: FastAPI):
             pass
     if bot:
         await bot.session.close()
+    await engine.dispose()
 
-app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+
+app = FastAPI(title=settings.app_name, version="0.2.0", lifespan=lifespan)
 app.include_router(api_router)
+
 
 @app.get("/health")
 async def health():
