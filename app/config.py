@@ -27,6 +27,16 @@ class Settings(BaseSettings):
     public_base_url: str = "http://localhost:8080"
     webapp_url: str = ""
     support_contact: str = ""
+    tariff_min_days: int = 7
+    tariff_max_days: int = 365
+    tariff_min_traffic_gb: int = 10
+    tariff_max_traffic_gb: int = 1000
+    tariff_min_devices: int = 1
+    tariff_max_devices: int = 10
+    tariff_price_per_day_minor: int = 5
+    tariff_price_per_gb_minor: int = 2
+    tariff_price_per_device_minor: int = 100
+    tariff_currency: str = "EUR"
 
     @property
     def admin_id_set(self) -> set[int]:
