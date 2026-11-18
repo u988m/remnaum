@@ -114,3 +114,16 @@ async def get_tariff_draft(telegram_id: int) -> TariffQuote:
             amount_minor=draft.amount_minor,
             currency=settings.tariff_currency,
         )
+
+
+def calculate_stars_price(duration_days: int, traffic_gb: int, device_limit: int) -> int:
+    if min(duration_days, traffic_gb, device_limit) < 1:
+        raise ValueError("Tariff values must be positive")
+    amount = (
+        duration_days * settings.tariff_stars_price_per_day
+        + traffic_gb * settings.tariff_stars_price_per_gb
+        + device_limit * settings.tariff_stars_price_per_device
+    )
+    if amount < 1:
+        raise ValueError("Telegram Stars price must be greater than zero")
+    return amount
