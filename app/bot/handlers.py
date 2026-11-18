@@ -131,7 +131,7 @@ async def payment_choose_handler(callback: CallbackQuery) -> None:
     if callback.message:
         quote = await get_tariff_draft(callback.from_user.id)
         await callback.message.edit_text(
-            f"💳 <b>Выберите способ оплаты</b>\\n\\n"
+            f"💳 <b>Выберите способ оплаты</b>\n\n"
             f"К оплате: <b>{escape(format_price(quote.amount_minor, quote.currency))}</b>",
             reply_markup=keyboard,
         )
@@ -185,7 +185,7 @@ async def subscription_handler(callback: CallbackQuery) -> None:
     subscription = await get_user_subscription(callback.from_user.id)
     if subscription is None:
         await callback.message.edit_text(
-            "🔐 <b>Моя подписка</b>\\n\\nАктивная VPN-подписка пока не найдена.",
+            "🔐 <b>Моя подписка</b>\n\nАктивная VPN-подписка пока не найдена.",
             reply_markup=back_menu(),
         )
         return
@@ -193,10 +193,10 @@ async def subscription_handler(callback: CallbackQuery) -> None:
     expires_at = subscription["expires_at"]
     expires_text = expires_at.strftime("%d.%m.%Y %H:%M UTC") if expires_at else "не указано"
     details = (
-        "🔐 <b>Моя подписка</b>\\n\\n"
-        f"Статус: <b>{escape(subscription['status'])}</b>\\n"
-        f"Действует до: <b>{expires_text}</b>\\n"
-        f"Трафик: <b>{subscription['traffic_gb'] or '—'} ГБ</b>\\n"
+        "🔐 <b>Моя подписка</b>\n\n"
+        f"Статус: <b>{escape(subscription['status'])}</b>\n"
+        f"Действует до: <b>{expires_text}</b>\n"
+        f"Трафик: <b>{subscription['traffic_gb'] or '—'} ГБ</b>\n"
         f"Устройства: <b>{subscription['device_limit'] or '—'}</b>"
     )
     url = subscription.get("subscription_url")
