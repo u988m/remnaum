@@ -4,7 +4,7 @@ Remnaum is a Telegram-first VPN subscription platform built around the Remnawave
 
 ## Current status
 
-**Foundation release: 0.1.0.** This repository contains the application skeleton and deployment foundation. It does not yet sell subscriptions or provision VPN users.
+**Current milestone: 0.2.0.** The bot registers Telegram users and provides a starter menu for plans, profile, subscription and support. Billing, subscription provisioning and the customer Web App are not production-ready yet.
 
 ## Planned modules
 
@@ -40,6 +40,7 @@ See [`.env.example`](.env.example). Keep secrets in `.env`; never commit it.
 - Set `TELEGRAM_USE_WEBHOOK=false` to use polling.
 - For webhook mode, set `TELEGRAM_USE_WEBHOOK=true`, `TELEGRAM_WEBHOOK_URL` and a long random `TELEGRAM_WEBHOOK_SECRET`. Put the service behind HTTPS.
 - Set `REMNAWAVE_BASE_URL` and `REMNAWAVE_API_TOKEN` to enable the panel adapter.
+- Set `SUPPORT_CONTACT` to the text or contact link shown in the support section.
 - Payment integration is intentionally disabled until a provider is selected and verified.
 
 ## Operations
