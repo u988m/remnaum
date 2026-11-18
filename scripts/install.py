@@ -125,6 +125,36 @@ def install_docker() -> None:
         raise RuntimeError("Docker Compose v2 did not become available")
 
 
+def offer_docker_setup() -> None:
+    """Install missing components without touching a running Docker engine."""
+    if docker_ready():
+        return
+    if shutil.which("docker"):
+        if not Path("/usr/bin/apt-get").exists() and not shutil.which("apt-get"):
+            raise RuntimeError("Docker найден, но Compose v2 отсутствует. Установите Compose plugin.")
+        answer = prompt("Docker есть, но нет Compose v2. Установить дополнение? (Д/н)", default="Д")
+        if answer.lower() not in ("д", "да", "y", "yes"):
+            raise RuntimeError("Для запуска нужен Docker Compose v2")
+        run(["apt-get", "update"])
+        run(["apt-get", "install", "-y", "docker-compose-plugin"])
+        if not docker_ready():
+            raise RuntimeError("Compose v2 не появился; существующий Docker не был заменён")
+        return
+    answer = prompt("Docker не найден. Установить автоматически? (Д/н)", default="Д")
+    if answer.lower() not in ("д", "да", "y", "yes"):
+        raise RuntimeError("Для запуска нужен Docker")
+    install_docker()
+
+
+def first_free_loopback_port(preferred: int) -> int:
+    if loopback_available(preferred):
+        return preferred
+    for candidate in range(max(1024, preferred + 1), min(65535, preferred + 60)):
+        if loopback_available(candidate):
+            return candidate
+    raise RuntimeError("Не найден свободный локальный порт в ближайшем диапазоне")
+
+
 def network_exists(name: str) -> bool:
     return run(["docker", "network", "inspect", name], check=False, quiet=True).returncode == 0
 
@@ -505,19 +535,22 @@ def main() -> int:
         )
 
     print("\n[2/4] Проверяем Docker и порты")
-    if not docker_ready():
-        if mode == "panel":
-            raise RuntimeError("Docker Compose is missing. On a Panel host, install it manually without replacing existing Docker.")
-        if shutil.which("docker"):
-            raise RuntimeError("Docker exists but Compose v2 is missing. Install the Compose plugin without replacing your Docker Engine.")
-        install_docker()
+    offer_docker_setup()
     port = args.local_port or int(existing.get("REMNAUM_LOCAL_PORT") or "18080")
     if not 1024 <= port <= 65535:
         raise ValueError("Local app port must be between 1024 and 65535")
     if mode == "standalone" and existing.get("DEPLOY_MODE") != "standalone" and not public_ports_available():
-        raise RuntimeError("80/443 are already occupied. Select '--mode panel' and reuse the existing proxy.")
-    if mode == "panel" and existing.get("DEPLOY_MODE") != "panel" and not loopback_available(port):
-        raise RuntimeError(f"127.0.0.1:{port} is busy; choose --local-port with a free port.")
+        print("Порты 80/443 заняты существующим прокси.")
+        answer = prompt("Поставить Remnaum рядом с ним без конфликта портов? (Д/н)", default="Д")
+        if answer.lower() in ("д", "да", "y", "yes"):
+            mode = "panel"
+        else:
+            raise RuntimeError("Освободите публичные 80/443 или используйте режим совместного прокси.")
+    if mode == "panel" and existing.get("DEPLOY_MODE") != "panel":
+        chosen_port = first_free_loopback_port(port)
+        if chosen_port != port:
+            print(f"Порт {port} занят. Выбран свободный 127.0.0.1:{chosen_port}.")
+        port = chosen_port
 
     print("\n[3/4] Настройки магазина")
     cfg = config_for_install(existing, mode, args.proxy_network, port)
