@@ -81,3 +81,8 @@ tr:last-child td{border-bottom:0}
 
 [hidden]{display:none!important}
 #welcome-photo-input[hidden]{display:none!important}
+
+.bot-identity{display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap;background:rgba(44,80,134,.15);border:1px solid var(--ui-border);padding:13px 16px;border-radius:13px;margin-bottom:16px}
+.bot-identity strong{display:block;font-size:15px;margin-top:5px}
+.bot-identity .muted{display:block;font-size:12px}
+.bot-identity button{margin-left:auto}
