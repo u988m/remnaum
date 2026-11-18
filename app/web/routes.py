@@ -331,7 +331,7 @@ async def webapp_create_checkout(data: WebAppCheckout, x_telegram_init_data: str
         raise HTTPException(status_code=503, detail="Telegram bot is not initialized")
     try:
         invoice_url = await bot.create_invoice_link(
-            title=(await get_store_profile())["name"][:50] + " VPN",
+            title=(await get_store_profile())["name"][:28] + " VPN",
             description=f"VPN-подписка: {data.days} дней, {data.traffic} ГБ, {data.devices} устройств",
             payload=f"remnaum:{payment.id}",
             provider_token="",
@@ -578,7 +578,7 @@ async def webapp_checkout_ready_plan(data: WebAppFixedPlanCheckout, x_telegram_i
         raise HTTPException(status_code=503, detail="Telegram bot is not initialized")
     try:
         url = await bot.create_invoice_link(
-            title=(await get_store_profile())["name"][:50] + " VPN",
+            title=(await get_store_profile())["name"][:28] + " VPN",
             description=f"VPN: {quote.duration_days} дней, {quote.traffic_gb} ГБ, {quote.device_limit} устройств",
             payload=f"remnaum:{payment.id}", provider_token="", currency="XTR",
             prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
