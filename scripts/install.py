@@ -384,6 +384,8 @@ def choose_install_dir(existing: dict[str, str], requested: str | None = None,
 
 def install_update_timer() -> bool:
     """Install a host-side scheduler that can read the private Git remote safely."""
+    if os.geteuid() != 0:
+        return False
     if not shutil.which("systemctl") or not Path("/run/systemd/system").exists():
         print("Systemd недоступен: автоматические уведомления GitHub можно проверять вручную.")
         return False
