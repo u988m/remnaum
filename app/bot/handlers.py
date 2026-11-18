@@ -349,18 +349,37 @@ async def support_handler(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "menu:devices")
 async def devices_handler(callback: CallbackQuery) -> None:
+    from app.services.remnawave import RemnawaveClient
     await callback.answer()
     subscription = await get_user_subscription(callback.from_user.id)
-    if subscription is None:
+    if not subscription:
         message = "📱 <b>Мои устройства</b>\\n\\nСначала оформите подписку."
     else:
         limit = subscription.get("device_limit")
-        message = (
-            "📱 <b>Мои устройства</b>\\n\\n"
-            f"Лимит устройств: <b>{limit if limit is not None else '—'}</b>\\n"
-            "Подключите устройство с помощью ссылки в разделе «Подписка».\\n"
-            "Список HWID-устройств появится после подключения API управления устройствами."
-        )
+        lines = ["📱 <b>Мои устройства</b>", "", f"Ваш лимит: <b>{limit if limit is not None else '—'}</b>"]
+        panel_id = subscription.get("panel_user_id")
+        if panel_id and settings.remnawave_base_url and settings.remnawave_api_token:
+            try:
+                result = await RemnawaveClient().get_hwid_devices(panel_id)
+                data = result.get("response", result) if isinstance(result, dict) else result
+                if isinstance(data, dict):
+                    devices = data.get("devices", data.get("items", []))
+                elif isinstance(data, list):
+                    devices = data
+                else:
+                    devices = []
+                lines.append(f"Подключено устройств: <b>{len(devices)}</b>")
+                for index, device in enumerate(devices[:10], 1):
+                    if isinstance(device, dict):
+                        label = device.get("deviceModel") or device.get("platform") or device.get("userAgent") or "Устройство"
+                    else:
+                        label = "Устройство"
+                    lines.append(f"{index}. {escape(str(label)[:70])}")
+            except Exception:
+                lines.append("Список устройств временно недоступен.")
+        else:
+            lines.append("Подключите VPN, чтобы увидеть зарегистрированные устройства.")
+        message = chr(10).join(lines)
     if callback.message:
         await callback.message.edit_text(message.replace(chr(92) + "n", chr(10)), reply_markup=back_menu())
 
