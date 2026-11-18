@@ -69,7 +69,8 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
         stored = await session.get(Payment, payment_id)
         if stored is None:
             raise RuntimeError("Local payment record disappeared")
-        if stored.status == "pending":\n            stored.provider_payment_id = link.payment_id
+        if stored.status == "pending":
+            stored.provider_payment_id = link.payment_id
         await session.commit()
     return payment, link
 
