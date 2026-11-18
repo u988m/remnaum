@@ -1,0 +1,14 @@
+# Add this overlay only when the existing Remnawave reverse proxy
+# already shares the external Docker network (usually remnawave-network).
+# Proxy containers resolve remnaum-api:8080 via this private alias.
+services:
+  app:
+    networks:
+      default: {}
+      panel_proxy:
+        aliases:
+          - remnaum-api
+networks:
+  panel_proxy:
+    external: true
+    name: ${REMNAUM_PROXY_NETWORK:?Choose your existing reverse-proxy Docker network}

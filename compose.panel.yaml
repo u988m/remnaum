@@ -1,0 +1,6 @@
+# Panel VPS: only a host-loopback port, never TCP 80/443.
+# Useful with a host-native reverse proxy; safe alongside Remnawave.
+services:
+  app:
+    ports:
+      - "127.0.0.1:${REMNAUM_LOCAL_PORT:-18080}:8080"
