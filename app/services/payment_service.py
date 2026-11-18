@@ -36,6 +36,8 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
                 draft.duration_days, draft.traffic_gb, draft.device_limit
             ) != (plan.duration_days, plan.traffic_gb, plan.device_limit):
                 raise ValueError("Selected plan has changed; select it again")
+            if quote.currency.upper() != "RUB":
+                raise ValueError("Fixed RUB plans require TARIFF_CURRENCY=RUB for external checkout")
             amount_minor = plan.price_rub_minor
         else:
             amount_minor = quote.amount_minor
