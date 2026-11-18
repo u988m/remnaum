@@ -6,12 +6,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
-
     app_name: str = "Remnaum"
     app_env: str = "development"
     app_host: str = "0.0.0.0"
     app_port: int = 8080
     app_secret_key: str = "development-only-change-me"
+    admin_api_token: str = ""
     log_level: str = "INFO"
     database_url: str = "postgresql+asyncpg://remnaum:remnaum@localhost:5432/remnaum"
     redis_url: str = "redis://localhost:6379/0"

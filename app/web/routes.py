@@ -14,6 +14,49 @@ from app.services.subscriptions import provision_paid_payment
 
 router = APIRouter()
 
+import secrets
+from pydantic import BaseModel, Field
+from app.services.store_settings import get_store_payment_settings, public_payment_settings, update_store_payment_settings
+
+
+class PaymentSettingsUpdate(BaseModel):
+    methods: dict[str, bool] = Field(default_factory=dict)
+    credentials: dict[str, dict[str, str]] = Field(default_factory=dict)
+
+
+def _require_admin_token(token: str | None) -> None:
+    if not settings.admin_api_token:
+        raise HTTPException(status_code=503, detail="ADMIN_API_TOKEN is not configured")
+    if not token or not secrets.compare_digest(token, settings.admin_api_token):
+        raise HTTPException(status_code=403, detail="Administrator authentication required")
+
+
+@router.get("/admin/api/payment-settings")
+async def admin_get_payment_settings(x_admin_token: str | None = Header(default=None)):
+    _require_admin_token(x_admin_token)
+    methods, credentials = await get_store_payment_settings()
+    return public_payment_settings(methods, credentials)
+
+
+@router.put("/admin/api/payment-settings")
+async def admin_update_payment_settings(
+    data: PaymentSettingsUpdate,
+    x_admin_token: str | None = Header(default=None),
+):
+    _require_admin_token(x_admin_token)
+    try:
+        return await update_store_payment_settings(data.methods, data.credentials)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/api/v1/payment-methods")
+async def public_payment_methods():
+    methods, credentials = await get_store_payment_settings()
+    configured = public_payment_settings(methods, credentials)["configured"]
+    return {"methods": {key: enabled and configured.get(key, False) for key, enabled in methods.items()}}
+
+
 
 @router.post("/telegram/webhook")
 async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: str | None = Header(default=None)):

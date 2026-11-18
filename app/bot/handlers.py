@@ -18,6 +18,7 @@ from app.services.payment_service import settle_payment
 from app.services.tariffs import calculate_stars_price
 from app.services.subscriptions import get_user_subscription, provision_paid_payment
 from app.services.users import get_or_create_user
+from app.services.store_settings import is_payment_method_enabled
 
 router = Router(name="user")
 
@@ -66,7 +67,8 @@ def tariff_text(quote: TariffQuote) -> str:
         f"Срок: <b>{quote.duration_days} дней</b>\n"
         f"Трафик: <b>{quote.traffic_gb} ГБ</b>\n"
         f"Устройства: <b>{quote.device_limit}</b>\n\n"
-        f"Стоимость: <b>{stars} ⭐</b>\n\n"
+        f"Стоимость: <b>{quote.amount_minor / 100:.2f} {escape(quote.currency)}</b>\n"
+        f"Цена в Telegram: <b>{stars} ⭐</b>\n\n"
         "Настройте параметры кнопками ниже. Значения ограничены доступным диапазоном."
     )
 
@@ -130,6 +132,10 @@ async def tariff_update_handler(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "payment:choose")
 async def payment_choose_handler(callback: CallbackQuery) -> None:
     await callback.answer()
+    if not await is_payment_method_enabled("telegram_stars"):
+        if callback.message:
+            await callback.message.edit_text("Оплата временно отключена администратором.", reply_markup=back_menu())
+        return
     if not settings.telegram_terms_url:
         if callback.message:
             await callback.message.edit_text(
