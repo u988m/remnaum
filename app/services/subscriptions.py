@@ -10,6 +10,7 @@ from app.db.models import Payment, Subscription, SubscriptionDetails, User
 from app.db.session import SessionLocal
 from app.services.remnawave import RemnawaveClient
 from app.services.referrals import pending_rewards_for_payment, grant_referral_reward
+from app.services.promos import pending_promo_redemptions
 
 
 def _unwrap(data: Any) -> dict[str, Any]:
@@ -49,7 +50,8 @@ async def provision_paid_payment(payment_id: int) -> bool:
         if min(days, traffic_gb, device_limit) < 1:
             raise RuntimeError("Payment does not contain a valid tariff snapshot")
         pending_rewards = await pending_rewards_for_payment(session, user.id)
-        bonus_days = sum(reward.days for reward in pending_rewards)
+        promo_credits = await pending_promo_redemptions(session, user.id)
+        bonus_days = sum(reward.days for reward in pending_rewards) + sum(p.bonus_days for p in promo_credits)
         total_days = days + bonus_days
         if not settings.remnawave_base_url or not settings.remnawave_api_token:
             raise RuntimeError("Remnawave is not configured")
@@ -113,9 +115,9 @@ async def provision_paid_payment(payment_id: int) -> bool:
                 description=marker,
             )
             panel_user = _unwrap(created)
-            if not panel_user.get("id"):
+            if panel_user.get("id") is None and not panel_user.get("uuid"):
                 panel_user = _unwrap(await panel.get_user_by_username(username))
-            panel_user_id = int(panel_user["id"])
+            panel_user_id = _panel_identity(panel_user)
             panel_user = _unwrap(await panel.get_user(panel_user_id))
 
         expire_value = panel_user.get("expireAt")
@@ -160,6 +162,8 @@ async def provision_paid_payment(payment_id: int) -> bool:
 
         for reward in pending_rewards:
             reward.redeemed_payment_id = payment_id
+        for credit in promo_credits:
+            credit.applied_payment_id = payment_id
         await grant_referral_reward(session, user.id, payment_id)
         payment.status = "succeeded"
         await session.commit()

@@ -86,6 +86,9 @@ jobs:
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM referral_rewards;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM remnawave_events;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM store_payment_settings;')" = "0"
+          for table in promo_codes promo_redemptions trial_settings trial_claims; do
+            test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc "SELECT COUNT(*) FROM $table;")" = "0"
+          done
           docker compose exec -T app python - <<'PY'
           import urllib.error
           import urllib.request
@@ -101,6 +104,10 @@ jobs:
           assert request('/api/v1/store/catalog').status == 200
           assert request('/api/v1/store/me').status == 401
           assert request('/admin/api/referrals').status == 401
+          assert request('/admin/api/trial').status == 401
+          assert request('/admin/api/promos').status == 401
+          assert request('/api/v1/webapp/offers').status == 401
+          assert request('/api/v1/webapp/trial', 'POST').status == 401
           assert request('/webhooks/remnawave', 'POST', 'webhook.example.com').status == 401
           print('Public storefront/miniapp and unauthenticated protected routes verified')
           PY
@@ -122,6 +129,33 @@ jobs:
           docker compose restart app
           sleep 5
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM users;')" = "0"
+      - name: Verify promo redemption is persisted and cannot repeat
+        run: |
+          docker compose exec -T app python - <<'PY'
+          import asyncio
+          from app.db.models import User
+          from app.db.session import SessionLocal
+          from app.services.promos import create_promo, redeem_promo, promo_balance
+          from app.services.trials import trial_eligible, get_trial_settings
+          async def main():
+              async with SessionLocal() as session:
+                  session.add(User(telegram_id=123456789, username="smoke"))
+                  await session.commit()
+              promo = await create_promo("SMOKE7", 7, 5)
+              assert promo["used_count"] == 0
+              first = await redeem_promo(123456789, "smoke7")
+              assert first["bonus_days"] == 7
+              assert (await promo_balance(123456789))["days"] == 7
+              try:
+                  await redeem_promo(123456789, "SMOKE7")
+              except ValueError:
+                  pass
+              else:
+                  raise AssertionError("Promo was redeemed twice")
+              assert (await get_trial_settings())["enabled"] is False
+              assert not await trial_eligible(123456789)
+          asyncio.run(main())
+          PY
       - name: Show logs on failure
         if: failure()
         run: docker compose logs --tail=200

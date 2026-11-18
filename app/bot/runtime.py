@@ -17,6 +17,7 @@ async def setup_bot() -> None:
             BotCommand(command="start", description="Главное меню"),
             BotCommand(command="admin", description="Панель владельца"),
             BotCommand(command="help", description="Помощь"),
+            BotCommand(command="promo", description="Активировать промокод: /promo КОД"),
             BotCommand(command="terms", description="Условия покупки"),
             BotCommand(command="paysupport", description="Поддержка оплаты"),
             ])
