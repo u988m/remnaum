@@ -35,6 +35,21 @@ class RemnawaveClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"username":"tg_12345"', seen["payload"])
         self.assertIn('"telegramId":12345', seen["payload"])
 
+    async def test_legacy_uuid_user_updates(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["path"] = request.url.path
+            seen["payload"] = request.read().decode()
+            return httpx.Response(200, json={"response": {"uuid": "abcd-1234"}})
+
+        client = RemnawaveClient("https://panel.example", "token", httpx.MockTransport(handler))
+        await client.update_user("abcd-1234", traffic_limit_bytes=1024, hwid_device_limit=2)
+        self.assertIn('"uuid":"abcd-1234"', seen["payload"])
+        self.assertNotIn('"id":', seen["payload"])
+        await client.get_subscription("abcd-1234")
+        self.assertEqual(seen["path"], "/api/subscriptions/by-uuid/abcd-1234")
+
     async def test_extend_user_uses_days_body(self):
         seen = {}
 
