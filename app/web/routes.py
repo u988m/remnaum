@@ -772,3 +772,36 @@ async def webapp_checkout_ready_plan(data: WebAppFixedPlanCheckout, x_telegram_i
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Could not create Stars invoice") from exc
     return {"payment_id": payment.id, "stars": stars, "invoice_url": url}
+
+
+from app.services.store_profile import get_store_profile, update_store_profile
+
+
+class StoreProfilePayload(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    tagline: str = Field(default="", max_length=300)
+    description: str = Field(default="", max_length=300)
+    accent_color: str = Field(default="#4b8bea", pattern=r"^#[a-fA-F0-9]{6}$")
+    support_contact: str = Field(default="", max_length=300)
+
+
+@router.get("/api/v1/store-profile")
+async def public_store_profile():
+    return await get_store_profile()
+
+
+@router.get("/admin/api/store-profile")
+async def admin_get_store_profile(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    return await get_store_profile()
+
+
+@router.put("/admin/api/store-profile")
+async def admin_put_store_profile(
+    data: StoreProfilePayload, x_telegram_init_data: str | None = Header(default=None)
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    try:
+        return await update_store_profile(data.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
