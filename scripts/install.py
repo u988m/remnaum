@@ -581,6 +581,25 @@ def wait_for_app_health(max_attempts: int = 35) -> bool:
     return False
 
 
+def sync_squads_after_update(existing: dict[str, str]) -> bool:
+    """Refresh all Panel groups after upgrading without losing a working setup."""
+    url = existing.get("REMNAWAVE_BASE_URL")
+    token = existing.get("REMNAWAVE_API_TOKEN")
+    if not url or not token:
+        return False
+    try:
+        squads = discover_squads(url, token)
+        chosen = select_squads(squads)
+    except (OSError, ValueError):
+        print("Группы Remnawave не обновлены: API недоступен или нет внутренних групп.")
+        return False
+    if chosen == existing.get("REMNAWAVE_ACTIVE_INTERNAL_SQUADS"):
+        return False
+    write_env({"REMNAWAVE_ACTIVE_INTERNAL_SQUADS": chosen})
+    print("✅ Новые внутренние группы сохранены в конфигурации Remnaum.")
+    return True
+
+
 def perform_update(existing: dict[str, str]) -> int:
     if not existing.get("COMPOSE_FILE"):
         raise ValueError("Сначала выберите режим установки через пункт 1.")
@@ -591,6 +610,10 @@ def perform_update(existing: dict[str, str]) -> int:
     ui.section(1, 3, "Создание резервной копии и загрузка обновлений")
     offer_backup_key()
     run(["bash", "update.sh"])
+    if sync_squads_after_update(existing):
+        # FastAPI reads the group IDs at startup, so apply the refreshed
+        # environment without restarting PostgreSQL, Redis or Remnawave.
+        run(["docker", "compose", "up", "-d", "--no-deps", "--force-recreate", "app"])
     ui.section(2, 3, "Проверка контейнеров")
     run(["docker", "compose", "ps"])
     ui.section(3, 3, "Проверка приложения")
@@ -770,20 +793,26 @@ def config_for_install(existing: dict[str, str], mode: str,
     for key, label, hidden in required:
         if not cfg.get(key):
             cfg[key] = prompt(label, hidden=hidden)
-    # Never ask for UUIDs when the panel can provide its Internal Squads.
-    if not cfg.get("REMNAWAVE_ACTIVE_INTERNAL_SQUADS"):
-        print("\\n🔎 Получаем внутренние группы Remnawave через API...")
-        try:
-            squads = discover_squads(cfg["REMNAWAVE_BASE_URL"], cfg["REMNAWAVE_API_TOKEN"])
-        except (OSError, ValueError):
-            # Never print full HTTP errors: endpoints might include user credentials.
-            print("Не удалось получить группы автоматически. Проверьте API-токен и доступность панели.")
-            manual = prompt("UUID внутренней группы (резервный вариант, через запятую)")
-            cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"] = validate_uuid_list(manual)
+    # Always re-discover squads, even when a previous installation already
+    # saved IDs: newly created Panel squads must be available to new customers.
+    # Existing IDs are retained when the Panel API is temporarily unavailable.
+    print("\\n🔎 Синхронизируем все внутренние группы Remnawave...")
+    try:
+        squads = discover_squads(cfg["REMNAWAVE_BASE_URL"], cfg["REMNAWAVE_API_TOKEN"])
+    except (OSError, ValueError):
+        if cfg.get("REMNAWAVE_ACTIVE_INTERNAL_SQUADS"):
+            print("API панели недоступен: сохранены ранее выбранные группы.")
+            cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"] = validate_uuid_list(
+                cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"]
+            )
         else:
-            # A successful API response with zero squads is not an outage.
-            # Do not encourage entering an unrelated UUID.
-            cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"] = select_squads(squads, prompt)
+            print("Нет связи с API Remnawave. Используйте резервный ручной ввод UUID.")
+            manual = prompt("UUID внутренних групп (через запятую)")
+            cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"] = validate_uuid_list(manual)
+    else:
+        # An empty, valid list is not a connection error; there is nothing
+        # that can be safely assigned to a paid subscription.
+        cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"] = select_squads(squads)
     # On a shared host reuse the already configured secret so other Panel
     # webhook consumers are not disconnected or made incompatible.
     panel_env = local_panel_for_url(cfg["REMNAWAVE_BASE_URL"]) if mode == "panel" else None
