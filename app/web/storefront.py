@@ -9,15 +9,16 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.dialects.postgresql import insert
 
 from app.config import settings
 from app.db.models import User
 from app.db.session import SessionLocal
-from app.services.payment_service import accept_current_terms, create_payment_for_user
-from app.services.plans import choose_plan, list_plans
+from app.services.payment_service import accept_current_terms, create_payment_for_user, recent_purchases
+from app.services.subscriptions import get_user_subscription
+from app.services.plans import list_plans
 from app.services.store_auth import issue_store_session, verify_store_session, verify_telegram_login
 from app.services.store_profile import get_store_profile, get_terms_url
 from app.services.store_settings import get_store_payment_settings, public_payment_settings
@@ -104,8 +105,20 @@ async def store_me(request: Request):
     return {"id": telegram_id, "first_name": user.username or ""}
 
 
+@router.get("/api/v1/store/purchases")
+async def store_purchases(request: Request, response: Response):
+    telegram_id = _store_user(request)
+    response.headers["Cache-Control"] = "no-store"
+    subscription = await get_user_subscription(telegram_id)
+    return {
+        "items": await recent_purchases(telegram_id),
+        "subscription": {key: subscription[key] for key in ("status", "expires_at", "subscription_url")}
+        if subscription else None,
+    }
+
+
 class StoreCheckoutPayload(BaseModel):
-    plan_id: int = Field(ge=1)
+    plan_id: int = Field(ge=1, le=2147483647)
     provider: str = Field(min_length=1, max_length=32)
     accepted_terms: bool
 
@@ -123,9 +136,8 @@ async def store_checkout(request: Request, data: StoreCheckoutPayload):
     if not methods.get(data.provider):
         raise HTTPException(status_code=403, detail="Payment method is disabled")
     try:
-        await choose_plan(telegram_id, data.plan_id)
         await accept_current_terms(telegram_id)
-        payment, link = await create_payment_for_user(telegram_id, data.provider)
+        payment, link = await create_payment_for_user(telegram_id, data.provider, plan_id=data.plan_id)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not link.url.startswith("https://"):

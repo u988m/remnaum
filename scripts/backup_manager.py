@@ -28,6 +28,12 @@ from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+if __package__:
+    from .branding_storage import prepare_branding_storage
+else:
+    from branding_storage import prepare_branding_storage
+
+
 ROOT = Path(__file__).resolve().parents[1]
 BACKUPS = ROOT / "backups"
 DATA = ROOT / "data"
@@ -345,6 +351,79 @@ def inspect_backup(archive: Path, *, supplied_key: str | None = None) -> dict:
             return info
 
 
+def _restore_postgres(dump_path: Path, target: Path) -> None:
+    # Restoring into an empty database also handles archives older than the
+    # installed schema. Dependencies from later migrations cannot block restore.
+    suffix = secrets.token_hex(8)
+    staging = f"remnaum_restore_{suffix}"
+    previous = f"remnaum_previous_{suffix}"
+    command = ["docker", "compose", "exec", "-T", "postgres"]
+
+    def pg(*args: str, **kwargs) -> subprocess.CompletedProcess:
+        return subprocess.run(command + list(args), cwd=target, timeout=360, **kwargs)
+
+    pg("createdb", "-U", "remnaum", staging, check=True)
+    try:
+        with dump_path.open("rb") as dump:
+            pg("pg_restore", "-U", "remnaum", "-d", staging, "--no-owner", "--no-acl",
+               "--single-transaction", stdin=dump, check=True)
+        pg("psql", "-U", "remnaum", "-d", "postgres", "--set=ON_ERROR_STOP=1", "--single-transaction",
+           "-c", f"ALTER DATABASE remnaum RENAME TO {previous}; ALTER DATABASE {staging} RENAME TO remnaum;",
+           check=True)
+    except (OSError, subprocess.SubprocessError):
+        pg("dropdb", "-U", "remnaum", "--if-exists", staging, check=False)
+        raise
+    if pg("dropdb", "-U", "remnaum", "--if-exists", previous, check=False).returncode:
+        print(f"Предыдущая база сохранена как {previous}.")
+
+
+def _restore_redis(source: Path, target: Path) -> None:
+    subprocess.run(["docker", "compose", "stop", "redis"], cwd=target, check=True,
+                   stdout=subprocess.DEVNULL, timeout=60)
+    # An AOF-enabled Redis ignores a standalone dump.rdb on startup. Load the
+    # dump into an isolated instance first and let Redis generate its own AOF.
+    prepare_aof = r"""
+set -eu
+stage=$(mktemp -d /data/.restore.XXXXXX)
+socket="$stage/redis.sock"
+cleanup() {
+    redis-cli -s "$socket" SHUTDOWN NOSAVE >/dev/null 2>&1 || true
+    if [ -d "$stage/previous-aof" ] && [ ! -e /data/appendonlydir ]; then
+        mv "$stage/previous-aof" /data/appendonlydir
+    fi
+    rm -rf "$stage"
+}
+trap cleanup EXIT
+cp /restore/redis.rdb "$stage/dump.rdb"
+redis-server --dir "$stage" --pidfile "$stage/redis.pid" --logfile "$stage/redis.log" \
+    --daemonize yes --port 0 --unixsocket "$socket" --appendonly no --save ""
+attempt=0
+until [ "$(redis-cli -s "$socket" PING 2>/dev/null)" = PONG ]; do
+    attempt=$((attempt + 1))
+    [ "$attempt" -lt 120 ] || { cat "$stage/redis.log" >&2; exit 1; }
+    sleep 1
+done
+[ "$(redis-cli -s "$socket" CONFIG SET appendonly yes)" = OK ]
+attempt=0
+until [ -s "$stage/appendonlydir/appendonly.aof.manifest" ]; do
+    attempt=$((attempt + 1))
+    [ "$attempt" -lt 120 ] || { cat "$stage/redis.log" >&2; exit 1; }
+    sleep 1
+done
+redis-cli -s "$socket" SHUTDOWN NOSAVE
+cp "$stage/dump.rdb" "$stage/restored.rdb"
+mv "$stage/restored.rdb" /data/dump.rdb
+if [ -d /data/appendonlydir ]; then
+    mv /data/appendonlydir "$stage/previous-aof"
+fi
+mv "$stage/appendonlydir" /data/appendonlydir
+"""
+    subprocess.run([
+        "docker", "compose", "run", "--rm", "-T", "--no-deps",
+        "-v", str(source) + ":/restore:ro", "--entrypoint", "sh", "redis", "-c", prepare_aof,
+    ], cwd=target, check=True, timeout=300)
+
+
 def restore_backup(archive: Path, *, supplied_key: str | None = None, target_root: Path | None = None) -> None:
     """Restore in the current install location, selected by bootstrap/installer.
 
@@ -386,6 +465,7 @@ def restore_backup(archive: Path, *, supplied_key: str | None = None, target_roo
                 else:
                     shutil.copy2(entry, destination)
             os.chmod(target / ".env", 0o600)
+            prepare_branding_storage(target)
             subprocess.run(
                 ["docker", "compose", "up", "-d", "postgres", "redis"],
                 cwd=target, check=True, capture_output=True, timeout=180,
@@ -401,21 +481,8 @@ def restore_backup(archive: Path, *, supplied_key: str | None = None, target_roo
                 time.sleep(2)
             else:
                 raise RuntimeError("PostgreSQL не запустился после восстановления конфигурации")
-            with (extracted / "database.dump").open("rb") as dump:
-                subprocess.run([
-                    "docker", "compose", "exec", "-T", "postgres",
-                    "pg_restore", "-U", "remnaum", "-d", "remnaum",
-                    "--no-owner", "--no-acl", "--clean", "--if-exists",
-                    "--single-transaction",
-                ], cwd=target, stdin=dump, check=True, timeout=360)
-            subprocess.run(["docker", "compose", "stop", "redis"], cwd=target, check=True,
-                           stdout=subprocess.DEVNULL, timeout=60)
-            subprocess.run([
-                "docker", "compose", "run", "--rm", "-T", "--no-deps",
-                "-v", str(extracted) + ":/restore:ro",
-                "--entrypoint", "sh", "redis", "-c",
-                "rm -rf /data/appendonlydir && cp /restore/redis.rdb /data/dump.rdb",
-            ], cwd=target, check=True, capture_output=True, timeout=120)
+            _restore_postgres(extracted / "database.dump", target)
+            _restore_redis(extracted, target)
             subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=target,
                            check=True, timeout=360)
             import time

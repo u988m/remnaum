@@ -67,7 +67,7 @@ async function loadAccountPanels(){
   }else $("account-device-info").textContent="Информация об устройствах временно недоступна";
   if(results[1].status==="fulfilled"){
     const d=results[1].value;
-    $("account-purchase-info").textContent=d.items.length?d.items.map(x=>"#"+x.id+" · "+(x.currency==="XTR"?x.amount+" ⭐":(x.amount/100).toFixed(2)+" "+x.currency)+" · "+x.status).join(" | "):"Покупок пока нет";
+    $("account-purchase-info").textContent=d.items.length?d.items.map(x=>"#"+x.id+" · "+formatPaymentAmount(x.amount,x.currency)+" · "+paymentStatusLabel(x.status)).join(" | "):"Покупок пока нет";
   }else $("account-purchase-info").textContent="История покупок временно недоступна";
   if(results[2].status==="fulfilled"){
     const d=results[2].value;
@@ -75,6 +75,75 @@ async function loadAccountPanels(){
     if(d.link){$("account-referral-link").href=d.link;$("account-referral-link").textContent=d.link;$("account-referral-link").style.display="block";$("copy-referral").hidden=false}
   }else $("account-referral-info").textContent="Реферальная информация временно недоступна";
 }
+let trackedOrder = 0;
+
+function trackPayment(paymentId, paid = false) {
+  const request = ++trackedOrder;
+  if (paid) $("status").textContent = "Оплата получена. Активируем подписку…";
+  async function refresh(remaining) {
+    if (request !== trackedOrder) return;
+    try {
+      const {status} = await api("/api/v1/webapp/purchases/" + paymentId);
+      if (request !== trackedOrder) return;
+      if (status === "succeeded") {
+        $("status").textContent = "Подписка активирована.";
+        try {
+          const current = await api("/api/v1/webapp/bootstrap");
+          if (request !== trackedOrder) return;
+          renderSubscription(current.subscription, current.activation_pending);
+          switchPage("vpn");
+          loadAccountPanels();
+        } catch {
+          $("status").textContent = "Подписка активирована. Откройте магазин заново, чтобы получить ссылку.";
+        }
+        return;
+      }
+      if (status === "failed") {
+        $("status").textContent = paymentStatusLabel(status);
+        return;
+      }
+      if (status === "paid") {
+        paid = true;
+        $("status").textContent = "Оплата получена. Активируем подписку…";
+      }
+    } catch {
+      // A temporary network failure should not stop tracking the order.
+    }
+    if (remaining > 0) setTimeout(() => refresh(remaining - 1), 3000);
+    else if (paid) $("status").textContent = "Подписка ещё активируется. Сообщим о готовности в Telegram.";
+  }
+  refresh(20);
+}
+
+$("activation-refresh").onclick = async () => {
+  $("activation-refresh").disabled = true;
+  try {
+    const current = await api("/api/v1/webapp/bootstrap");
+    renderSubscription(current.subscription, current.activation_pending);
+  } catch {
+    $("activation-message").textContent = "Не удалось обновить статус. Попробуйте ещё раз.";
+  } finally {
+    $("activation-refresh").disabled = false;
+  }
+};
+
+function renderSubscription(subscription, activating) {
+  $("activation-notice").hidden = !activating;
+  $("activation-message").textContent = "Оплата получена. Активируем подписку.";
+  $("no-subscription").hidden = Boolean(subscription || activating);
+  $("subscription").style.display = subscription ? "block" : "none";
+  if (!subscription) return;
+  $("sub-status").textContent = ({active:"Активна", expired:"Истекла", disabled:"Отключена"})[subscription.status] || subscription.status;
+  $("sub-expiry").textContent = subscription.expires_at ? new Date(subscription.expires_at).toLocaleString("ru-RU") : "—";
+  $("sub-traffic").textContent = subscription.traffic_gb ?? "—";
+  $("sub-devices").textContent = subscription.device_limit ?? "—";
+  $("sub-days").textContent = subscription.days_left ?? "—";
+  const url = subscription.subscription_url;
+  $("sub-link").style.display = url?.startsWith("https://") ? "inline-block" : "none";
+  if (url?.startsWith("https://")) $("sub-link").href = url;
+  else $("sub-link").removeAttribute("href");
+}
+
 function fillOptions(id,min,max,step,selected,label){const el=$(id);el.replaceChildren();const chosen=Math.min(max,Math.max(min,selected));const values=[];for(let n=min;n<=max;n+=step)values.push(n);if(!values.includes(chosen))values.push(chosen);values.sort((a,b)=>a-b);values.forEach(n=>{const o=document.createElement("option");o.value=String(n);o.textContent=n+" "+label;el.appendChild(o)});el.value=String(chosen)}
 const providerLabels={telegram_stars:"⭐ Telegram Stars",yookassa:"💳 ЮKassa",yoomoney:"🏦 ЮMoney",cryptopay:"🪙 Crypto Pay"};
 function paymentMode(){return $("checkout-method").value||"telegram_stars"}
@@ -107,12 +176,16 @@ async function loadReadyPlans(){
       await api("/api/v1/webapp/terms/accept",{accepted:true});
       if(paymentMode()!=="telegram_stars"){
         const result=await api("/api/v1/webapp/plans/external/checkout",{plan_id:plan.id,provider:paymentMode()});
-        openCheckoutUrl(result.url);$("status").textContent="Счёт №"+result.payment_id+" создан.";
+        openCheckoutUrl(result.url);$("status").textContent="Счёт №"+result.payment_id+" создан.";trackPayment(result.payment_id);
         btn.disabled=false;return;
       }
       if(!tg?.openInvoice)throw Error("Откройте Mini App из Telegram");
       const invoice=await api("/api/v1/webapp/plans/checkout",{plan_id:plan.id});
-      tg.openInvoice(invoice.invoice_url,status=>{$("status").textContent="Статус оплаты: "+status;if(status==="paid")setTimeout(()=>location.reload(),1800);btn.disabled=false});
+      tg.openInvoice(invoice.invoice_url,status=>{
+        if(status==="paid"||status==="pending") trackPayment(invoice.payment_id,status==="paid");
+        else $("status").textContent=status==="cancelled"?"Оплата отменена":"Оплата не завершена";
+        btn.disabled=false;
+      });
     }catch(e){$("status").textContent=e.message;btn.disabled=false}};
     item.append(title,details,btn);$("plans-list").appendChild(item);
   }
@@ -134,18 +207,19 @@ $("buy").onclick=async()=>{try{
   await api("/api/v1/webapp/terms/accept",{accepted:true});
   if(paymentMode()!=="telegram_stars"){
     const result=await api("/api/v1/webapp/external/checkout",{...limits(),provider:paymentMode()});
-    openCheckoutUrl(result.url);$("status").textContent="Счёт №"+result.payment_id+" создан. Подписка появится после подтверждения оплаты.";
+    openCheckoutUrl(result.url);$("status").textContent="Счёт №"+result.payment_id+" создан. Подписка появится после подтверждения оплаты.";trackPayment(result.payment_id);
     recalc();return;
   }
   const result=await api("/api/v1/webapp/checkout",limits());
   if(!tg?.openInvoice)throw Error("Откройте магазин из Telegram");
   tg.openInvoice(result.invoice_url,status=>{
-    $("status").textContent=status==="paid"?"Оплата подтверждена":status==="cancelled"?"Отменено":"Статус: "+status;
-    if(status==="paid")setTimeout(()=>location.reload(),1800);else recalc();
+    if(status==="paid"||status==="pending") trackPayment(result.payment_id,status==="paid");
+    else $("status").textContent=status==="cancelled"?"Оплата отменена":"Оплата не завершена";
+    recalc();
   });
 }catch(e){$("status").textContent=e.message;recalc()}};
 
 async function start(){try{if(!tg?.initData)throw Error("Откройте Mini App через кнопку в Telegram");data=await api("/api/v1/webapp/bootstrap");if(data.profile){$("store-name").textContent=data.profile.name;$("store-tagline").textContent=data.profile.tagline||"Ваш VPN";document.documentElement.style.setProperty("--accent",data.profile.accent_color);document.documentElement.style.setProperty("--tg-theme-button-color",data.profile.accent_color);if(data.profile.welcome_image_url){$("hero-image").src=data.profile.welcome_image_url;$("hero-image").hidden=false}if(data.profile.support_contact){$("support-text").textContent=data.profile.support_contact;const contact=data.profile.support_contact.trim();const candidate=contact.startsWith("@")?"https://t.me/"+contact.slice(1):contact;if(candidate.startsWith("https://t.me/")||candidate.startsWith("https://telegram.me/")){$("support-link").href=candidate;$("support-link").hidden=false}}}$("loading").style.display="none";$("app").style.display="block";$("bottom-nav").hidden=false;$("profile-name").textContent=data.user.first_name||"Покупатель";$("profile-id").textContent=data.user.id;$("admin-entry").hidden=!data.is_admin;if(data.is_admin){$("admin-entry").onclick=()=>window.location.assign("/admin"+window.location.hash)}$("welcome").textContent=data.user.first_name?"Здравствуйте, "+data.user.first_name+"! Настройте подписку под себя.":"Выберите параметры подписки.";if(data.terms_url){$("terms-link").href=data.terms_url}else{$("terms-link").textContent="условия не настроены";$("terms-link").removeAttribute("href");$("buy").disabled=true}
-fillOptions("days",data.limits.days_min,data.limits.days_max,1,data.limits.days_default,"дней");fillOptions("traffic",data.limits.traffic_min,data.limits.traffic_max,1,data.limits.traffic_default,"ГБ");fillOptions("devices",data.limits.devices_min,data.limits.devices_max,1,data.limits.devices_default,"устройств");if(data.subscription){const s=data.subscription;$("no-subscription").hidden=true;$("subscription").style.display="block";$("sub-status").textContent=s.status;$("sub-expiry").textContent=s.expires_at?new Date(s.expires_at).toLocaleString():"—";$("sub-traffic").textContent=s.traffic_gb??"—";$("sub-devices").textContent=s.device_limit??"—";$("sub-days").textContent=s.days_left??"—";if(s.subscription_url){$("sub-link").href=s.subscription_url;$("sub-link").style.display="inline-block"}}
+fillOptions("days",data.limits.days_min,data.limits.days_max,1,data.limits.days_default,"дней");fillOptions("traffic",data.limits.traffic_min,data.limits.traffic_max,1,data.limits.traffic_default,"ГБ");fillOptions("devices",data.limits.devices_min,data.limits.devices_max,1,data.limits.devices_default,"устройств");renderSubscription(data.subscription,data.activation_pending);
 $("buy").disabled=true;fillPaymentOptions();recalc();loadAccountPanels();loadOffers();await loadReadyPlans()}catch(e){$("loading").textContent=e.message}}
 start();

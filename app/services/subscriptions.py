@@ -4,13 +4,13 @@ from typing import Any
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.db.models import Payment, Subscription, SubscriptionDetails, User
+from app.db.models import Payment, PaymentActivation, Subscription, SubscriptionDetails, User
 from app.db.session import SessionLocal
 from app.services.remnawave import RemnawaveClient
-from app.services.referrals import pending_rewards_for_payment, grant_referral_reward
-from app.services.promos import pending_promo_redemptions
+from app.services.referrals import grant_referral_reward
 
 
 def _unwrap(data: Any) -> dict[str, Any]:
@@ -28,158 +28,133 @@ def _panel_identity(user: dict[str, Any]) -> int | str:
     return int(value) if str(value).isdigit() else str(value)
 
 
-async def provision_paid_payment(payment_id: int) -> bool:
-    async with SessionLocal() as session:
-        payment = await session.scalar(
-            select(Payment).where(Payment.id == payment_id).with_for_update()
-        )
-        if payment is None:
-            raise ValueError("Payment not found")
-        if payment.status == "succeeded":
-            return False
-        if payment.status != "paid":
-            raise ValueError("Payment has not been verified as paid")
+async def provision_paid_payment(
+    session: AsyncSession, payment: Payment, user: User, activation: PaymentActivation,
+) -> None:
+    """Apply the paid order while the worker holds the customer's database lock."""
+    snapshot = json.loads(payment.payload or "{}").get("tariff") or {}
+    days = int(snapshot.get("duration_days", 0))
+    traffic_gb = int(snapshot.get("traffic_gb", 0))
+    device_limit = int(snapshot.get("device_limit", 0))
+    if min(days, traffic_gb, device_limit) < 1:
+        raise RuntimeError("Payment does not contain a valid tariff snapshot")
+    total_days = days + activation.bonus_days
+    if not settings.remnawave_base_url or not settings.remnawave_api_token:
+        raise RuntimeError("Remnawave is not configured")
 
-        user = await session.get(User, payment.user_id)
-        if user is None:
-            raise RuntimeError("Payment owner not found")
-        snapshot = json.loads(payment.payload or "{}").get("tariff") or {}
-        days = int(snapshot.get("duration_days", 0))
-        traffic_gb = int(snapshot.get("traffic_gb", 0))
-        device_limit = int(snapshot.get("device_limit", 0))
-        if min(days, traffic_gb, device_limit) < 1:
-            raise RuntimeError("Payment does not contain a valid tariff snapshot")
-        pending_rewards = await pending_rewards_for_payment(session, user.id)
-        promo_credits = await pending_promo_redemptions(session, user.id)
-        bonus_days = sum(reward.days for reward in pending_rewards) + sum(p.bonus_days for p in promo_credits)
-        total_days = days + bonus_days
-        if not settings.remnawave_base_url or not settings.remnawave_api_token:
-            raise RuntimeError("Remnawave is not configured")
+    subscription = await session.scalar(
+        select(Subscription)
+        .where(Subscription.user_id == user.id)
+        .order_by(Subscription.created_at.desc(), Subscription.id.desc())
+        .limit(1)
+        .with_for_update()
+    )
+    payment_id = payment.id
+    username = f"tg_{user.telegram_id}"
+    traffic_bytes = traffic_gb * 1024 * 1024 * 1024
+    panel = RemnawaveClient()
 
-        subscription = await session.scalar(
-            select(Subscription)
-            .where(Subscription.user_id == user.id)
-            .order_by(Subscription.created_at.desc())
-            .with_for_update()
-        )
-        username = f"tg_{user.telegram_id}"
-        traffic_bytes = traffic_gb * 1024 * 1024 * 1024
-        panel = RemnawaveClient()
+    panel_user: dict[str, Any] | None = None
+    try:
+        panel_user = _unwrap(await panel.get_user_by_username(username))
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 404:
+            raise
 
-        panel_user: dict[str, Any] | None = None
-        try:
-            panel_user = _unwrap(await panel.get_user_by_username(username))
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != 404:
-                raise
-
-        marker = f"remnaum-payment:{payment_id}"
-        if panel_user:
-            panel_user_id = _panel_identity(panel_user)
-            description = str(panel_user.get("description") or "")
-            if marker not in description:
-                expire_value = panel_user.get("expireAt")
-                if isinstance(expire_value, str):
-                    current_expiry = datetime.fromisoformat(expire_value.replace("Z", "+00:00"))
-                    if current_expiry.tzinfo is None:
-                        current_expiry = current_expiry.replace(tzinfo=timezone.utc)
-                else:
-                    current_expiry = datetime.now(timezone.utc)
-                new_expiry = max(current_expiry, datetime.now(timezone.utc)) + timedelta(days=total_days)
-                new_description = f"{description} | {marker}".strip(" |")
-                await panel.update_user(
-                    panel_user_id,
-                    traffic_limit_bytes=traffic_bytes,
-                    hwid_device_limit=device_limit,
-                    expire_at=new_expiry,
-                    description=new_description,
-                )
+    marker = f"remnaum-payment:{payment_id}"
+    if panel_user:
+        panel_user_id = _panel_identity(panel_user)
+        description = str(panel_user.get("description") or "")
+        if marker not in (part.strip() for part in description.split("|")):
+            expire_value = panel_user.get("expireAt")
+            if isinstance(expire_value, str):
+                current_expiry = datetime.fromisoformat(expire_value.replace("Z", "+00:00"))
+                if current_expiry.tzinfo is None:
+                    current_expiry = current_expiry.replace(tzinfo=timezone.utc)
             else:
-                await panel.update_user(
-                    panel_user_id,
-                    traffic_limit_bytes=traffic_bytes,
-                    hwid_device_limit=device_limit,
-                    description=description,
-                )
-            panel_user = _unwrap(await panel.get_user(panel_user_id))
-        else:
-            expire_at = datetime.now(timezone.utc) + timedelta(days=total_days)
-            created = await panel.create_user(
-                username,
-                expire_at,
-                telegram_id=user.telegram_id,
+                current_expiry = datetime.now(timezone.utc)
+            new_expiry = max(current_expiry, datetime.now(timezone.utc)) + timedelta(days=total_days)
+            new_description = f"{description} | {marker}".strip(" |")
+            await panel.update_user(
+                panel_user_id,
                 traffic_limit_bytes=traffic_bytes,
-                traffic_limit_strategy="NO_RESET",
                 hwid_device_limit=device_limit,
-                active_internal_squads=settings.remnawave_internal_squad_ids or None,
-                description=marker,
+                expire_at=new_expiry,
+                description=new_description,
             )
-            panel_user = _unwrap(created)
-            if panel_user.get("id") is None and not panel_user.get("uuid"):
-                panel_user = _unwrap(await panel.get_user_by_username(username))
-            panel_user_id = _panel_identity(panel_user)
-            panel_user = _unwrap(await panel.get_user(panel_user_id))
-
-        expire_value = panel_user.get("expireAt")
-        expires_at = (
-            datetime.fromisoformat(expire_value.replace("Z", "+00:00"))
-            if isinstance(expire_value, str)
-            else datetime.now(timezone.utc) + timedelta(days=total_days)
+        panel_user = _unwrap(await panel.get_user(panel_user_id))
+    else:
+        expire_at = datetime.now(timezone.utc) + timedelta(days=total_days)
+        created = await panel.create_user(
+            username,
+            expire_at,
+            telegram_id=user.telegram_id,
+            traffic_limit_bytes=traffic_bytes,
+            traffic_limit_strategy="NO_RESET",
+            hwid_device_limit=device_limit,
+            active_internal_squads=settings.remnawave_internal_squad_ids or None,
+            description=marker,
         )
-        subscription_url = panel_user.get("subscriptionUrl")
+        panel_user = _unwrap(created)
+        if panel_user.get("id") is None and not panel_user.get("uuid"):
+            panel_user = _unwrap(await panel.get_user_by_username(username))
+        panel_user_id = _panel_identity(panel_user)
+        panel_user = _unwrap(await panel.get_user(panel_user_id))
 
-        if subscription is None:
-            subscription = Subscription(
-                user_id=user.id,
-                panel_user_id=str(panel_user_id),
-                status="active",
-                expires_at=expires_at,
-            )
-            session.add(subscription)
-            await session.flush()
-        else:
-            subscription.panel_user_id = str(panel_user_id)
-            subscription.status = "active"
-            subscription.expires_at = expires_at
+    expire_value = panel_user.get("expireAt")
+    if not isinstance(expire_value, str):
+        raise RuntimeError("Remnawave expiration date is unavailable")
+    expires_at = datetime.fromisoformat(expire_value.replace("Z", "+00:00"))
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    subscription_url = panel_user.get("subscriptionUrl")
+    if not isinstance(subscription_url, str) or not subscription_url:
+        raise RuntimeError("Remnawave subscription link is unavailable")
 
-        details = await session.scalar(
-            select(SubscriptionDetails).where(
-                SubscriptionDetails.subscription_id == subscription.id
-            )
+    if subscription is None:
+        subscription = Subscription(
+            user_id=user.id,
+            panel_user_id=str(panel_user_id),
+            status="active",
+            expires_at=expires_at,
         )
-        if details is None:
-            details = SubscriptionDetails(
-                subscription_id=subscription.id,
-                subscription_url=subscription_url,
-                traffic_gb=traffic_gb,
-                device_limit=device_limit,
-            )
-            session.add(details)
-        else:
-            details.subscription_url = subscription_url
-            details.traffic_gb = traffic_gb
-            details.device_limit = device_limit
+        session.add(subscription)
+        await session.flush()
+    else:
+        subscription.panel_user_id = str(panel_user_id)
+        subscription.status = "active"
+        subscription.expires_at = expires_at
 
-        for reward in pending_rewards:
-            reward.redeemed_payment_id = payment_id
-        for credit in promo_credits:
-            credit.applied_payment_id = payment_id
-        await grant_referral_reward(session, user.id, payment_id)
-        payment.status = "succeeded"
-        await session.commit()
-        return True
+    details = await session.scalar(
+        select(SubscriptionDetails).where(
+            SubscriptionDetails.subscription_id == subscription.id
+        )
+    )
+    if details is None:
+        details = SubscriptionDetails(
+            subscription_id=subscription.id,
+            subscription_url=subscription_url,
+            traffic_gb=traffic_gb,
+            device_limit=device_limit,
+        )
+        session.add(details)
+    else:
+        details.subscription_url = subscription_url
+        details.traffic_gb = traffic_gb
+        details.device_limit = device_limit
+
+    await grant_referral_reward(session, user.id, payment_id)
+    payment.status = "succeeded"
 
 
 async def get_user_subscription(telegram_id: int) -> dict[str, Any] | None:
-    from sqlalchemy import outerjoin
-
     async with SessionLocal() as session:
         result = await session.execute(
             select(Subscription, SubscriptionDetails)
             .join(User, Subscription.user_id == User.id)
             .outerjoin(SubscriptionDetails, SubscriptionDetails.subscription_id == Subscription.id)
             .where(User.telegram_id == telegram_id)
-            .order_by(Subscription.created_at.desc())
+            .order_by(Subscription.created_at.desc(), Subscription.id.desc())
             .limit(1)
         )
         row = result.first()

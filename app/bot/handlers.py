@@ -12,12 +12,12 @@ from app.services.payment_service import (
     create_stars_payment_for_user,
     create_payment_for_user,
     has_accepted_current_terms,
-    retry_paid_payments_for_user,
     validate_stars_pre_checkout,
 )
 from app.services.payment_providers import VerifiedPayment
-from app.services.payment_service import settle_payment
-from app.services.subscriptions import get_user_subscription, provision_paid_payment
+from app.services.payment_service import mark_payment_creation_failed, recent_purchases, settle_payment
+from app.services.subscriptions import get_user_subscription
+from app.services.payment_activation import has_paid_orders
 from app.services.users import get_or_create_user
 from app.services.store_settings import is_payment_method_enabled, get_store_payment_settings, public_payment_settings
 from app.services.store_profile import get_terms_url
@@ -28,9 +28,6 @@ from app.services.referrals import parse_referral_start, register_referral, refe
 from app.services.plans import list_plans, choose_plan, selected_stars_price, clear_selected_plan
 from app.services.trials import get_trial_settings, trial_eligible, claim_trial
 from app.services.promos import redeem_promo, promo_balance
-from app.db.models import Payment, User
-from app.db.session import SessionLocal
-from sqlalchemy import select
 
 router = Router(name="user")
 
@@ -356,13 +353,18 @@ async def external_payment_handler(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "payment:create:stars")
 async def stars_payment_create_handler(callback: CallbackQuery) -> None:
     await callback.answer()
+    if not callback.message:
+        return
+    if not await is_payment_method_enabled("telegram_stars"):
+        await callback.message.answer("Оплата через Telegram Stars временно недоступна.")
+        return
     try:
         payment, stars = await create_stars_payment_for_user(callback.from_user.id)
     except (ValueError, RuntimeError) as exc:
         if callback.message:
             await callback.message.answer(escape(str(exc)))
         return
-    if callback.message:
+    try:
         profile = await get_store_profile()
         await callback.message.answer_invoice(
             title=profile["name"][:28] + " VPN",
@@ -372,6 +374,9 @@ async def stars_payment_create_handler(callback: CallbackQuery) -> None:
             currency="XTR",
             prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
         )
+    except Exception:
+        await mark_payment_creation_failed(payment.id)
+        await callback.message.answer("Не удалось открыть счёт. Попробуйте ещё раз.")
 
 
 @router.pre_checkout_query()
@@ -396,29 +401,29 @@ async def stars_pre_checkout_handler(query: PreCheckoutQuery) -> None:
 @router.message(F.successful_payment)
 async def stars_successful_payment_handler(message: Message) -> None:
     successful = message.successful_payment
-    if successful is None:
+    if successful is None or message.from_user is None:
         return
     try:
-        payment_id = int(successful.invoice_payload.removeprefix("remnaum:"))
+        prefix, _, reference = successful.invoice_payload.partition(":")
+        if prefix != "remnaum" or not reference.isascii() or not reference.isdecimal():
+            raise ValueError("Invalid invoice reference")
+        payment_id = int(reference)
         verified = VerifiedPayment(
             local_payment_id=payment_id,
             provider_payment_id=successful.telegram_payment_charge_id,
             amount_minor=successful.total_amount,
             currency=successful.currency,
         )
-        await settle_payment(verified, "telegram_stars")
-        await provision_paid_payment(payment_id)
-    except Exception:
-        await message.answer(
-            "⭐ Платёж подтверждён Telegram. Выдача VPN-доступа задерживается; "
-            "откройте «Моя подписка» через несколько секунд или обратитесь в поддержку."
-        )
+        newly_paid = await settle_payment(verified, "telegram_stars", telegram_id=message.from_user.id)
+    except ValueError:
+        await message.answer("Не удалось сопоставить платёж с заказом. Обратитесь в /paysupport.")
         return
-    await message.answer(
-        "✅ Оплата подтверждена! VPN-подписка активирована. "
-        "Откройте раздел «Моя подписка», чтобы получить ссылку подключения.",
-        reply_markup=main_menu(),
-    )
+    if newly_paid:
+        await message.answer(
+            f"✅ Оплата заказа №{payment_id} получена. Активируем подписку автоматически. "
+            "Когда VPN будет готов, пришлём сообщение.",
+            reply_markup=main_menu(),
+        )
 
 
 @router.message(Command("terms"))
@@ -549,15 +554,14 @@ async def subscription_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     if not callback.message:
         return
-    try:
-        await retry_paid_payments_for_user(callback.from_user.id)
-    except Exception:
-        pass
-    subscription = await get_user_subscription(callback.from_user.id)
+    telegram_id = callback.from_user.id
+    subscription = await get_user_subscription(telegram_id)
+    activating = await has_paid_orders(telegram_id)
+    activation_text = "\n\nОплата получена. Активируем заказ и пришлём уведомление." if activating else ""
     if subscription is None:
+        empty_text = activation_text or "\n\nАктивная VPN-подписка пока не найдена."
         await callback.message.edit_text(
-            "🔐 <b>Моя подписка</b>\n\nАктивная VPN-подписка пока не найдена.",
-            reply_markup=back_menu(),
+            "🔐 <b>Моя подписка</b>" + empty_text, reply_markup=back_menu(),
         )
         return
 
@@ -569,6 +573,7 @@ async def subscription_handler(callback: CallbackQuery) -> None:
         f"Действует до: <b>{expires_text}</b>\n"
         f"Трафик: <b>{subscription['traffic_gb'] or '—'} ГБ</b>\n"
         f"Устройства: <b>{subscription['device_limit'] or '—'}</b>"
+        + activation_text
     )
     url = subscription.get("subscription_url")
     keyboard = back_menu()
@@ -652,18 +657,22 @@ async def devices_handler(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "menu:purchases")
 async def purchases_handler(callback: CallbackQuery) -> None:
     await callback.answer()
-    async with SessionLocal() as session:
-        rows = (await session.scalars(
-            select(Payment).join(User, Payment.user_id == User.id)
-            .where(User.telegram_id == callback.from_user.id)
-            .order_by(Payment.created_at.desc(), Payment.id.desc()).limit(10)
-        )).all()
+    orders = await recent_purchases(callback.from_user.id, limit=10)
+    labels = {
+        "pending": "Ожидает оплаты",
+        "paid": "Оплачено, активируется",
+        "succeeded": "Подписка активирована",
+        "failed": "Не удалось создать счёт",
+    }
     lines = ["🧾 <b>Мои покупки</b>", ""]
-    if not rows:
+    if not orders:
         lines.append("Покупок пока нет.")
-    for p in rows:
-        amount = f"{p.amount} ⭐" if p.currency == "XTR" else f"{p.amount / 100:.2f} {escape(p.currency)}"
-        lines.append(f"#{p.id} · {escape(p.provider)} · {amount} · {escape(p.status)}")
+    for order in orders:
+        amount = order["amount"]
+        currency = order["currency"]
+        price = f"{amount} ⭐" if currency == "XTR" else f"{amount / 100:.2f} {escape(currency)}"
+        status = labels.get(order["status"], order["status"])
+        lines.append(f"#{order['id']} · {price} · {escape(status)}")
     if callback.message:
         await callback.message.edit_text(chr(10).join(lines), reply_markup=back_menu())
 

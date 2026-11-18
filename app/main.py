@@ -5,12 +5,17 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.bot.runtime import bot, dispatcher, setup_bot
 from app.config import settings
-from app.db.base import Base
+from app.db.migrate import upgrade_database
 from app.db.session import engine
 from app.services.legacy_settings import migrate_legacy_payment_settings
+from app.services.payment_activation import run_activation_worker
+from app.services.renewal_reminders import run_renewal_reminders
 from app.web.routes import router as api_router
 from app.web.storefront import router as store_router
 
@@ -37,30 +42,28 @@ async def _register_telegram_webhook() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    await migrate_legacy_payment_settings()
-
-    polling_task = None
-    webhook_task = None
-    if settings.telegram_bot_token:
-        await setup_bot()
-        if settings.telegram_use_webhook and settings.telegram_webhook_url:
-            if not settings.telegram_webhook_secret:
-                raise RuntimeError("TELEGRAM_WEBHOOK_SECRET is required in webhook mode")
-            webhook_task = asyncio.create_task(_register_telegram_webhook())
-        elif not settings.telegram_use_webhook:
-            polling_task = asyncio.create_task(dispatcher.start_polling(bot))
+    tasks = []
     try:
+        async with engine.begin() as connection:
+            await connection.run_sync(upgrade_database)
+        await migrate_legacy_payment_settings()
+
+        if settings.telegram_bot_token:
+            await setup_bot()
+            if settings.telegram_use_webhook and settings.telegram_webhook_url:
+                if not settings.telegram_webhook_secret:
+                    raise RuntimeError("TELEGRAM_WEBHOOK_SECRET is required in webhook mode")
+                tasks.append(asyncio.create_task(_register_telegram_webhook()))
+            elif not settings.telegram_use_webhook:
+                tasks.append(asyncio.create_task(dispatcher.start_polling(bot)))
+        tasks.append(asyncio.create_task(run_activation_worker()))
+        if bot is not None and settings.renewal_reminder_days:
+            tasks.append(asyncio.create_task(run_renewal_reminders(bot, settings.renewal_reminder_days)))
         yield
     finally:
-        for task in (polling_task, webhook_task):
-            if task:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         if bot:
             await bot.session.close()
         await engine.dispose()
@@ -74,4 +77,9 @@ app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "stat
 
 @app.get("/health")
 async def health():
+    try:
+        async with asyncio.timeout(3), engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+    except (SQLAlchemyError, OSError, TimeoutError):
+        return JSONResponse({"status": "unavailable", "service": "remnaum"}, status_code=503)
     return {"status": "ok", "service": "remnaum"}

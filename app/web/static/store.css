@@ -29,3 +29,9 @@ button:not(:disabled):active{transform:scale(.985)}
 input[type=checkbox]{accent-color:var(--accent);width:18px;height:18px;vertical-align:middle}
 @media(max-width:600px){header{margin-bottom:32px;align-items:flex-start}.pill{font-size:10px;text-align:right}main{padding:24px 15px 60px}.card{padding:20px}h1{letter-spacing:-1.3px}.lead{font-size:16px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important;animation:none!important}}
+
+#purchases{margin-bottom:24px}
+#store-purchase-list{padding-inline-start:1.25em;color:#a8bad1}
+#store-purchase-list li{margin-block:8px}
+#store-connect{display:inline-block;margin-block:6px}
+#store-connect[hidden]{display:none}

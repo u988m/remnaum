@@ -1,19 +1,19 @@
+import json
 from pathlib import Path
 from html import escape
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.bot.runtime import bot, dispatcher
 from app.config import settings
-from app.db.models import Payment, Subscription, User
+from app.db.models import Payment, PaymentActivation, Subscription, User
 from app.db.session import SessionLocal
 from app.services.payment_providers import get_provider
-from app.services.payment_service import settle_payment
-from app.services.subscriptions import provision_paid_payment
-from app.services.payment_notifications import notify_external_payment_success
+from app.services.payment_service import mark_payment_creation_failed, recent_purchases, settle_payment
+from app.services.payment_activation import has_paid_orders, schedule_activation_retry
 from app.services.telegram_webapp import validate_telegram_init_data
 
 router = APIRouter()
@@ -34,8 +34,9 @@ class PaymentSettingsUpdate(BaseModel):
 
 async def _configured_provider(name: str):
     methods, credentials = await get_store_payment_settings()
-    if not methods.get(name):
-        raise HTTPException(status_code=404, detail="Payment provider is disabled")
+    # Existing invoices still need to settle when sales for a provider pause.
+    if not public_payment_settings(methods, credentials)["configured"].get(name):
+        raise HTTPException(status_code=404, detail="Payment provider is not configured")
     return get_provider(name, credentials.get(name))
 
 
@@ -66,7 +67,7 @@ async def public_payment_methods():
 
 
 
-from app.services.tariffs import get_store_tariff_pricing, update_store_tariff_pricing, set_tariff_draft
+from app.services.tariffs import get_store_tariff_pricing, update_store_tariff_pricing
 
 class TariffPricingUpdate(BaseModel):
     pricing: dict[str, int | str] = Field(default_factory=dict)
@@ -114,12 +115,9 @@ async def public_config():
     return {"app": settings.app_name, "webapp_url": settings.webapp_url}
 
 
-@router.get("/payments/return", response_class=HTMLResponse)
+@router.get("/payments/return")
 async def payment_return():
-    return HTMLResponse(
-        "<!doctype html><html lang='ru'><meta charset='utf-8'><title>Remnaum</title>"
-        "<body><h2>Вернитесь в Telegram</h2><p>Статус оплаты обновится автоматически после подтверждения платёжной системой.</p></body></html>"
-    )
+    return RedirectResponse("/store#purchases", status_code=303)
 
 
 @router.get("/payments/yoomoney/{payment_id}", response_class=HTMLResponse)
@@ -137,6 +135,7 @@ async def yoomoney_payment_form(payment_id: int):
     receiver_value = (credentials.get("yoomoney") or {}).get("receiver") or settings.yoomoney_receiver
     receiver = escape(receiver_value, quote=True)
     label = escape(f"remnaum-{payment_id}", quote=True)
+    success_url = escape(settings.public_base_url.rstrip("/") + "/payments/return", quote=True)
     html = f"""<!doctype html>
 <html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Оплата Remnaum</title><body>
@@ -146,57 +145,25 @@ async def yoomoney_payment_form(payment_id: int):
 <input type="hidden" name="label" value="{label}">
 <input type="hidden" name="quickpay-form" value="button">
 <input type="hidden" name="sum" value="{amount}">
+<input type="hidden" name="successURL" value="{success_url}">
 <button type="submit" name="paymentType" value="PC">Оплатить кошельком ЮMoney</button>
 <button type="submit" name="paymentType" value="AC">Оплатить банковской картой</button>
 </form></body></html>"""
     return HTMLResponse(html)
 
 
-@router.post("/webhooks/payments/yookassa")
-async def yookassa_webhook(request: Request):
-    body = await request.body()
+@router.post("/webhooks/payments/{provider}")
+async def external_payment_webhook(provider: str, request: Request):
+    if provider not in {"yookassa", "yoomoney", "cryptopay"}:
+        raise HTTPException(status_code=404, detail="Unknown payment provider")
+    adapter = await _configured_provider(provider)
     try:
-        verified = await (await _configured_provider("yookassa")).verify_webhook(body, dict(request.headers))
-        await settle_payment(verified, "yookassa")
-        provisioned = await provision_paid_payment(verified.local_payment_id)
-        if provisioned:
-            await notify_external_payment_success(verified.local_payment_id)
+        verified = await adapter.verify_webhook(await request.body(), dict(request.headers))
+        await settle_payment(verified, provider)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Could not verify YooKassa payment") from exc
-    return {"ok": True}
-
-
-@router.post("/webhooks/payments/yoomoney")
-async def yoomoney_webhook(request: Request):
-    body = await request.body()
-    try:
-        verified = await (await _configured_provider("yoomoney")).verify_webhook(body, dict(request.headers))
-        await settle_payment(verified, "yoomoney")
-        provisioned = await provision_paid_payment(verified.local_payment_id)
-        if provisioned:
-            await notify_external_payment_success(verified.local_payment_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Could not process YooMoney notification") from exc
-    return {"ok": True}
-
-
-@router.post("/webhooks/payments/cryptopay")
-async def cryptopay_webhook(request: Request):
-    body = await request.body()
-    try:
-        verified = await (await _configured_provider("cryptopay")).verify_webhook(body, dict(request.headers))
-        await settle_payment(verified, "cryptopay")
-        provisioned = await provision_paid_payment(verified.local_payment_id)
-        if provisioned:
-            await notify_external_payment_success(verified.local_payment_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Could not process Crypto Pay update") from exc
+        raise HTTPException(status_code=502, detail="Could not record verified payment") from exc
     return {"ok": True}
 
 
@@ -213,7 +180,7 @@ from app.db.models import Subscription, SubscriptionDetails, TermsAcceptance, Us
 from app.db.session import SessionLocal
 from app.services.payment_service import accept_current_terms, create_stars_payment_for_user, has_accepted_current_terms
 from app.services.subscriptions import get_user_subscription
-from app.services.tariffs import calculate_store_stars_price, get_store_tariff_pricing, set_tariff_draft
+from app.services.tariffs import calculate_store_stars_price, get_store_tariff_pricing
 from app.services.telegram_webapp import validate_telegram_init_data
 from app.config import settings
 from app.bot.runtime import bot
@@ -226,15 +193,16 @@ async def _webapp_user(init_data: str):
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     telegram_id = int(identity["id"])
     async with SessionLocal() as session:
-        statement = pg_insert(User).values(
-            telegram_id=telegram_id,
-            username=identity.get("username"),
-        ).on_conflict_do_update(
-            index_elements=[User.telegram_id],
-            set_={"username": identity.get("username")},
-        )
-        await session.execute(statement)
-        await session.commit()
+        username = identity.get("username")
+        user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+        if user is None or user.username != username:
+            statement = pg_insert(User).values(
+                telegram_id=telegram_id, username=username,
+            ).on_conflict_do_update(
+                index_elements=[User.telegram_id], set_={"username": username},
+            )
+            await session.execute(statement)
+            await session.commit()
     return identity
 
 
@@ -281,6 +249,7 @@ async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=Non
             "devices_default": min(max(1, settings.tariff_min_devices), settings.tariff_max_devices),
         },
         "subscription": subscription_data,
+        "activation_pending": await has_paid_orders(int(identity["id"])),
     }
 
 
@@ -317,18 +286,14 @@ async def webapp_create_checkout(data: WebAppCheckout, x_telegram_init_data: str
         raise HTTPException(status_code=403, detail="Accept the current terms before checkout")
     if not await is_payment_method_enabled("telegram_stars"):
         raise HTTPException(status_code=403, detail="Telegram Stars checkout is disabled")
-    if min(data.days, data.traffic, data.devices) < 1:
-        raise HTTPException(status_code=422, detail="Tariff values must be positive")
-    if not settings.tariff_min_days <= data.days <= settings.tariff_max_days:
-        raise HTTPException(status_code=422, detail="Duration is outside configured limits")
-    if not settings.tariff_min_traffic_gb <= data.traffic <= settings.tariff_max_traffic_gb:
-        raise HTTPException(status_code=422, detail="Traffic is outside configured limits")
-    if not settings.tariff_min_devices <= data.devices <= settings.tariff_max_devices:
-        raise HTTPException(status_code=422, detail="Device count is outside configured limits")
-    await set_tariff_draft(int(identity["id"]), identity.get("username"), data.days, data.traffic, data.devices)
-    payment, stars = await create_stars_payment_for_user(int(identity["id"]))
     if bot is None:
         raise HTTPException(status_code=503, detail="Telegram bot is not initialized")
+    try:
+        payment, stars = await create_stars_payment_for_user(
+            int(identity["id"]), dimensions=(data.days, data.traffic, data.devices),
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
         invoice_url = await bot.create_invoice_link(
             title=(await get_store_profile())["name"][:28] + " VPN",
@@ -339,6 +304,7 @@ async def webapp_create_checkout(data: WebAppCheckout, x_telegram_init_data: str
             prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
         )
     except Exception as exc:
+        await mark_payment_creation_failed(payment.id)
         raise HTTPException(status_code=502, detail="Could not create Telegram Stars invoice") from exc
     return {"payment_id": payment.id, "stars": stars, "invoice_url": invoice_url}
 
@@ -370,12 +336,14 @@ async def admin_overview(x_telegram_init_data: str | None = Header(default=None)
         active = await session.scalar(select(func.count(Subscription.id)).where(Subscription.status == "active")) or 0
         succeeded = await session.scalar(select(func.count(Payment.id)).where(Payment.status == "succeeded")) or 0
         pending = await session.scalar(select(func.count(Payment.id)).where(Payment.status == "pending")) or 0
+        activating = await session.scalar(select(func.count(Payment.id)).where(Payment.status == "paid")) or 0
     return {
         "admin_name": identity.get("first_name", ""),
         "users": users,
         "active_subscriptions": active,
         "successful_payments": succeeded,
         "pending_payments": pending,
+        "activating_payments": activating,
     }
 
 
@@ -417,32 +385,59 @@ async def admin_users(
 
 @router.get("/admin/api/payments")
 async def admin_payments(
-    limit: int = 20,
-    offset: int = 0,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=2147483647),
+    status: str = Query(default="", pattern=r"^(pending|paid|succeeded|failed)?$"),
+    search: str = Query(default="", max_length=128),
     x_telegram_init_data: str | None = Header(default=None),
 ):
     await _require_telegram_admin(x_telegram_init_data)
-    if limit < 1 or limit > 100 or offset < 0:
-        raise HTTPException(status_code=422, detail="Invalid pagination")
+    filters = []
+    if status:
+        filters.append(Payment.status == status)
+    search = search.strip().removeprefix("#")
+    if search:
+        matches = [Payment.provider_payment_id == search]
+        if search.isascii() and search.isdecimal() and int(search) <= 2147483647:
+            matches.append(Payment.id == int(search))
+        filters.append(or_(*matches))
     async with SessionLocal() as session:
-        total = await session.scalar(select(func.count(Payment.id))) or 0
+        total = await session.scalar(select(func.count(Payment.id)).where(*filters)) or 0
         result = await session.execute(
-            select(Payment, User.telegram_id)
+            select(Payment, User.telegram_id, PaymentActivation)
             .join(User, User.id == Payment.user_id)
+            .outerjoin(PaymentActivation, PaymentActivation.payment_id == Payment.id)
+            .where(*filters)
             .order_by(Payment.created_at.desc(), Payment.id.desc())
-            .limit(limit)
-            .offset(offset)
+            .limit(limit).offset(offset)
         )
         items = [{
             "id": payment.id,
             "telegram_id": telegram_id,
             "provider": payment.provider,
+            "provider_payment_id": payment.provider_payment_id,
             "amount": payment.amount,
             "currency": payment.currency,
             "status": payment.status,
             "created_at": payment.created_at.isoformat(),
-        } for payment, telegram_id in result.all()]
+            "attempts": activation.attempts if activation else 0,
+            "next_attempt_at": activation.next_attempt_at if activation else None,
+            "last_error": activation.last_error if activation else None,
+        } for payment, telegram_id, activation in result.all()]
     return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+@router.post("/admin/api/payments/{payment_id}/retry", status_code=202)
+async def admin_retry_payment(payment_id: int, x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    if not 1 <= payment_id <= 2147483647:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    status = await schedule_activation_retry(payment_id)
+    if status is None:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    if status != "paid":
+        raise HTTPException(status_code=409, detail="Повтор доступен для оплаченного заказа, который ещё активируется")
+    return {"status": status}
 
 
 @router.get("/admin/api/users/{telegram_id}")
@@ -505,7 +500,7 @@ async def remnawave_webhook(request: Request, x_remnawave_signature: str | None 
 
 
 # Fixed plans share the existing Telegram-authenticated admin dashboard.
-from app.services.plans import list_plans, save_plan, choose_plan
+from app.services.plans import list_plans, save_plan
 
 
 class PlanPayload(BaseModel):
@@ -556,7 +551,7 @@ async def admin_update_fixed_plan(
 
 
 class WebAppFixedPlanCheckout(BaseModel):
-    plan_id: int = Field(ge=1)
+    plan_id: int = Field(ge=1, le=2147483647)
 
 
 @router.post("/api/v1/webapp/plans/checkout")
@@ -569,21 +564,24 @@ async def webapp_checkout_ready_plan(data: WebAppFixedPlanCheckout, x_telegram_i
         raise HTTPException(status_code=403, detail="Accept the current terms before checkout")
     if not await is_payment_method_enabled("telegram_stars"):
         raise HTTPException(status_code=403, detail="Telegram Stars checkout is disabled")
-    try:
-        quote = await choose_plan(telegram_id, data.plan_id)
-        payment, stars = await create_stars_payment_for_user(telegram_id)
-    except (ValueError, RuntimeError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if bot is None:
         raise HTTPException(status_code=503, detail="Telegram bot is not initialized")
     try:
+        payment, stars = await create_stars_payment_for_user(telegram_id, plan_id=data.plan_id)
+        tariff = json.loads(payment.payload)["tariff"]
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
         url = await bot.create_invoice_link(
             title=(await get_store_profile())["name"][:28] + " VPN",
-            description=f"VPN: {quote.duration_days} дней, {quote.traffic_gb} ГБ, {quote.device_limit} устройств",
+            description=(
+                f"VPN: {tariff['duration_days']} дней, {tariff['traffic_gb']} ГБ, {tariff['device_limit']} устройств"
+            ),
             payload=f"remnaum:{payment.id}", provider_token="", currency="XTR",
             prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
         )
     except Exception as exc:
+        await mark_payment_creation_failed(payment.id)
         raise HTTPException(status_code=502, detail="Could not create Stars invoice") from exc
     return {"payment_id": payment.id, "stars": stars, "invoice_url": url}
 
@@ -672,21 +670,30 @@ async def admin_put_store_profile(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _purchase_identity(init_data: str | None) -> int:
+    try:
+        return int(validate_telegram_init_data(init_data or "")["id"])
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
 @router.get("/api/v1/webapp/purchases")
 async def webapp_purchases(x_telegram_init_data: str | None = Header(default=None)):
-    if not x_telegram_init_data:
-        raise HTTPException(status_code=401, detail="Telegram authentication is required")
-    identity = await _webapp_user(x_telegram_init_data)
+    return {"items": await recent_purchases(_purchase_identity(x_telegram_init_data))}
+
+
+@router.get("/api/v1/webapp/purchases/{payment_id}")
+async def webapp_purchase_status(payment_id: int, x_telegram_init_data: str | None = Header(default=None)):
+    telegram_id = _purchase_identity(x_telegram_init_data)
+    if not 1 <= payment_id <= 2147483647:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
     async with SessionLocal() as session:
-        payments = (await session.scalars(
-            select(Payment).join(User, Payment.user_id == User.id)
-            .where(User.telegram_id == int(identity["id"]))
-            .order_by(Payment.created_at.desc(), Payment.id.desc()).limit(20)
-        )).all()
-        return {"items": [{
-            "id": p.id, "provider": p.provider, "amount": p.amount,
-            "currency": p.currency, "status": p.status, "created_at": p.created_at.isoformat(),
-        } for p in payments]}
+        status = await session.scalar(
+            select(Payment.status).join(User).where(Payment.id == payment_id, User.telegram_id == telegram_id)
+        )
+    if status is None:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    return {"status": status}
 
 
 @router.get("/api/v1/webapp/devices")
@@ -895,9 +902,12 @@ def _validate_external_provider(name: str) -> None:
         raise HTTPException(status_code=422, detail="Unknown external provider")
 
 
-async def _external_checkout(telegram_id: int, provider: str):
+async def _external_checkout(
+    telegram_id: int, provider: str, *,
+    plan_id: int | None = None, dimensions: tuple[int, int, int] | None = None,
+):
     try:
-        payment, link = await create_payment_for_user(telegram_id, provider)
+        payment, link = await create_payment_for_user(telegram_id, provider, plan_id=plan_id, dimensions=dimensions)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if urlsplit(link.url).scheme != "https":
@@ -916,12 +926,7 @@ async def webapp_external_checkout(
     telegram_id = int(identity["id"])
     if not await has_accepted_current_terms(telegram_id):
         raise HTTPException(status_code=403, detail="Accept the current terms before checkout")
-    if not (settings.tariff_min_days <= data.days <= settings.tariff_max_days
-            and settings.tariff_min_traffic_gb <= data.traffic <= settings.tariff_max_traffic_gb
-            and settings.tariff_min_devices <= data.devices <= settings.tariff_max_devices):
-        raise HTTPException(status_code=422, detail="Tariff values outside allowed range")
-    await set_tariff_draft(telegram_id, identity.get("username"), data.days, data.traffic, data.devices)
-    return await _external_checkout(telegram_id, data.provider)
+    return await _external_checkout(telegram_id, data.provider, dimensions=(data.days, data.traffic, data.devices))
 
 
 @router.post("/api/v1/webapp/plans/external/checkout")
@@ -935,11 +940,7 @@ async def webapp_external_plan_checkout(
     telegram_id = int(identity["id"])
     if not await has_accepted_current_terms(telegram_id):
         raise HTTPException(status_code=403, detail="Accept the current terms before checkout")
-    try:
-        await choose_plan(telegram_id, data.plan_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return await _external_checkout(telegram_id, data.provider)
+    return await _external_checkout(telegram_id, data.provider, plan_id=data.plan_id)
 
 
 async def _get_public_checkout_methods():

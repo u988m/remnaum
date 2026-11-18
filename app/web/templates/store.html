@@ -9,10 +9,18 @@
 <p class="small">Для покупки через самостоятельный сайт подтвердите аккаунт Telegram. В Mini App оплата цифровых подписок доступна через Telegram Stars.</p>
 __LOGIN_WIDGET__</section>
 <section id="account" class="login"><h2 id="hello">Вы вошли</h2>
-<p class="small">Оплата проходит на защищённой странице выбранного провайдера. Ключи платёжных систем не передаются браузеру.</p>
+<div id="purchases" hidden>
+<h3>Мои заказы</h3>
+<p id="store-payment-status" role="status"></p>
+<p id="store-subscription"></p>
+<a id="store-connect" hidden>Открыть ссылку подключения</a>
+<ul id="store-purchase-list"></ul>
+<button id="store-refresh" type="button">Проверить статус</button>
+</div>
+<h3>Новый заказ</h3>
 <label><input type="checkbox" id="terms"> Принимаю <a id="terms-url" href="#" target="_blank" rel="noopener">условия продажи</a></label>
 <p>Способ оплаты</p><select id="provider"></select><br><br>
 <button id="buy" disabled>Перейти к оплате</button><p id="status" role="status"></p>
 </section>
 <footer>Покупка через самостоятельный веб-магазин. Если вы открыли Mini App непосредственно в Telegram, используйте Telegram Stars.</footer>
-</main><script src="/static/store.js" defer></script></body></html>
+</main><script src="/static/payment-status.js" defer></script><script src="/static/store.js" defer></script></body></html>

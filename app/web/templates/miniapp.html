@@ -48,6 +48,10 @@
     </section>
     <section class="page" id="page-vpn" data-page-panel="vpn" hidden>
       <div class="page-title"><small>МОЙ VPN</small><h1>Подписка и устройства</h1><p class="muted">Всё необходимое для подключения и контроля доступа.</p></div>
+      <section class="panel" id="activation-notice" hidden>
+        <p role="status" id="activation-message">Оплата получена. Активируем подписку.</p>
+        <button type="button" class="secondary-btn" id="activation-refresh">Проверить статус</button>
+      </section>
       <section class="panel" id="subscription" style="display:none">
         <div class="section-title"><h2>Текущая подписка</h2><span class="status-pill" id="sub-status">—</span></div>
         <div class="expiry-line"><span>Действует до</span><strong id="sub-expiry">—</strong></div>
@@ -101,5 +105,5 @@
   <button type="button" data-page="bonuses"><span class="nav-icon">✧</span><small>Бонусы</small></button>
   <button type="button" data-page="account"><span class="nav-icon">◎</span><small>Профиль</small></button>
 </nav>
-<script src="/static/miniapp.js" defer></script>
+<script src="/static/payment-status.js" defer></script><script src="/static/miniapp.js" defer></script>
 </body></html>

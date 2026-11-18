@@ -9,6 +9,7 @@ import base64
 import binascii
 import io
 import os
+import tempfile
 from pathlib import Path
 
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -62,15 +63,14 @@ def save_welcome_image(data_base64: str) -> str:
     if DATA_DIR.is_symlink():
         raise ValueError("Некорректное расположение изображения")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    path = WELCOME_IMAGE.with_name(".welcome-upload.tmp")
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd, filename = tempfile.mkstemp(prefix=".welcome-", dir=DATA_DIR)
+    path = Path(filename)
     try:
         with os.fdopen(fd, "wb") as stream:
             stream.write(output.getvalue())
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(path, WELCOME_IMAGE)
-        os.chmod(WELCOME_IMAGE, 0o600)
     finally:
         path.unlink(missing_ok=True)
     return welcome_image_url() or "/api/v1/store-profile/welcome-image"
@@ -78,4 +78,4 @@ def save_welcome_image(data_base64: str) -> str:
 
 def delete_welcome_image() -> None:
     if welcome_image_path():
-        WELCOME_IMAGE.unlink()
+        WELCOME_IMAGE.unlink(missing_ok=True)

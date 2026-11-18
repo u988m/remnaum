@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 import terminal_ui as ui
+from branding_storage import prepare_branding_storage
 import backup_manager as backups
 from remnawave_setup import (
     discover_squads, select_squads, validate_uuid_list,
@@ -247,13 +248,18 @@ def generate_proxy_snippets(cfg: dict[str, str]) -> None:
             f"    server_name {nginx_domains};\n"
             "    ssl_certificate /PATH/TO/fullchain.pem;\n"
             "    ssl_certificate_key /PATH/TO/privkey.pem;\n"
+
+            "    proxy_http_version 1.1;\n"
+            "    proxy_set_header Host $host;\n"
+            "    proxy_set_header X-Real-IP $remote_addr;\n"
+            "    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+            "    proxy_set_header X-Forwarded-Proto $scheme;\n"
+            "    location = /admin/api/store-profile/welcome-image {\n"
+            "        client_max_body_size 8m;\n"
+            f"        proxy_pass http://{upstream};\n"
+            "    }\n"
             "    location / {\n"
             f"        proxy_pass http://{upstream};\n"
-            "        proxy_http_version 1.1;\n"
-            "        proxy_set_header Host $host;\n"
-            "        proxy_set_header X-Real-IP $remote_addr;\n"
-            "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
-            "        proxy_set_header X-Forwarded-Proto $scheme;\n"
             "    }\n"
             "}\n"
         )
@@ -606,7 +612,7 @@ def refresh_all_remnawave_squads(existing: dict[str, str]) -> bool:
     return True
 
 
-def perform_update(existing: dict[str, str]) -> int:
+def perform_update(existing: dict[str, str], release: str | None = None) -> int:
     if not existing.get("COMPOSE_FILE"):
         raise ValueError("Сначала выберите режим установки через пункт 1.")
     if not docker_ready():
@@ -615,7 +621,7 @@ def perform_update(existing: dict[str, str]) -> int:
         raise RuntimeError("Для обновления необходим git.")
     ui.section(1, 3, "Создание резервной копии и загрузка обновлений")
     offer_backup_key()
-    run(["bash", "update.sh"])
+    run(["bash", "update.sh"] + ([release] if release else []))
     if refresh_all_remnawave_squads(existing):
         run(["docker", "compose", "up", "-d", "--no-deps", "--force-recreate", "app"])
     ui.section(2, 3, "Проверка контейнеров")
@@ -865,6 +871,7 @@ def config_for_install(existing: dict[str, str], mode: str,
 def main() -> int:
     parser = argparse.ArgumentParser(description="Мастер установки и обновления Remnaum.")
     parser.add_argument("--action", choices=("install", "update", "backup"), help="Выбор без меню")
+    parser.add_argument("--release", help="Установить указанный тег выпуска при обновлении")
     parser.add_argument("--mode", choices=("panel", "standalone"),
                         help="Optional topology selection (otherwise guided interactive prompt)")
     parser.add_argument("--proxy-network",
@@ -881,7 +888,7 @@ def main() -> int:
     existing = read_env()
     action = choose_action(existing, args.action)
     if action == "update":
-        return perform_update(existing)
+        return perform_update(existing, args.release)
     if action == "backup":
         return show_backup_menu(existing)
     choose_install_dir(existing, args.install_dir, no_relocate=args.no_relocate)
@@ -921,7 +928,7 @@ def main() -> int:
     else:
         write_env({k: value for k, value in cfg.items() if existing.get(k) != value})
 
-    (ROOT / "data").mkdir(exist_ok=True)
+    prepare_branding_storage(ROOT)
     if mode == "panel":
         generate_proxy_snippets(cfg)
         print("\nPanel mode: Remnaum will NOT publish 80 or 443.")

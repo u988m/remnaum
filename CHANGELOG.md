@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Persist verified payments before activating VPN access. Retry delayed activations, keep bonuses assigned to the original order, and show the outcome in the bot, Mini App and browser store.
+- Give owners order search, payment filters, retry actions and activation failure details.
+- Snapshot web checkout selections independently, so concurrent checkouts cannot overwrite one another's tariff.
+- Adopt versioned PostgreSQL migrations and check database readiness during deployments. Support installing a specific Git tag and rolling back application files after an unsuccessful update.
+- Add optional Telegram renewal reminders and cover checkout recovery, existing-database upgrades and updater rollback in CI.
+
 ## 1.0.0-rc.8 — Remnawave 3.x compatibility and automatic squad synchronization
 
 - Installer now auto-selects **every** existing Internal Squad from `GET /api/internal-squads` with no manual choice; all found UUIDs are assigned to new VPN subscribers.

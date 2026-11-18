@@ -1,25 +1,56 @@
 import json
-from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 
-from app.db.models import Payment, TariffDraft, TermsAcceptance, User
+from app.db.models import Payment, TariffDraft, TariffPlan, TermsAcceptance, User
 from app.db.session import SessionLocal
 from app.config import settings
-from app.services.payment_providers import VerifiedPayment, get_provider
-from app.services.tariffs import calculate_store_stars_price, ensure_tariff_draft
+from app.services.payment_providers import PaymentLink, VerifiedPayment, get_provider
+from app.services.tariffs import calculate_store_price, calculate_store_stars_price, get_store_tariff_pricing, validate_tariff_dimensions
 from app.services.store_settings import get_store_payment_settings
 from app.services.plans import selected_plan_for_user
 from app.services.store_profile import get_terms_url
 
 
-async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple[Payment, Any]:
+async def _checkout_selection(
+    session, user: User, plan_id: int | None, dimensions: tuple[int, int, int] | None,
+) -> tuple[tuple[int, int, int], TariffPlan | None]:
+    if plan_id is not None:
+        plan = await session.get(TariffPlan, plan_id)
+        if not plan or not plan.is_active:
+            raise ValueError("Выбранный тариф недоступен")
+        return (plan.duration_days, plan.traffic_gb, plan.device_limit), plan
+    if dimensions is not None:
+        validate_tariff_dimensions(dimensions)
+        return dimensions, None
+
+    # Only the bot uses persisted drafts. Web checkouts snapshot the request
+    # itself, so another tab or chat cannot change the invoice dimensions.
+    draft = await session.scalar(select(TariffDraft).where(TariffDraft.user_id == user.id))
+    if draft is None:
+        return (settings.tariff_min_days, settings.tariff_min_traffic_gb, settings.tariff_min_devices), None
+    values = (draft.duration_days, draft.traffic_gb, draft.device_limit)
+    plan = await selected_plan_for_user(session, user.id)
+    if plan and (not plan.is_active or values != (plan.duration_days, plan.traffic_gb, plan.device_limit)):
+        raise ValueError("Выбранный тариф изменился. Выберите его заново.")
+    return values, plan
+
+
+def _tariff_snapshot(values: tuple[int, int, int]) -> dict:
+    days, traffic, devices = values
+    return {"duration_days": days, "traffic_gb": traffic, "device_limit": devices}
+
+
+async def create_payment_for_user(
+    telegram_id: int, provider_name: str, *,
+    plan_id: int | None = None, dimensions: tuple[int, int, int] | None = None,
+) -> tuple[Payment, PaymentLink]:
     methods, credentials = await get_store_payment_settings()
     if provider_name not in {"yookassa", "yoomoney", "cryptopay"} or not methods.get(provider_name):
         raise ValueError("Выбранный способ оплаты отключён администратором")
     if not await get_terms_url() or not await has_accepted_current_terms(telegram_id):
         raise ValueError("Перед покупкой примите опубликованные условия продажи")
-    quote = await ensure_tariff_draft(telegram_id)
     if not settings.remnawave_base_url or not settings.remnawave_api_token:
         raise RuntimeError("Remnawave is not configured; payment checkout is disabled")
     if not settings.remnawave_internal_squad_ids:
@@ -28,39 +59,24 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
         if user is None:
             raise ValueError("Telegram user is not registered")
-        draft = await session.scalar(
-            select(TariffDraft).where(TariffDraft.user_id == user.id)
-        )
-        if draft is None:
-            raise ValueError("Configure your tariff before paying")
-        plan = await selected_plan_for_user(session, user.id)
-        if plan is not None:
-            if not plan.is_active or (
-                draft.duration_days, draft.traffic_gb, draft.device_limit
-            ) != (plan.duration_days, plan.traffic_gb, plan.device_limit):
-                raise ValueError("Selected plan has changed; select it again")
-            if quote.currency.upper() != "RUB":
-                raise ValueError("Fixed RUB plans require TARIFF_CURRENCY=RUB for external checkout")
-            amount_minor = plan.price_rub_minor
-        else:
-            amount_minor = quote.amount_minor
-        if amount_minor <= 0:
-            raise ValueError("Tariff amount must be greater than zero")
-
-        if provider_name == "yoomoney" and quote.currency.upper() != "RUB":
-            raise ValueError("Set TARIFF_CURRENCY=RUB to enable YooMoney wallet payments")
+        values, plan = await _checkout_selection(session, user, plan_id, dimensions)
+        pricing = await get_store_tariff_pricing()
+        currency = pricing["currency"]
+        if plan is not None and currency != "RUB":
+            raise ValueError("Fixed RUB plans require RUB for external checkout")
+        if provider_name == "yoomoney" and currency != "RUB":
+            raise ValueError("YooMoney wallet payments require RUB")
+        amount_minor = plan.price_rub_minor if plan else await calculate_store_price(*values, pricing=pricing)
+        if not 1 <= amount_minor <= 2147483647:
+            raise ValueError("Цена находится вне допустимого диапазона")
         payment = Payment(
             user_id=user.id,
             provider=provider_name,
             amount=amount_minor,
-            currency=quote.currency,
+            currency=currency,
             status="pending",
             payload=json.dumps({
-                "tariff": {
-                    "duration_days": draft.duration_days,
-                    "traffic_gb": draft.traffic_gb,
-                    "device_limit": draft.device_limit,
-                },
+                "tariff": _tariff_snapshot(values),
                 "plan_id": plan.id if plan is not None else None,
             }),
         )
@@ -80,15 +96,11 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
             description=f"Remnaum VPN subscription #{payment_id}",
         )
     except Exception:
-        async with SessionLocal() as session:
-            failed = await session.get(Payment, payment_id)
-            if failed is not None and failed.status == "pending":
-                failed.status = "failed"
-                await session.commit()
+        await mark_payment_creation_failed(payment_id)
         raise
 
     async with SessionLocal() as session:
-        stored = await session.get(Payment, payment_id)
+        stored = await session.get(Payment, payment_id, with_for_update=True)
         if stored is None:
             raise RuntimeError("Local payment record disappeared")
         if stored.status == "pending":
@@ -97,12 +109,18 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
     return payment, link
 
 
-def _tariff_currency() -> str:
-    from app.config import settings
-    return settings.tariff_currency.upper()
+async def mark_payment_creation_failed(payment_id: int) -> None:
+    async with SessionLocal.begin() as session:
+        payment = await session.get(Payment, payment_id, with_for_update=True)
+        if payment is not None and payment.status == "pending":
+            payment.status = "failed"
 
 
-async def settle_payment(verified: VerifiedPayment, provider_name: str) -> bool:
+async def settle_payment(
+    verified: VerifiedPayment, provider_name: str, *, telegram_id: int | None = None,
+) -> bool:
+    if not verified.provider_payment_id or len(verified.provider_payment_id) > 128:
+        raise ValueError("Invalid provider payment ID")
     async with SessionLocal() as session:
         payment = await session.scalar(
             select(Payment)
@@ -111,21 +129,26 @@ async def settle_payment(verified: VerifiedPayment, provider_name: str) -> bool:
         )
         if payment is None:
             raise ValueError("Local payment not found")
+        if telegram_id is not None:
+            owner = await session.get(User, payment.user_id)
+            if owner is None or owner.telegram_id != telegram_id:
+                raise ValueError("Payment owner mismatch")
         if payment.provider != provider_name:
             raise ValueError("Payment provider mismatch")
         if payment.amount != verified.amount_minor or payment.currency.upper() != verified.currency.upper():
             raise ValueError("Payment amount or currency mismatch")
         if (
             payment.provider_payment_id
-            and not payment.provider_payment_id.startswith("ym-")
+            and not (
+                provider_name == "yoomoney" and payment.status == "pending"
+                and payment.provider_payment_id == f"ym-{payment.id}"
+            )
             and payment.provider_payment_id != verified.provider_payment_id
         ):
             raise ValueError("Provider payment ID mismatch")
-        if payment.status == "succeeded":
+        if payment.status in {"paid", "succeeded"}:
             return False
-        if payment.status == "paid":
-            return True
-        if payment.status != "pending":
+        if payment.status not in {"pending", "failed"}:
             raise ValueError("Payment is not pending")
         payment.provider_payment_id = verified.provider_payment_id
         payment.status = "paid"
@@ -153,22 +176,15 @@ async def accept_current_terms(telegram_id: int) -> None:
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
         if user is None:
             raise ValueError("Telegram user is not registered")
-        existing = await session.scalar(
-            select(TermsAcceptance).where(
-                TermsAcceptance.user_id == user.id,
-                TermsAcceptance.terms_version == settings.telegram_terms_version,
-            )
-        )
-        if existing is None:
-            session.add(TermsAcceptance(
-                user_id=user.id,
-                terms_version=settings.telegram_terms_version,
-            ))
-            await session.commit()
+        await session.execute(insert(TermsAcceptance).values(
+            user_id=user.id, terms_version=settings.telegram_terms_version,
+        ).on_conflict_do_nothing(constraint="uq_terms_acceptance_user_version"))
+        await session.commit()
 
 
-async def create_stars_payment_for_user(telegram_id: int) -> tuple[Payment, int]:
-    await ensure_tariff_draft(telegram_id)
+async def create_stars_payment_for_user(
+    telegram_id: int, *, plan_id: int | None = None, dimensions: tuple[int, int, int] | None = None,
+) -> tuple[Payment, int]:
     if not await get_terms_url():
         raise RuntimeError("Publish the terms URL in the admin branding settings before enabling sales")
     if not await has_accepted_current_terms(telegram_id):
@@ -182,18 +198,10 @@ async def create_stars_payment_for_user(telegram_id: int) -> tuple[Payment, int]
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
         if user is None:
             raise ValueError("Telegram user is not registered")
-        draft = await session.scalar(select(TariffDraft).where(TariffDraft.user_id == user.id))
-        if draft is None:
-            raise ValueError("Configure your tariff before paying")
-        plan = await selected_plan_for_user(session, user.id)
-        if plan is not None:
-            if not plan.is_active or (
-                draft.duration_days, draft.traffic_gb, draft.device_limit
-            ) != (plan.duration_days, plan.traffic_gb, plan.device_limit):
-                raise ValueError("Selected plan has changed; select it again")
-            stars = plan.price_stars
-        else:
-            stars = await calculate_store_stars_price(draft.duration_days, draft.traffic_gb, draft.device_limit)
+        values, plan = await _checkout_selection(session, user, plan_id, dimensions)
+        stars = plan.price_stars if plan else await calculate_store_stars_price(*values)
+        if not 1 <= stars <= 2147483647:
+            raise ValueError("Цена находится вне допустимого диапазона")
         payment = Payment(
             user_id=user.id,
             provider="telegram_stars",
@@ -201,11 +209,7 @@ async def create_stars_payment_for_user(telegram_id: int) -> tuple[Payment, int]
             currency="XTR",
             status="pending",
             payload=json.dumps({
-                "tariff": {
-                    "duration_days": draft.duration_days,
-                    "traffic_gb": draft.traffic_gb,
-                    "device_limit": draft.device_limit,
-                },
+                "tariff": _tariff_snapshot(values),
                 "plan_id": plan.id if plan is not None else None,
                 "terms_version": settings.telegram_terms_version,
             }),
@@ -242,19 +246,15 @@ async def validate_stars_pre_checkout(
         return payment is not None
 
 
-async def retry_paid_payments_for_user(telegram_id: int) -> None:
-    from app.services.subscriptions import provision_paid_payment
-
+async def recent_purchases(telegram_id: int, limit: int = 20) -> list[dict]:
     async with SessionLocal() as session:
-        payment_ids = list((await session.scalars(
-            select(Payment.id)
-            .join(User, Payment.user_id == User.id)
-            .where(
-                User.telegram_id == telegram_id,
-                Payment.provider == "telegram_stars",
-                Payment.status == "paid",
-            )
-            .order_by(Payment.id)
-        )).all())
-    for payment_id in payment_ids:
-        await provision_paid_payment(payment_id)
+        payments = (await session.scalars(
+            select(Payment).join(User)
+            .where(User.telegram_id == telegram_id)
+            .order_by(Payment.created_at.desc(), Payment.id.desc()).limit(limit)
+        )).all()
+        return [{
+            "id": payment.id, "provider": payment.provider, "amount": payment.amount,
+            "currency": payment.currency, "status": payment.status,
+            "created_at": payment.created_at.isoformat(),
+        } for payment in payments]

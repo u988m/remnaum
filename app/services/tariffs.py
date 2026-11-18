@@ -78,8 +78,11 @@ def calculate_price(duration_days: int, traffic_gb: int, device_limit: int) -> i
     )
 
 
-async def calculate_store_price(duration_days: int, traffic_gb: int, device_limit: int) -> int:
-    pricing = await get_store_tariff_pricing()
+async def calculate_store_price(
+    duration_days: int, traffic_gb: int, device_limit: int, *, pricing: dict | None = None,
+) -> int:
+    if pricing is None:
+        pricing = await get_store_tariff_pricing()
     if min(duration_days, traffic_gb, device_limit) < 1:
         raise ValueError("Tariff values must be positive")
     return duration_days * pricing["rub_per_day_minor"] + traffic_gb * pricing["rub_per_gb_minor"] + device_limit * pricing["rub_per_device_minor"]
@@ -137,14 +140,7 @@ async def update_tariff_draft(telegram_id: int, username: str | None, field: str
         return TariffQuote(draft.duration_days, draft.traffic_gb, draft.device_limit, draft.amount_minor, pricing["currency"])
 
 
-async def set_tariff_draft(
-    telegram_id: int,
-    username: str | None,
-    duration_days: int,
-    traffic_gb: int,
-    device_limit: int,
-) -> TariffQuote:
-    values = (duration_days, traffic_gb, device_limit)
+def validate_tariff_dimensions(values: tuple[int, int, int]) -> None:
     bounds = (
         (settings.tariff_min_days, settings.tariff_max_days),
         (settings.tariff_min_traffic_gb, settings.tariff_max_traffic_gb),
@@ -152,6 +148,16 @@ async def set_tariff_draft(
     )
     if any(value < minimum or value > maximum for value, (minimum, maximum) in zip(values, bounds)):
         raise ValueError("Tariff values are outside configured limits")
+
+
+async def set_tariff_draft(
+    telegram_id: int,
+    username: str | None,
+    duration_days: int,
+    traffic_gb: int,
+    device_limit: int,
+) -> TariffQuote:
+    validate_tariff_dimensions((duration_days, traffic_gb, device_limit))
     async with SessionLocal() as session:
         statement = insert(User).values(telegram_id=telegram_id, username=username)
         statement = statement.on_conflict_do_update(

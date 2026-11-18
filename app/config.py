@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     telegram_webhook_url: str = ""
     telegram_webhook_secret: str = ""
     telegram_use_webhook: bool = False
+    renewal_reminder_days: int = Field(default=0, ge=0, le=14)
     admin_ids: str = ""
     remnawave_base_url: str = ""
     remnawave_api_token: str = ""

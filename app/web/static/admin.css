@@ -15,7 +15,7 @@ main{max-width:1160px;margin:0 auto;padding:26px 22px 64px}
 .tag{margin-left:auto;color:#85d7bd;font-size:11px;font-weight:800;letter-spacing:1px;border:1px solid #285747;background:#112f2e;padding:8px 13px;border-radius:999px}
 h1{font-size:29px;letter-spacing:-.9px;line-height:1.2;margin:0 0 6px}h2{letter-spacing:-.4px}h3{font-size:15px}
 .muted{color:var(--muted);line-height:1.6;font-size:13px}
-.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:22px 0}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:22px 0}
 .card{background:linear-gradient(145deg,#192a41,#132135);border:1px solid #304966;border-radius:17px;padding:20px;min-width:0}
 .card span{display:block;color:var(--muted);font-size:12px;line-height:1.4}.card b{display:block;font-size:30px;letter-spacing:-1px;font-weight:850;margin-top:8px}
 .admin-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:23px 0 16px}
@@ -68,3 +68,8 @@ tr:last-child td{border-bottom:0}
 @media(max-width:750px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.card{padding:16px}.card b{font-size:26px}.brand-image-settings{grid-template-columns:1fr}.section{padding:17px}.admin-tabs button{font-size:12px;min-height:48px}}
 @media(max-width:420px){main{padding:15px 11px 55px}.admin-header{gap:10px}.brand{font-size:19px}.tag{font-size:9px;padding:6px 9px}.admin-tabs{gap:6px}.admin-tabs button{padding:10px 5px;font-size:10.5px}#plan-form .grid,#payment-settings-view .grid,#pricing-fields{grid-template-columns:1fr!important}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important;scroll-behavior:auto!important}}
+
+#payment-filters{align-items:end;justify-content:start}
+#payment-filters label{flex:1 1 185px;margin:0}
+#payments-table td:last-child{min-width:180px;white-space:normal}
+#payments-table td:last-child p{margin:0 0 8px}

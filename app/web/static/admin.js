@@ -2,11 +2,87 @@ const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();const $=id=>document.g
 async function api(path){const r=await fetch(path,{headers:{"X-Telegram-Init-Data":tg?.initData||""}});const d=await r.json();if(!r.ok)throw Error(d.detail||"Ошибка запроса");return d}
 function cell(value){const td=document.createElement("td");td.textContent=value??"—";return td}
 function row(target,values){const tr=document.createElement("tr");values.forEach(v=>tr.appendChild(cell(v)));$(target).appendChild(tr)}
-async function overview(){const d=await api("/admin/api/overview");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments}
+async function overview(){const d=await api("/admin/api/overview");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments;$("activating-count").textContent=d.activating_payments}
 async function loadUsers(){const d=await api("/admin/api/users?limit="+pageSize+"&offset="+userOffset);$("users-table").replaceChildren();d.items.forEach(u=>{row("users-table",[u.telegram_id,u.username?"@"+u.username:"—",u.subscription_status,u.expires_at?new Date(u.expires_at).toLocaleDateString():"—",new Date(u.created_at).toLocaleDateString()]);const tr=$("users-table").lastElementChild;const button=document.createElement("button");button.className="action";button.textContent="Подробнее";button.onclick=()=>showCustomer(u.telegram_id);tr.appendChild(cell(button.textContent));tr.lastElementChild.replaceChildren(button)});$("users-page").textContent="Показано "+(d.total?userOffset+1:0)+"–"+Math.min(userOffset+d.items.length,d.total)+" из "+d.total;$("users-prev").disabled=userOffset===0;$("users-next").disabled=userOffset+pageSize>=d.total}
-async function showCustomer(id){$("status").textContent="";try{const d=await api("/admin/api/users/"+encodeURIComponent(id));$("customer-title").textContent="Клиент "+d.telegram_id;$("customer-summary").textContent=(d.username?"@"+d.username+" · ":"")+"Зарегистрирован: "+new Date(d.created_at).toLocaleString();$("customer-subscriptions").replaceChildren();$("customer-payments").replaceChildren();d.subscriptions.forEach(x=>row("customer-subscriptions",[x.id,x.status,x.expires_at?new Date(x.expires_at).toLocaleString():"—",new Date(x.created_at).toLocaleString()]));d.payments.forEach(x=>row("customer-payments",[x.id,x.provider,x.amount+" "+x.currency,x.status,new Date(x.created_at).toLocaleString()]));$("customer-detail").hidden=false;$("customer-detail").scrollIntoView({behavior:"smooth",block:"nearest"})}catch(e){$("status").textContent=e.message}}
+async function showCustomer(id){$("status").textContent="";try{const d=await api("/admin/api/users/"+encodeURIComponent(id));$("customer-title").textContent="Клиент "+d.telegram_id;$("customer-summary").textContent=(d.username?"@"+d.username+" · ":"")+"Зарегистрирован: "+new Date(d.created_at).toLocaleString();$("customer-subscriptions").replaceChildren();$("customer-payments").replaceChildren();d.subscriptions.forEach(x=>row("customer-subscriptions",[x.id,x.status,x.expires_at?new Date(x.expires_at).toLocaleString():"—",new Date(x.created_at).toLocaleString()]));d.payments.forEach(x=>row("customer-payments",[x.id,x.provider,formatPaymentAmount(x.amount,x.currency),paymentStatusLabel(x.status),new Date(x.created_at).toLocaleString()]));$("customer-detail").hidden=false;$("customer-detail").scrollIntoView({behavior:"smooth",block:"nearest"})}catch(e){$("status").textContent=e.message}}
 $("customer-close").onclick=()=>{$("customer-detail").hidden=true};
-async function loadPayments(){const d=await api("/admin/api/payments?limit="+pageSize+"&offset="+paymentOffset);$("payments-table").replaceChildren();d.items.forEach(p=>row("payments-table",[p.id,p.telegram_id,p.provider,p.amount+" "+p.currency,p.status,new Date(p.created_at).toLocaleString()]));$("payments-page").textContent="Показано "+(d.total?paymentOffset+1:0)+"–"+Math.min(paymentOffset+d.items.length,d.total)+" из "+d.total;$("payments-prev").disabled=paymentOffset===0;$("payments-next").disabled=paymentOffset+pageSize>=d.total}
+let paymentRequest = 0;
+
+function activationDetails(payment) {
+  const wrapper = document.createElement("div");
+  if (payment.status !== "paid") {
+    wrapper.textContent = "—";
+    return wrapper;
+  }
+  const summary = document.createElement("p");
+  const errors = {
+    panel_timeout: "Панель не ответила вовремя",
+    panel_unreachable: "Панель недоступна",
+    activation_error: "Ошибка выдачи подписки",
+  };
+  const reason = errors[payment.last_error] || payment.last_error?.replace("panel_http_", "Панель вернула HTTP ");
+  const next = payment.next_attempt_at ? new Date(payment.next_attempt_at).toLocaleString("ru-RU") : "";
+  summary.textContent = [
+    payment.attempts ? "Попыток: " + payment.attempts : "В очереди",
+    reason,
+    next ? "Следующая попытка: " + next : "",
+  ].filter(Boolean).join(" · ");
+  const retry = document.createElement("button");
+  retry.className = "action";
+  retry.type = "button";
+  retry.textContent = "Повторить";
+  retry.onclick = async () => {
+    retry.disabled = true;
+    try {
+      await adminApi("POST", "/admin/api/payments/" + payment.id + "/retry");
+      $("status").textContent = "Запрос на повтор отправлен.";
+      await loadPayments();
+    } catch (error) {
+      $("status").textContent = error.message;
+      retry.disabled = false;
+    }
+  };
+  wrapper.append(summary, retry);
+  return wrapper;
+}
+
+async function loadPayments() {
+  const request = ++paymentRequest;
+  const query = new URLSearchParams({
+    limit: pageSize, offset: paymentOffset,
+    status: $("payment-status-filter").value, search: $("payment-search").value.trim(),
+  });
+  const result = await api("/admin/api/payments?" + query);
+  if (request !== paymentRequest) return;
+  $("payments-table").replaceChildren();
+  for (const payment of result.items) {
+    row("payments-table", [
+      payment.id, payment.telegram_id,
+      [payment.provider, payment.provider_payment_id].filter(Boolean).join(" · "),
+      formatPaymentAmount(payment.amount, payment.currency),
+      paymentStatusLabel(payment.status), new Date(payment.created_at).toLocaleString("ru-RU"),
+    ]);
+    const detailsCell = document.createElement("td");
+    detailsCell.append(activationDetails(payment));
+    $("payments-table").lastElementChild.append(detailsCell);
+  }
+  $("payments-page").textContent = result.items.length
+    ? (paymentOffset + 1) + "–" + (paymentOffset + result.items.length) + " из " + result.total
+    : "Платежи не найдены";
+  $("payments-prev").disabled = paymentOffset === 0;
+  $("payments-next").disabled = paymentOffset + pageSize >= result.total;
+}
+
+function refreshPayments() {
+  return loadPayments().catch(error => $("status").textContent = error.message);
+}
+
+$("payment-filters").onsubmit = event => {
+  event.preventDefault();
+  paymentOffset = 0;
+  refreshPayments();
+};
+
 async function adminApi(method,path,body){const r=await fetch(path,{method,headers:{"X-Telegram-Init-Data":tg?.initData||"","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(typeof d.detail==="string"?d.detail:"Ошибка запроса");return d}
 let cachedPlans=[];
 async function loadPlans(){
@@ -180,9 +256,9 @@ $("referral-form").onsubmit=async e=>{
     $("status").textContent="Реферальная программа сохранена";
   }catch(err){$("status").textContent=err.message}
 };
-async function start(){try{if(!tg?.initData)throw Error("Откройте панель через Telegram Mini App");const d=await api("/admin/api/overview");$("loading").hidden=true;$("dashboard").hidden=false;$("welcome").textContent="Здравствуйте, "+(d.admin_name||"администратор");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments;await loadUsers();await loadBrand();const tab=new URLSearchParams(window.location.search).get("tab");if(tab){document.querySelector(`nav button[data-tab="${tab}"]`)?.click()}}catch(e){$("loading").textContent=e.message}}
+async function start(){try{if(!tg?.initData)throw Error("Откройте панель через Telegram Mini App");const d=await api("/admin/api/overview");$("loading").hidden=true;$("dashboard").hidden=false;$("welcome").textContent="Здравствуйте, "+(d.admin_name||"администратор");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments;$("activating-count").textContent=d.activating_payments;await loadUsers();await loadBrand();const tab=new URLSearchParams(window.location.search).get("tab");if(tab){document.querySelector(`nav button[data-tab="${tab}"]`)?.click()}}catch(e){$("loading").textContent=e.message}}
 document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const tab=b.dataset.tab;$("users-view").hidden=tab!=="users";$("payments-view").hidden=tab!=="payments";$("plans-view").hidden=tab!=="plans";$("brand-view").hidden=tab!=="brand";$("referrals-view").hidden=tab!=="referrals";$("trial-view").hidden=tab!=="trial";$("promos-view").hidden=tab!=="promos";$("payment-settings-view").hidden=tab!=="settings";$("pricing-view").hidden=tab!=="tariffs";try{if(tab==="payments")await loadPayments();if(tab==="plans")await loadPlans();if(tab==="brand")await loadBrand();if(tab==="referrals")await loadReferrals();if(tab==="trial")await loadTrialSettings();if(tab==="promos")await loadPromos();if(tab==="settings")await loadPaymentSettings();if(tab==="tariffs")await loadPricing()}catch(e){$("status").textContent=e.message}}));
-$("users-refresh").onclick=()=>loadUsers().catch(e=>$("status").textContent=e.message);$("payments-refresh").onclick=()=>loadPayments().catch(e=>$("status").textContent=e.message);
+$("users-refresh").onclick=()=>loadUsers().catch(e=>$("status").textContent=e.message);$("payments-refresh").onclick=refreshPayments;
 $("users-prev").onclick=()=>{userOffset=Math.max(0,userOffset-pageSize);loadUsers()};$("users-next").onclick=()=>{userOffset+=pageSize;loadUsers()};
-$("payments-prev").onclick=()=>{paymentOffset=Math.max(0,paymentOffset-pageSize);loadPayments()};$("payments-next").onclick=()=>{paymentOffset+=pageSize;loadPayments()};
+$("payments-prev").onclick=()=>{paymentOffset=Math.max(0,paymentOffset-pageSize);refreshPayments()};$("payments-next").onclick=()=>{paymentOffset+=pageSize;refreshPayments()};
 start();

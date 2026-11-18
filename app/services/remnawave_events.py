@@ -44,10 +44,15 @@ async def record_and_reconcile(body: bytes, event: dict) -> bool:
         status = STATUS_EVENTS.get(kind) if scope in ("", "user") else None
         panel_id = panel_subscription_id(event) if status else None
         if panel_id:
+            # Panel 3.x can include both a UUID and the numeric ID used by new purchases.
+            identities = [panel_id]
+            other_id = event["data"].get("id")
+            if other_id is not None and str(other_id) != panel_id:
+                identities.append(str(other_id))
             subscription = await session.scalar(
                 select(Subscription)
-                .where(Subscription.panel_user_id == panel_id)
-                .order_by(Subscription.created_at.desc())
+                .where(Subscription.panel_user_id.in_(identities))
+                .order_by(Subscription.created_at.desc(), Subscription.id.desc()).limit(1)
                 .with_for_update()
             )
             if subscription is not None and subscription.status != "pending":
