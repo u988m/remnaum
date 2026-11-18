@@ -1,38 +1,105 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="color-scheme" content="dark"><title>Remnaum</title>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#091320">
+<title>VPN — личный кабинет</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="stylesheet" href="/static/miniapp.css"></head><body><main><div id="loading" class="loading">Загружаем ваш магазин…</div><div id="app">
-<header><div class="brand"><span id="store-name">Remnaum</span><span style="color:var(--tg-theme-button-color,#4b8bea)">.</span></div><div class="tag">VPN STORE</div></header>
-<h1 id="store-tagline">Ваш VPN — ваши правила</h1><div class="muted" id="welcome">Выберите параметры подписки и получите доступ за пару секунд.</div>
-<section class="panel" id="subscription" style="display:none"><h2>Ваша подписка</h2><div class="row"><span class="muted">Статус</span><b id="sub-status">—</b></div><div class="row"><span class="muted">Действует до</span><b id="sub-expiry">—</b></div><div class="grid"><div class="metric"><b id="sub-traffic">—</b><span>ГБ</span></div><div class="metric"><b id="sub-devices">—</b><span>устройств</span></div><div class="metric"><b id="sub-days">—</b><span>дней осталось</span></div></div><a id="sub-link" href="#" target="_blank" style="display:none">Открыть ссылку подключения</a></section>
-<section class="panel" id="connection-guide">
-<h2>📖 Как подключиться</h2>
-<p class="muted">1. Установите клиент, поддерживающий подписку Remnawave, на телефон или компьютер.</p>
-<p class="muted">2. Откройте ссылку подключения выше. Скопируйте или импортируйте её в VPN-клиент.</p>
-<p class="muted">3. Обновите список серверов в клиенте и выберите подключение.</p>
-<p class="muted">Если возникли проблемы, воспользуйтесь контактом поддержки магазина.</p>
-</section>
-<section class="panel" id="account-devices"><h2>📱 Мои устройства</h2><div class="muted" id="account-device-info">Загружаем…</div></section>
-<section class="panel" id="account-purchases"><h2>🧾 Мои покупки</h2><div class="muted" id="account-purchase-info">Загружаем…</div></section>
-<section class="panel" id="account-referrals"><h2>🎁 Пригласить друга</h2><div class="muted" id="account-referral-info">Загружаем…</div><a id="account-referral-link" style="display:none"></a></section>
-<section class="panel" id="trial-offer" style="display:none">
-<h2>🎁 Пробный доступ</h2><p class="muted" id="trial-copy"></p>
-<button id="trial-claim" type="button">Получить пробный доступ</button>
-<p class="status" id="trial-status"></p>
-</section>
-<section class="panel" id="promo-offer">
-<h2>🎟 Промокод</h2><p class="muted" id="promo-balance">Ваши бонусные дни появятся здесь</p>
-<input id="promo-input" maxlength="32" placeholder="Введите промокод" autocomplete="off" style="width:100%;padding:14px;background:var(--tg-theme-bg-color,#0b1018);color:inherit;border:1px solid #334155;border-radius:12px">
-<button id="promo-activate" type="button">Активировать код</button>
-<p class="status" id="promo-status"></p>
-</section>
-<section class="panel" id="fixed-plans" style="display:none"><h2>Готовые тарифы</h2><div id="plans-list"></div><p class="muted">Цены готовых тарифов задаёт владелец магазина. Для оплаты примите условия ниже.</p></section>
-<section class="panel"><h2>Соберите свой тариф</h2><div class="row"><label for="days">Срок подписки</label><select id="days"></select></div><div class="row"><label for="traffic">Трафик</label><select id="traffic"></select></div><div class="row"><label for="devices">Устройства</label><select id="devices"></select></div>
-<div class="row"><label for="checkout-method">Способ оплаты</label><select id="checkout-method"></select></div>
-<div style="margin-top:16px"><div class="muted" id="price-label">Стоимость</div><div class="price" id="stars-price">—</div></div>
-<label class="check"><input id="terms" type="checkbox"><span>Я принимаю <a id="terms-link" href="#" target="_blank">условия оказания услуги</a>.</span></label>
-<button id="buy" disabled>Оплатить Telegram Stars</button><div id="status" class="status"></div></section>
-<div class="muted" style="font-size:12px;text-align:center;margin-top:20px">Способы оплаты настраивает владелец магазина · Remnaum</div>
-</div></main>
-<script src="/static/miniapp.js" defer></script></body></html>
+<link rel="stylesheet" href="/static/miniapp.css">
+</head>
+<body>
+<main>
+  <header class="topbar">
+    <div class="brand-logo" aria-hidden="true">R</div>
+    <div class="brand-meta"><strong id="store-name">Remnaum</strong><span>VPN STORE · ЛИЧНЫЙ КАБИНЕТ</span></div>
+    <span class="top-dot" aria-label="Безопасное подключение">●</span>
+  </header>
+  <div id="loading" class="loading" role="status">Подключаем ваш кабинет…</div>
+  <div id="app">
+    <section class="page active" id="page-shop" data-page-panel="shop">
+      <div class="hero">
+        <div class="eyebrow"><span class="online-dot"></span> ВАШ VPN · ВАШИ ПРАВИЛА</div>
+        <h1 id="store-tagline">Простой доступ к свободному интернету</h1>
+        <p id="welcome" class="muted">Подберите подписку и подключайтесь за пару минут.</p>
+        <img id="hero-image" alt="Обложка магазина" hidden>
+      </div>
+      <section class="panel" id="fixed-plans" style="display:none">
+        <div class="section-title"><div><small>01 / ВЫБОР</small><h2>Готовые тарифы</h2></div><span class="section-label">Популярное</span></div>
+        <div id="plans-list" class="plan-list"></div>
+      </section>
+      <section class="panel" id="custom-plan">
+        <div class="section-title"><div><small>02 / КОНСТРУКТОР</small><h2>Соберите свой тариф</h2></div></div>
+        <div class="field-grid">
+          <label class="form-field"><span>Срок подписки</span><select id="days"></select></label>
+          <label class="form-field"><span>Трафик</span><select id="traffic"></select></label>
+          <label class="form-field"><span>Устройства</span><select id="devices"></select></label>
+          <label class="form-field"><span>Способ оплаты</span><select id="checkout-method"></select></label>
+        </div>
+        <div class="checkout-summary">
+          <span id="price-label">Стоимость</span>
+          <strong id="stars-price" class="price">—</strong>
+        </div>
+        <label class="check"><input id="terms" type="checkbox"><span>Принимаю <a id="terms-link" href="#" target="_blank" rel="noopener">условия оказания услуги</a></span></label>
+        <button id="buy" class="primary-btn" type="button" disabled>Продолжить</button>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </section>
+    </section>
+    <section class="page" id="page-vpn" data-page-panel="vpn" hidden>
+      <div class="page-title"><small>МОЙ VPN</small><h1>Подписка и устройства</h1><p class="muted">Всё необходимое для подключения и контроля доступа.</p></div>
+      <section class="panel" id="subscription" style="display:none">
+        <div class="section-title"><h2>Текущая подписка</h2><span class="status-pill" id="sub-status">—</span></div>
+        <div class="expiry-line"><span>Действует до</span><strong id="sub-expiry">—</strong></div>
+        <div class="grid">
+          <div class="metric"><b id="sub-traffic">—</b><span>ГБ трафика</span></div>
+          <div class="metric"><b id="sub-devices">—</b><span>устройства</span></div>
+          <div class="metric"><b id="sub-days">—</b><span>дней осталось</span></div>
+        </div>
+        <a class="link-button" id="sub-link" href="#" target="_blank" rel="noopener" style="display:none">↗ Открыть ссылку подключения</a>
+      </section>
+      <section class="panel empty-state" id="no-subscription"><span class="empty-glyph">◇</span><h2>Подписка ещё не активирована</h2><p class="muted">Выберите тариф в магазине, чтобы получить подключение.</p><button class="secondary-btn" type="button" data-go-page="shop">Посмотреть тарифы</button></section>
+      <section class="panel" id="account-devices"><div class="section-title"><h2>Мои устройства</h2><span>📱</span></div><div class="muted" id="account-device-info">Загружаем…</div></section>
+      <section class="panel" id="connection-guide">
+        <div class="section-title"><h2>Как подключиться</h2><span>↗</span></div>
+        <ol class="steps"><li>Установите VPN-клиент, подходящий для вашей подписки.</li><li>Откройте ссылку подключения выше и импортируйте её.</li><li>Обновите серверы, выберите нужный и подключитесь.</li></ol>
+      </section>
+    </section>
+    <section class="page" id="page-bonuses" data-page-panel="bonuses" hidden>
+      <div class="page-title"><small>ПРИВИЛЕГИИ</small><h1>Бонусы и подарки</h1><p class="muted">Приглашайте друзей и активируйте специальные предложения.</p></div>
+      <section class="panel" id="account-referrals">
+        <div class="section-title"><h2>Пригласить друга</h2><span>✦</span></div>
+        <div class="muted" id="account-referral-info">Загружаем…</div>
+        <a id="account-referral-link" class="ref-link" href="#" style="display:none"></a>
+        <button class="secondary-btn" id="copy-referral" type="button" hidden>Скопировать ссылку</button>
+      </section>
+      <section class="panel" id="trial-offer" style="display:none">
+        <div class="section-title"><h2>Пробный доступ</h2><span>✧</span></div>
+        <p class="muted" id="trial-copy"></p><button id="trial-claim" type="button" class="primary-btn">Получить доступ</button><p class="status" id="trial-status" role="status"></p>
+      </section>
+      <section class="panel" id="promo-offer">
+        <div class="section-title"><h2>Промокод</h2><span>⌁</span></div>
+        <p class="muted" id="promo-balance">Проверяем бонусный баланс…</p>
+        <label class="form-field"><span>Ваш код</span><input id="promo-input" maxlength="32" placeholder="Например, WELCOME" autocomplete="off"></label>
+        <button id="promo-activate" type="button" class="primary-btn">Активировать</button><p class="status" id="promo-status" role="status"></p>
+      </section>
+    </section>
+    <section class="page" id="page-account" data-page-panel="account" hidden>
+      <div class="page-title"><small>ЛИЧНЫЙ КАБИНЕТ</small><h1>Мой аккаунт</h1><p class="muted">Информация и история операций.</p></div>
+      <section class="panel profile-card">
+        <div class="profile-avatar">◈</div><div><strong id="profile-name">Покупатель</strong><p class="muted">Telegram ID: <span id="profile-id">—</span></p></div>
+      </section>
+      <section class="panel" id="account-purchases"><div class="section-title"><h2>История покупок</h2><span>↗</span></div><div class="muted" id="account-purchase-info">Загружаем…</div></section>
+      <section class="panel" id="account-support"><div class="section-title"><h2>Поддержка</h2><span>✉</span></div><p class="muted" id="support-text">Связаться с поддержкой магазина</p><a class="link-button" href="#" id="support-link" target="_blank" rel="noopener" hidden>Открыть поддержку</a></section>
+      <button class="secondary-btn admin-entry" id="admin-entry" type="button" hidden>⚙ Управление магазином</button>
+    </section>
+  </div>
+</main>
+<nav class="bottom-nav" id="bottom-nav" aria-label="Разделы магазина" hidden>
+  <button type="button" class="nav-active" data-page="shop" aria-current="page"><span class="nav-icon">▦</span><small>Магазин</small></button>
+  <button type="button" data-page="vpn"><span class="nav-icon">◈</span><small>Мой VPN</small></button>
+  <button type="button" data-page="bonuses"><span class="nav-icon">✧</span><small>Бонусы</small></button>
+  <button type="button" data-page="account"><span class="nav-icon">◎</span><small>Профиль</small></button>
+</nav>
+<script src="/static/miniapp.js" defer></script>
+</body></html>
