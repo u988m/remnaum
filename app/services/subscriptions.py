@@ -138,3 +138,28 @@ async def provision_paid_payment(payment_id: int) -> bool:
         payment.status = "succeeded"
         await session.commit()
         return True
+
+
+async def get_user_subscription(telegram_id: int) -> dict[str, Any] | None:
+    from sqlalchemy import outerjoin
+
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(Subscription, SubscriptionDetails)
+            .join(User, Subscription.user_id == User.id)
+            .outerjoin(SubscriptionDetails, SubscriptionDetails.subscription_id == Subscription.id)
+            .where(User.telegram_id == telegram_id)
+            .order_by(Subscription.created_at.desc())
+            .limit(1)
+        )
+        row = result.first()
+        if row is None:
+            return None
+        subscription, details = row
+        return {
+            "status": subscription.status,
+            "expires_at": subscription.expires_at,
+            "subscription_url": details.subscription_url if details else None,
+            "traffic_gb": details.traffic_gb if details else None,
+            "device_limit": details.device_limit if details else None,
+        }
