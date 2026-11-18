@@ -892,3 +892,56 @@ async def admin_put_store_profile(
         return await update_store_profile(data.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/api/v1/webapp/purchases")
+async def webapp_purchases(x_telegram_init_data: str | None = Header(default=None)):
+    if not x_telegram_init_data:
+        raise HTTPException(status_code=401, detail="Telegram authentication is required")
+    identity = await _webapp_user(x_telegram_init_data)
+    async with SessionLocal() as session:
+        payments = (await session.scalars(
+            select(Payment).join(User, Payment.user_id == User.id)
+            .where(User.telegram_id == int(identity["id"]))
+            .order_by(Payment.created_at.desc(), Payment.id.desc()).limit(20)
+        )).all()
+        return {"items": [{
+            "id": p.id, "provider": p.provider, "amount": p.amount,
+            "currency": p.currency, "status": p.status, "created_at": p.created_at.isoformat(),
+        } for p in payments]}
+
+
+@router.get("/api/v1/webapp/devices")
+async def webapp_hwid_devices(x_telegram_init_data: str | None = Header(default=None)):
+    from app.services.remnawave import RemnawaveClient
+    if not x_telegram_init_data:
+        raise HTTPException(status_code=401, detail="Telegram authentication is required")
+    identity = await _webapp_user(x_telegram_init_data)
+    subscription = await get_user_subscription(int(identity["id"]))
+    if not subscription or not subscription.get("panel_user_id"):
+        return {"limit": None, "items": []}
+    try:
+        result = await RemnawaveClient().get_hwid_devices(subscription["panel_user_id"])
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Device list temporarily unavailable") from exc
+    data = result.get("response", result) if isinstance(result, dict) else result
+    devices = data if isinstance(data, list) else data.get("devices", data.get("items", [])) if isinstance(data, dict) else []
+    return {"limit": subscription.get("device_limit"), "items": [
+        {"name": str(device.get("deviceModel") or device.get("platform") or device.get("userAgent") or "Устройство")[:100]}
+        for device in devices[:25] if isinstance(device, dict)
+    ]}
+
+
+@router.get("/api/v1/webapp/referrals")
+async def webapp_referrals(x_telegram_init_data: str | None = Header(default=None)):
+    from app.services.referrals import referral_code, referral_count
+    if not x_telegram_init_data:
+        raise HTTPException(status_code=401, detail="Telegram authentication is required")
+    identity = await _webapp_user(x_telegram_init_data)
+    telegram_id = int(identity["id"])
+    username = settings.telegram_bot_username.lstrip("@")
+    return {
+        "link": f"https://t.me/{username}?start={referral_code(telegram_id)}" if username else None,
+        "count": await referral_count(telegram_id),
+        "rewards_enabled": False,
+    }
