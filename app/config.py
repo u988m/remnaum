@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     admin_ids: str = ""
     remnawave_base_url: str = ""
     remnawave_api_token: str = ""
+    remnawave_active_internal_squads: str = ""
     payment_provider: str = "stub"
     payment_webhook_secret: str = ""
     yookassa_shop_id: str = ""
@@ -45,7 +46,7 @@ class Settings(BaseSettings):
     tariff_price_per_day_minor: int = Field(default=5, ge=0)
     tariff_price_per_gb_minor: int = Field(default=2, ge=0)
     tariff_price_per_device_minor: int = Field(default=100, ge=0)
-    tariff_currency: str = Field(default="EUR", min_length=3, max_length=8)
+    tariff_currency: str = Field(default="RUB", min_length=3, max_length=8)
 
     @model_validator(mode="after")
     def validate_tariff_ranges(self):
@@ -57,6 +58,10 @@ class Settings(BaseSettings):
         if any(minimum > maximum for minimum, maximum in ranges):
             raise ValueError("Tariff minimum values must not exceed maximum values")
         return self
+
+    @property
+    def remnawave_internal_squad_ids(self) -> list[str]:
+        return [value.strip() for value in self.remnawave_active_internal_squads.split(",") if value.strip()]
 
     @property
     def admin_id_set(self) -> set[int]:
