@@ -2,7 +2,7 @@ from pathlib import Path
 from html import escape
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -295,7 +295,7 @@ async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=Non
         }
     return {
         "user": {"id": identity["id"], "first_name": identity.get("first_name", "")},
-        "profile": await get_store_profile(),
+        "profile": await public_store_profile(),
         "pricing": pricing,
         "stars_enabled": await is_payment_method_enabled("telegram_stars"),
         "payment_methods": await _get_public_checkout_methods(),
@@ -628,15 +628,65 @@ class StoreProfilePayload(BaseModel):
     terms_url: str = Field(default="", max_length=300)
 
 
+from app.services.store_media import welcome_image_url, welcome_image_path, save_welcome_image, delete_welcome_image
+
 @router.get("/api/v1/store-profile")
 async def public_store_profile():
-    return await get_store_profile()
+    return {**await get_store_profile(), "welcome_image_url": welcome_image_url()}
 
 
 @router.get("/admin/api/store-profile")
 async def admin_get_store_profile(x_telegram_init_data: str | None = Header(default=None)):
     await _require_telegram_admin(x_telegram_init_data)
-    return await get_store_profile()
+    return {**await get_store_profile(), "welcome_image_url": welcome_image_url()}
+
+
+
+
+class WelcomeImagePayload(BaseModel):
+    data_base64: str = Field(min_length=32, max_length=7_200_000)
+
+
+@router.get("/api/v1/store-profile/welcome-image")
+async def public_welcome_image():
+    image = welcome_image_path()
+    if image is None:
+        raise HTTPException(status_code=404, detail="Изображение не установлено")
+    return FileResponse(
+        image, media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.put("/admin/api/store-profile/welcome-image")
+async def admin_upload_welcome_image(
+    data: WelcomeImagePayload,
+    x_telegram_init_data: str | None = Header(default=None),
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    try:
+        return {"url": save_welcome_image(data.data_base64)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.delete("/admin/api/store-profile/welcome-image")
+async def admin_delete_welcome_image(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    delete_welcome_image()
+    return {"url": None}
+
+
+@router.get("/admin/api/bot-identity")
+async def admin_bot_identity(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    if bot is None:
+        return {"username": "", "name": "", "id": None}
+    try:
+        identity = await bot.get_me()
+    except Exception:
+        return {"username": settings.telegram_bot_username.lstrip("@"), "name": "", "id": None}
+    return {"username": identity.username or "", "name": identity.first_name or "", "id": identity.id}
 
 
 @router.put("/admin/api/store-profile")
