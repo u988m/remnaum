@@ -308,10 +308,11 @@ button:disabled{opacity:.45}a{color:var(--tg-theme-link-color,#65a9ff)}.status{f
 </section>
 <section class="panel" id="fixed-plans" style="display:none"><h2>Готовые тарифы</h2><div id="plans-list"></div><p class="muted">Цены готовых тарифов задаёт владелец магазина. Для оплаты примите условия ниже.</p></section>
 <section class="panel"><h2>Соберите свой тариф</h2><div class="row"><label for="days">Срок подписки</label><select id="days"></select></div><div class="row"><label for="traffic">Трафик</label><select id="traffic"></select></div><div class="row"><label for="devices">Устройства</label><select id="devices"></select></div>
-<div style="margin-top:16px"><div class="muted">Стоимость в Telegram</div><div class="price" id="stars-price">—</div></div>
+<div class="row"><label for="checkout-method">Способ оплаты</label><select id="checkout-method"></select></div>
+<div style="margin-top:16px"><div class="muted" id="price-label">Стоимость</div><div class="price" id="stars-price">—</div></div>
 <label class="check"><input id="terms" type="checkbox"><span>Я принимаю <a id="terms-link" href="#" target="_blank">условия оказания услуги</a>.</span></label>
 <button id="buy" disabled>Оплатить Telegram Stars</button><div id="status" class="status"></div></section>
-<div class="muted" style="font-size:12px;text-align:center;margin-top:20px">Безопасная оплата через Telegram Stars · Remnaum</div>
+<div class="muted" style="font-size:12px;text-align:center;margin-top:20px">Способы оплаты настраивает владелец магазина · Remnaum</div>
 </div></main>
 <script>
 const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
@@ -363,6 +364,21 @@ async function loadAccountPanels(){
   }else $("account-referral-info").textContent="Реферальная информация временно недоступна";
 }
 function fillOptions(id,min,max,step,selected,label){const el=$(id);el.replaceChildren();const chosen=Math.min(max,Math.max(min,selected));const values=[];for(let n=min;n<=max;n+=step)values.push(n);if(!values.includes(chosen))values.push(chosen);values.sort((a,b)=>a-b);values.forEach(n=>{const o=document.createElement("option");o.value=String(n);o.textContent=n+" "+label;el.appendChild(o)});el.value=String(chosen)}
+const providerLabels={telegram_stars:"⭐ Telegram Stars",yookassa:"💳 ЮKassa",yoomoney:"🏦 ЮMoney",cryptopay:"🪙 Crypto Pay"};
+function paymentMode(){return $("checkout-method").value||"telegram_stars"}
+function openCheckoutUrl(url){
+  if(!url.startsWith("https://"))throw Error("Некорректный адрес провайдера");
+  if(tg?.openLink)tg.openLink(url);else window.open(url,"_blank","noopener,noreferrer");
+}
+function fillPaymentOptions(){
+  const select=$("checkout-method");select.replaceChildren();
+  Object.entries(data.payment_methods||{}).forEach(([key,enabled])=>{
+    if(!enabled)return;
+    const option=document.createElement("option");option.value=key;option.textContent=providerLabels[key]||key;
+    select.append(option);
+  });
+  select.onchange=recalc;
+}
 async function loadReadyPlans(){
   const result=await api("/api/v1/plans");
   if(!result.items.length)return;
@@ -371,27 +387,55 @@ async function loadReadyPlans(){
     const item=document.createElement("div");item.className="panel";
     const title=document.createElement("b");title.textContent=plan.title;
     const details=document.createElement("div");details.className="muted";
-    details.textContent=plan.duration_days+" дней · "+plan.traffic_gb+" ГБ · "+plan.device_limit+" устройств · "+plan.price_stars+" ⭐";
-    const btn=document.createElement("button");btn.textContent="Выбрать тариф — "+plan.price_stars+" ⭐";
+    details.textContent=plan.duration_days+" дней · "+plan.traffic_gb+" ГБ · "+plan.device_limit+" устройств · "+plan.price_stars+" ⭐ / "+(plan.price_rub_minor/100).toFixed(2)+" ₽";
+    const btn=document.createElement("button");btn.textContent="Выбрать тариф";
     btn.onclick=async()=>{try{
       if(!$("terms").checked)throw Error("Примите условия оказания услуги ниже");
-      if(!data.stars_enabled)throw Error("Оплата Stars выключена");
       btn.disabled=true;$("status").textContent="Создаём счёт…";
       await api("/api/v1/webapp/terms/accept",{accepted:true});
-      const invoice=await api("/api/v1/webapp/plans/checkout",{plan_id:plan.id});
+      if(paymentMode()!=="telegram_stars"){
+        const result=await api("/api/v1/webapp/plans/external/checkout",{plan_id:plan.id,provider:paymentMode()});
+        openCheckoutUrl(result.url);$("status").textContent="Счёт №"+result.payment_id+" создан.";
+        btn.disabled=false;return;
+      }
       if(!tg?.openInvoice)throw Error("Откройте Mini App из Telegram");
+      const invoice=await api("/api/v1/webapp/plans/checkout",{plan_id:plan.id});
       tg.openInvoice(invoice.invoice_url,status=>{$("status").textContent="Статус оплаты: "+status;if(status==="paid")setTimeout(()=>location.reload(),1800);btn.disabled=false});
     }catch(e){$("status").textContent=e.message;btn.disabled=false}};
     item.append(title,details,btn);$("plans-list").appendChild(item);
   }
 }
 function limits(){return {days:+$("days").value,traffic:+$("traffic").value,devices:+$("devices").value}}
-function recalc(){if(!data)return;const v=limits(),p=data.pricing;const stars=v.days*p.stars_per_day+v.traffic*p.stars_per_gb+v.devices*p.stars_per_device;$("stars-price").textContent=stars+" ⭐";$("buy").textContent="Оплатить "+stars+" Stars";$("buy").disabled=!$("terms").checked||!data.stars_enabled||!data.terms_url||stars<1}
+function recalc(){
+  if(!data)return;const v=limits(),p=data.pricing,method=paymentMode();
+  const stars=v.days*p.stars_per_day+v.traffic*p.stars_per_gb+v.devices*p.stars_per_device;
+  const rub=v.days*p.rub_per_day_minor+v.traffic*p.rub_per_gb_minor+v.devices*p.rub_per_device_minor;
+  const external=method!=="telegram_stars";const amount=external?rub:stars;
+  $("price-label").textContent=external?"Стоимость через "+(providerLabels[method]||method):"Стоимость в Telegram";
+  $("stars-price").textContent=external?(rub/100).toFixed(2)+" "+(p.currency||"RUB"):stars+" ⭐";
+  $("buy").textContent=external?"💳 Перейти к оплате":"⭐ Оплатить "+stars+" Stars";
+  $("buy").disabled=!$("terms").checked||!data.terms_url||amount<1||!(data.payment_methods||{})[method];
+}
 ["days","traffic","devices"].forEach(k=>$(k).addEventListener("change",recalc));$("terms").addEventListener("change",recalc);
-$("buy").onclick=async()=>{try{$("buy").disabled=true;$("status").textContent="Создаём счёт…";await api("/api/v1/webapp/terms/accept",{accepted:true});const result=await api("/api/v1/webapp/checkout",limits());if(!tg?.openInvoice)throw Error("Откройте магазин из Telegram, чтобы оплатить счёт");tg.openInvoice(result.invoice_url,(status)=>{$("status").textContent=status==="paid"?"Оплата подтверждена. Обновляем подписку…":status==="cancelled"?"Оплата отменена":"Статус оплаты: "+status;if(status==="paid")setTimeout(()=>location.reload(),1800);else recalc()})}catch(e){$("status").textContent=e.message;recalc()}};
+$("buy").onclick=async()=>{try{
+  $("buy").disabled=true;$("status").textContent="Создаём счёт…";
+  await api("/api/v1/webapp/terms/accept",{accepted:true});
+  if(paymentMode()!=="telegram_stars"){
+    const result=await api("/api/v1/webapp/external/checkout",{...limits(),provider:paymentMode()});
+    openCheckoutUrl(result.url);$("status").textContent="Счёт №"+result.payment_id+" создан. Подписка появится после подтверждения оплаты.";
+    recalc();return;
+  }
+  const result=await api("/api/v1/webapp/checkout",limits());
+  if(!tg?.openInvoice)throw Error("Откройте магазин из Telegram");
+  tg.openInvoice(result.invoice_url,status=>{
+    $("status").textContent=status==="paid"?"Оплата подтверждена":status==="cancelled"?"Отменено":"Статус: "+status;
+    if(status==="paid")setTimeout(()=>location.reload(),1800);else recalc();
+  });
+}catch(e){$("status").textContent=e.message;recalc()}};
+
 async function start(){try{if(!tg?.initData)throw Error("Откройте Mini App через кнопку в Telegram");data=await api("/api/v1/webapp/bootstrap");if(data.profile){$("store-name").textContent=data.profile.name;$("store-tagline").textContent=data.profile.tagline||"Ваш VPN";document.documentElement.style.setProperty("--tg-theme-button-color",data.profile.accent_color)}$("loading").style.display="none";$("app").style.display="block";$("welcome").textContent=data.user.first_name?"Здравствуйте, "+data.user.first_name+"! Настройте подписку под себя.":"Выберите параметры подписки.";if(data.terms_url){$("terms-link").href=data.terms_url}else{$("terms-link").textContent="условия не настроены";$("terms-link").removeAttribute("href");$("buy").disabled=true}
 fillOptions("days",data.limits.days_min,data.limits.days_max,1,data.limits.days_default,"дней");fillOptions("traffic",data.limits.traffic_min,data.limits.traffic_max,1,data.limits.traffic_default,"ГБ");fillOptions("devices",data.limits.devices_min,data.limits.devices_max,1,data.limits.devices_default,"устройств");if(data.subscription){const s=data.subscription;$("subscription").style.display="block";$("sub-status").textContent=s.status;$("sub-expiry").textContent=s.expires_at?new Date(s.expires_at).toLocaleString():"—";$("sub-traffic").textContent=s.traffic_gb??"—";$("sub-devices").textContent=s.device_limit??"—";$("sub-days").textContent=s.days_left??"—";if(s.subscription_url){$("sub-link").href=s.subscription_url;$("sub-link").style.display="inline-block"}}
-$("buy").disabled=!data.stars_enabled;recalc();loadAccountPanels();loadOffers();await loadReadyPlans()}catch(e){$("loading").textContent=e.message}}
+$("buy").disabled=true;fillPaymentOptions();recalc();loadAccountPanels();loadOffers();await loadReadyPlans()}catch(e){$("loading").textContent=e.message}}
 start();
 </script></body></html>""")
 
@@ -420,11 +464,9 @@ async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=Non
     return {
         "user": {"id": identity["id"], "first_name": identity.get("first_name", "")},
         "profile": await get_store_profile(),
-        "pricing": {key: value for key, value in pricing.items() if key.startswith("stars_")},
+        "pricing": pricing,
         "stars_enabled": await is_payment_method_enabled("telegram_stars"),
-        "payment_methods": (lambda m, c: {
-            key: bool(m.get(key) and c.get(key)) for key in ("telegram_stars", "yookassa", "yoomoney", "cryptopay")
-        })(*await _webapp_enabled_methods()),
+        "payment_methods": await _get_public_checkout_methods(),
         "terms_url": await get_terms_url(),
         "limits": {
             "days_min": settings.tariff_min_days, "days_max": settings.tariff_max_days,
@@ -1295,6 +1337,9 @@ async def webapp_external_plan_checkout(
     return await _external_checkout(telegram_id, data.provider)
 
 
-async def _webapp_enabled_methods():
+async def _get_public_checkout_methods():
     methods, credentials = await get_store_payment_settings()
-    return methods, public_payment_settings(methods, credentials)["configured"]
+    configured = public_payment_settings(methods, credentials)["configured"]
+    return {key: bool(methods.get(key) and configured.get(key)) for key in (
+        "telegram_stars", "yookassa", "yoomoney", "cryptopay"
+    )}
