@@ -112,6 +112,27 @@ class InstallerTests(unittest.TestCase):
             installer.choose_mode({"DEPLOY_MODE": "panel"}, None), "panel"
         )
 
+    def test_global_remnaum_launcher_works_from_any_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "remnaum"
+            root.mkdir()
+            launcher = Path(temp) / "bin" / "remnaum"
+            launcher.parent.mkdir()
+            with patch.object(installer, "ROOT", root), \
+                 patch.object(installer.os, "geteuid", return_value=0):
+                installer.install_global_command(destination=launcher)
+            content = launcher.read_text()
+            self.assertIn("cd " + str(root), content)
+            self.assertIn("exec sh ./install.sh", content)
+            self.assertIn("sudo /usr/local/bin/remnaum", content)
+            self.assertEqual(launcher.stat().st_mode & 0o777, 0o755)
+
+    def test_backup_menu_is_available_even_before_installation(self):
+        with patch.object(installer, "prompt", return_value="3"):
+            self.assertEqual(installer.choose_action({}, None), "backup")
+        with patch.object(installer, "prompt", return_value="3"):
+            self.assertEqual(installer.choose_action({"DEPLOY_MODE": "panel"}, None), "backup")
+
     def test_action_menu_install_and_update(self):
         with patch.object(installer, "prompt", return_value="1"):
             self.assertEqual(installer.choose_action({}, None), "install")
