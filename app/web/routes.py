@@ -314,7 +314,7 @@ async function loadAccountPanels(){
   }else $("account-purchase-info").textContent="История покупок временно недоступна";
   if(results[2].status==="fulfilled"){
     const d=results[2].value;
-    $("account-referral-info").textContent="Приглашено: "+d.count+". Бонусная программа пока не включена.";
+    $("account-referral-info").textContent="Приглашено: "+d.count+" · Бонусных дней: "+(d.reward?.days||0)+" · Начислено: "+(d.reward?.earned||0)+(d.rewards_enabled?" · Бонусы применятся при следующем продлении.":" · Программа пока отключена.");
     if(d.link){$("account-referral-link").href=d.link;$("account-referral-link").textContent=d.link;$("account-referral-link").style.display="block"}
   }else $("account-referral-info").textContent="Реферальная информация временно недоступна";
 }
@@ -501,7 +501,7 @@ th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflo
 <div class="card"><span>Успешные платежи</span><b id="paid-count">—</b></div>
 <div class="card"><span>Ожидают оплаты</span><b id="pending-count">—</b></div>
 </div>
-<nav><button class="active" data-tab="users">Клиенты</button><button data-tab="payments">Платежи</button><button data-tab="plans">Готовые тарифы</button><button data-tab="brand">Оформление</button><button data-tab="settings">Оплата</button><button data-tab="tariffs">Конструктор</button></nav>
+<nav><button class="active" data-tab="users">Клиенты</button><button data-tab="payments">Платежи</button><button data-tab="plans">Готовые тарифы</button><button data-tab="brand">Оформление</button><button data-tab="settings">Оплата</button><button data-tab="referrals">Рефералы</button><button data-tab="tariffs">Конструктор</button></nav>
 <section class="section" id="users-view"><div class="toolbar"><h2>Клиенты и подписки</h2><button class="action" id="users-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>Telegram ID</th><th>Username</th><th>Подписка</th><th>До</th><th>Регистрация</th><th>Действие</th></tr></thead><tbody id="users-table"></tbody></table></div><div id="customer-detail" class="section" hidden aria-live="polite"><div class="toolbar"><h2 id="customer-title">Карточка клиента</h2><button class="action" id="customer-close">Закрыть</button></div><p class="muted" id="customer-summary"></p><h3>Подписки</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Статус</th><th>Действует до</th><th>Создана</th></tr></thead><tbody id="customer-subscriptions"></tbody></table></div><h3>Платежи</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="customer-payments"></tbody></table></div></div><div class="toolbar" style="margin-top:12px"><button class="action" id="users-prev">Назад</button><span id="users-page" class="muted">Страница 1</span><button class="action" id="users-next">Далее</button></div></section>
 <section class="section" id="payments-view" hidden><div class="toolbar"><h2>История платежей</h2><button class="action" id="payments-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Клиент</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="payments-table"></tbody></table></div><div class="toolbar" style="margin-top:12px"><button class="action" id="payments-prev">Назад</button><span id="payments-page" class="muted">Страница 1</span><button class="action" id="payments-next">Далее</button></div></section>
 <section class="section" id="plans-view" hidden>
@@ -523,6 +523,15 @@ th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflo
 <div class="toolbar"><button class="action primary" type="submit">Сохранить тариф</button><button class="action" type="button" id="plan-new">Новый тариф</button></div>
 </form>
 <div class="table-wrap"><table><thead><tr><th>Тариф</th><th>Параметры</th><th>Рубли</th><th>Stars</th><th>Статус</th><th>Действие</th></tr></thead><tbody id="plans-table"></tbody></table></div>
+</section>
+<section class="section" id="referrals-view" hidden>
+<h2>Реферальная программа</h2>
+<p class="muted">Друг получает вашу ссылку. Бонусные дни начисляются пригласившему после первой успешно выданной платной подписки друга. Бонус автоматически продлевает следующую оплаченную подписку пригласившего.</p>
+<form id="referral-form">
+<label><input id="referral-enabled" type="checkbox"> Включить реферальные бонусы</label>
+<label>Бонус за первого оплатившего друга (дней)<input id="referral-days" type="number" min="1" max="90" required value="3"></label>
+<button class="action primary" type="submit">Сохранить настройки</button>
+</form>
 </section>
 <section class="section" id="brand-view" hidden>
 <h2>Оформление магазина</h2>
@@ -648,8 +657,18 @@ $("pricing-save").onclick=async()=>{try{
   const pricing={};pricingKeys.forEach(k=>pricing[k]=k==="currency"?$("pricing-"+k).value:+$("pricing-"+k).value);
   await adminApi("PUT","/admin/api/tariff-pricing",{pricing});$("status").textContent="Формула цен сохранена";
 }catch(e){$("status").textContent=e.message}};
+async function loadReferrals(){
+  const d=await adminApi("GET","/admin/api/referrals");
+  $("referral-enabled").checked=d.enabled;$("referral-days").value=d.reward_days;
+}
+$("referral-form").onsubmit=async e=>{
+  e.preventDefault();try{
+    await adminApi("PUT","/admin/api/referrals",{enabled:$("referral-enabled").checked,reward_days:+$("referral-days").value});
+    $("status").textContent="Реферальная программа сохранена";
+  }catch(err){$("status").textContent=err.message}
+};
 async function start(){try{if(!tg?.initData)throw Error("Откройте панель через Telegram Mini App");const d=await api("/admin/api/overview");$("loading").hidden=true;$("dashboard").hidden=false;$("welcome").textContent="Здравствуйте, "+(d.admin_name||"администратор");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments;await loadUsers()}catch(e){$("loading").textContent=e.message}}
-document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const tab=b.dataset.tab;$("users-view").hidden=tab!=="users";$("payments-view").hidden=tab!=="payments";$("plans-view").hidden=tab!=="plans";$("brand-view").hidden=tab!=="brand";$("payment-settings-view").hidden=tab!=="settings";$("pricing-view").hidden=tab!=="tariffs";try{if(tab==="payments")await loadPayments();if(tab==="plans")await loadPlans();if(tab==="brand")await loadBrand();if(tab==="settings")await loadPaymentSettings();if(tab==="tariffs")await loadPricing()}catch(e){$("status").textContent=e.message}}));
+document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const tab=b.dataset.tab;$("users-view").hidden=tab!=="users";$("payments-view").hidden=tab!=="payments";$("plans-view").hidden=tab!=="plans";$("brand-view").hidden=tab!=="brand";$("referrals-view").hidden=tab!=="referrals";$("payment-settings-view").hidden=tab!=="settings";$("pricing-view").hidden=tab!=="tariffs";try{if(tab==="payments")await loadPayments();if(tab==="plans")await loadPlans();if(tab==="brand")await loadBrand();if(tab==="referrals")await loadReferrals();if(tab==="settings")await loadPaymentSettings();if(tab==="tariffs")await loadPricing()}catch(e){$("status").textContent=e.message}}));
 $("users-refresh").onclick=()=>loadUsers().catch(e=>$("status").textContent=e.message);$("payments-refresh").onclick=()=>loadPayments().catch(e=>$("status").textContent=e.message);
 $("users-prev").onclick=()=>{userOffset=Math.max(0,userOffset-pageSize);loadUsers()};$("users-next").onclick=()=>{userOffset+=pageSize;loadUsers()};
 $("payments-prev").onclick=()=>{paymentOffset=Math.max(0,paymentOffset-pageSize);loadPayments()};$("payments-next").onclick=()=>{paymentOffset+=pageSize;loadPayments()};
