@@ -18,6 +18,7 @@ from app.services.payment_service import settle_payment
 from app.services.subscriptions import get_user_subscription, provision_paid_payment
 from app.services.users import get_or_create_user
 from app.services.store_settings import is_payment_method_enabled
+from app.services.store_profile import get_terms_url
 from app.services.store_profile import get_store_profile
 from app.services.referrals import parse_referral_start, register_referral, referral_count, referral_code, reward_balance, get_referral_settings
 from app.services.plans import list_plans, choose_plan, selected_stars_price, clear_selected_plan
@@ -206,10 +207,11 @@ async def payment_choose_handler(callback: CallbackQuery) -> None:
         if callback.message:
             await callback.message.edit_text("Оплата временно отключена администратором.", reply_markup=back_menu())
         return
-    if not settings.telegram_terms_url:
+    terms_url = await get_terms_url()
+    if not terms_url:
         if callback.message:
             await callback.message.edit_text(
-                "Продажи пока не включены: администратору нужно опубликовать условия и указать TELEGRAM_TERMS_URL.",
+                "Продажи пока не включены: администратору нужно опубликовать условия в разделе оформления админки.",
                 reply_markup=back_menu(),
             )
         return
@@ -217,7 +219,7 @@ async def payment_choose_handler(callback: CallbackQuery) -> None:
         await show_stars_checkout(callback)
         return
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📄 Прочитать условия", url=settings.telegram_terms_url)],
+        [InlineKeyboardButton(text="📄 Прочитать условия", url=terms_url)],
         [InlineKeyboardButton(text="Принимаю условия", callback_data="payment:terms:accept")],
         [InlineKeyboardButton(text="⬅️ Назад к тарифу", callback_data="menu:plans")],
     ])
@@ -326,9 +328,10 @@ async def stars_successful_payment_handler(message: Message) -> None:
 
 @router.message(Command("terms"))
 async def terms_handler(message: Message) -> None:
-    if settings.telegram_terms_url:
+    terms_url = await get_terms_url()
+    if terms_url:
         await message.answer(
-            f"Условия Remnaum: <a href=\"{escape(settings.telegram_terms_url, quote=True)}\">прочитать</a>"
+            f"Условия Remnaum: <a href=\"{escape(terms_url, quote=True)}\">прочитать</a>"
         )
     else:
         await message.answer("Условия ещё не опубликованы.")
