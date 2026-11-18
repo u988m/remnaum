@@ -1,35 +1,70 @@
-:root{font-family:Inter,system-ui,-apple-system,sans-serif;color-scheme:dark;background:#0b1018;color:#f4f7fc}
-*{box-sizing:border-box}body{margin:0;background:#0b1018;color:#f4f7fc}main{max-width:1100px;margin:auto;padding:24px 16px 48px}
-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:26px}.brand{font-size:23px;font-weight:850;letter-spacing:-.8px}
-.tag{font-size:11px;color:#9eacc0;border:1px solid #293548;padding:6px 10px;border-radius:20px}
-h1{font-size:27px;margin:0 0 7px;letter-spacing:-.8px}.muted{color:#9eacc0;line-height:1.5}
-.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}
-.card,.section{background:#151d29;border:1px solid #293548;border-radius:16px;padding:17px}
-.card span{display:block;color:#9eacc0;font-size:12px}.card b{display:block;font-size:26px;margin-top:7px}
-nav{display:flex;gap:8px;margin:22px 0 12px;flex-wrap:wrap}
-nav button,.action{border:1px solid #34445c;background:#182334;color:#e9f0fa;border-radius:10px;padding:10px 14px;font-weight:650}
-nav button.active,.primary{background:#3978d4;border-color:#3978d4;color:white}
-.section{margin-top:12px;overflow:hidden}.section h2{font-size:17px;margin:0 0 14px}
-.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
-table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:12px 9px;border-bottom:1px solid #293548;white-space:nowrap}
-th{color:#9eacc0;font-weight:600}td{max-width:250px;overflow:hidden;text-overflow:ellipsis}
-.table-wrap{overflow-x:auto}.status{font-size:13px;min-height:22px;margin-top:12px;color:#9eacc0}
-.pill{display:inline-block;padding:4px 8px;border-radius:20px;background:#24354a;color:#d7e6fb;font-size:11px}
-.empty{padding:25px;text-align:center;color:#9eacc0}
-#plan-form input:not([type=checkbox]),#brand-form input:not([type=color]),#payment-settings-view input:not([type=checkbox]),#pricing-view input{width:100%;border:1px solid #34445c;border-radius:9px;background:#0b1018;color:#f4f7fc;padding:11px;margin-top:5px}#plan-form label,#brand-form label{display:block;margin:12px 0;font-size:12px;color:#9eacc0}#plan-form{margin-bottom:16px}
-@media(max-width:700px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.card b{font-size:22px}main{padding:18px 12px 36px}header{margin-bottom:20px}h1{font-size:23px}th,td{padding:10px 7px}}
-
-/* Responsive dashboard controls, comfortable forms and keyboard support. */
-button{cursor:pointer;transition:background .15s ease,transform .15s ease,border-color .15s ease}
+:root{
+  color-scheme:dark;
+  --bg:#08121f;--surface:#111f30;--surface-2:#17273b;
+  --border:#2a4058;--text:#eff5fc;--muted:#9bb0c7;--accent:#4e80e6;
+  font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{background:var(--bg);scroll-behavior:smooth}
+body{margin:0;color:var(--text);background:radial-gradient(ellipse 68% 240px at 50% 0,#1c3150,transparent),var(--bg);min-height:100vh}
+main{max-width:1160px;margin:0 auto;padding:26px 22px 64px}
+.admin-header{display:flex;align-items:center;gap:12px;margin-bottom:27px;padding-bottom:19px;border-bottom:1px solid #28405d}
+.brand-logo{width:46px;height:46px;border-radius:14px;background:linear-gradient(132deg,#24ccd8,#347ff1 58%,#8061cb);display:grid;place-items:center;color:white;font-size:30px;font-weight:900;letter-spacing:-2px}
+.brand-block{display:grid;gap:2px}.brand{font-size:22px;font-weight:850;letter-spacing:-.8px}.brand-block small{color:var(--muted);font-size:11px}
+.tag{margin-left:auto;color:#85d7bd;font-size:11px;font-weight:800;letter-spacing:1px;border:1px solid #285747;background:#112f2e;padding:8px 13px;border-radius:999px}
+h1{font-size:29px;letter-spacing:-.9px;line-height:1.2;margin:0 0 6px}h2{letter-spacing:-.4px}h3{font-size:15px}
+.muted{color:var(--muted);line-height:1.6;font-size:13px}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:22px 0}
+.card{background:linear-gradient(145deg,#192a41,#132135);border:1px solid #304966;border-radius:17px;padding:20px;min-width:0}
+.card span{display:block;color:var(--muted);font-size:12px;line-height:1.4}.card b{display:block;font-size:30px;letter-spacing:-1px;font-weight:850;margin-top:8px}
+.admin-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:23px 0 16px}
+.admin-tabs button{border:1px solid #304761;background:#152337;color:#a6bcd3;border-radius:12px;padding:13px 9px;font-size:13px;font-weight:720;text-align:center}
+.admin-tabs button.active{border-color:#507db5;color:#edf6ff;background:linear-gradient(110deg,#203e64,#1b2d47);box-shadow:0 3px 16px #203f642b}
+.admin-tabs button:hover:not(.active){background:#1a2b42;color:white}
+.section{background:linear-gradient(145deg,var(--surface),#101b2a);border:1px solid var(--border);border-radius:19px;padding:22px;margin-top:12px;overflow:hidden}
+.section h2{font-size:19px;margin:0 0 14px}.section h3{margin:22px 0 13px}
+.access-loading{padding:34px;text-align:center;color:#b3c4da;font-size:15px}
+.toolbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:13px}
+.action{background:#203149;color:#e0ebfa;border:1px solid #3d5978;border-radius:11px;padding:11px 14px;min-height:40px;font-size:13px;font-weight:710}
+.primary{background:linear-gradient(115deg,#376dc6,#4a79d6);border-color:#5992e9;color:#fff}
+button{cursor:pointer;transition:transform .15s ease,background .15s ease,filter .15s ease}
+button:disabled{opacity:.45;cursor:not-allowed}
 button:not(:disabled):active{transform:scale(.98)}
-button:disabled{cursor:not-allowed;opacity:.5}
-button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #8abaff;outline-offset:2px}
-.section label{display:block;margin:12px 0;color:#b9c7d8}
-.section input:not([type=checkbox]){display:block;width:100%;max-width:600px;border:1px solid #44536a;background:#0e1726;color:#eef3fa;padding:12px;border-radius:10px;font:inherit;margin-top:6px}
-.section input[type=checkbox]{accent-color:#559cff;transform:scale(1.15);margin-right:7px}
-.section form{max-width:680px}
-.toolbar{flex-wrap:wrap}
-nav{overflow-x:auto;align-items:center;padding-bottom:4px}
-nav button.active{box-shadow:0 4px 16px rgba(50,112,200,.22)}
-@media(max-width:550px){main{padding:15px 10px 48px}.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.card{padding:13px}.card b{font-size:22px}.section{padding:13px}nav{gap:6px}}
-@media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important;animation:none!important}}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #88bfff;outline-offset:3px}
+.table-wrap{overflow-x:auto;border:1px solid #293d56;border-radius:13px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:13px 12px;text-align:left;border-bottom:1px solid #2b3c52;white-space:nowrap}
+th{font-weight:650;color:#a4b8cc;background:#152438}
+td{color:#e4ebf6;max-width:250px;overflow:hidden;text-overflow:ellipsis}
+tr:last-child td{border-bottom:0}
+.status{position:sticky;bottom:10px;z-index:3;color:#c4d9ee;margin-top:18px;font-size:13px;min-height:19px;pointer-events:none}
+.section form{max-width:100%}
+.section label{color:#bfd0e2;font-weight:650;font-size:12px;display:block;margin:10px 0 13px}
+.section input:not([type=checkbox]):not([type=color]),.section textarea,.section select{display:block;width:100%;min-width:0;background:#0b1929;color:#f0f6fc;border:1px solid #34506d;border-radius:11px;margin-top:7px;padding:12px;font:inherit;font-size:13px}
+.section input[type=checkbox]{accent-color:var(--accent);transform:scale(1.1);margin-right:8px}
+.section input[type=color]{width:68px;height:44px;margin-top:8px;background:none;border:none}
+.section input[type=file]{border:1px dashed #456689!important;background:#101e31!important;font-size:11px}
+.section form .grid{gap:13px!important}
+#plan-form .grid,#payment-settings-view .grid,#pricing-fields{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important}
+#plan-form{margin-bottom:25px;padding-bottom:22px;border-bottom:1px solid #2b435c}
+#plan-form .toolbar{justify-content:flex-start}
+#method-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0}
+#method-list label{background:#15273b;border:1px solid #2b4360;border-radius:12px;padding:14px;margin:0!important}
+#customer-detail{border:1px solid #365372;background:#142438}
+#brand-form{max-width:770px}
+.brand-image-settings{display:grid;grid-template-columns:minmax(200px,1fr) minmax(260px,1fr);gap:18px;margin:16px 0 18px}
+.image-preview{width:100%;aspect-ratio:16/9;display:grid;place-items:center;background:linear-gradient(145deg,#1b324f,#1b2040);border:1px dashed #4a6386;border-radius:15px;overflow:hidden;text-align:center}
+.image-preview img{width:100%;height:100%;object-fit:cover}
+#brand-photo-placeholder{color:#9db9df;font-size:30px;font-weight:800;line-height:1.3}
+#brand-photo-placeholder small{font-size:13px;font-weight:600}
+.image-controls{display:flex;flex-direction:column;justify-content:center;gap:5px}
+.image-buttons{display:flex;gap:10px;flex-wrap:wrap}.image-buttons .action{flex:1;min-width:115px}
+.upload-label{margin:0!important}
+.bot-identity{display:flex;align-items:center;gap:14px;background:#13283d;border:1px solid #31516c;padding:16px;border-radius:14px;margin:16px 0}
+.bot-identity-icon{background:#274a70;border-radius:12px;width:42px;height:42px;display:grid;place-items:center;font-size:24px;color:#afd7ff}
+.bot-identity p{margin:4px 0 0}
+.pill{background:#253c56;color:#d8ebff;font-size:11px;padding:6px 9px;border-radius:999px}
+@media(max-width:750px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.card{padding:16px}.card b{font-size:26px}.brand-image-settings{grid-template-columns:1fr}.section{padding:17px}.admin-tabs button{font-size:12px;min-height:48px}}
+@media(max-width:420px){main{padding:15px 11px 55px}.admin-header{gap:10px}.brand{font-size:19px}.tag{font-size:9px;padding:6px 9px}.admin-tabs{gap:6px}.admin-tabs button{padding:10px 5px;font-size:10.5px}#plan-form .grid,#payment-settings-view .grid,#pricing-fields{grid-template-columns:1fr!important}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important;scroll-behavior:auto!important}}
