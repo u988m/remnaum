@@ -392,6 +392,7 @@ def offer_backup_key() -> None:
 
 
 def show_backup_menu(existing: dict[str, str]) -> int:
+    global ROOT
     ui.header("Полные копии · Восстановление · Расписание")
     if not existing:
         print("  Магазин ещё не настроен. Можно восстановить существующий архив.")
@@ -424,21 +425,46 @@ def show_backup_menu(existing: dict[str, str]) -> int:
         secret = None
         if not backups.KEY.exists():
             secret = prompt("Ключ восстановления с прежнего сервера", hidden=True)
-        info = backups.inspect_backup(archive, supplied_key=secret)
+        try:
+            info = backups.inspect_backup(archive, supplied_key=secret)
+        except ValueError:
+            # On a fresh installation, the default generated key may belong to
+            # a different server. Ask instead of making recovery impossible.
+            if not backups.KEY.exists():
+                raise
+            secret = prompt("Этот архив создан с другим ключом. Введите прежний ключ", hidden=True)
+            info = backups.inspect_backup(archive, supplied_key=secret)
         print(f"  Архив создан: {info['created_utc']}")
         print(f"  Исходная папка: {info['original_path']}")
         print(f"  Текущая папка: {ROOT}")
-        if info["original_path"] != str(ROOT.resolve()):
-            ui.warning("Исходная папка отличается. Файлы будут восстановлены в текущую папку.")
+        target = ROOT.resolve()
+        original = Path(str(info["original_path"])).resolve()
+        if original != target and not existing:
+            answer = prompt("Восстановить в исходную папку " + str(original) + "? (Д/н)", default="Д")
+            if answer.lower() in ("д", "да", "y", "yes"):
+                if original.exists() and any(original.iterdir()):
+                    raise ValueError("Исходная папка уже содержит данные. Выберите её при новой установке или освободите вручную.")
+                target = original
+        elif original != target:
+            ui.warning("Действующая установка будет восстановлена в текущую папку, не в путь архива.")
         print("  Восстановление заменит базу и настройки текущего магазина!")
         if prompt("Для подтверждения введите ВОССТАНОВИТЬ", required=True) != "ВОССТАНОВИТЬ":
             ui.warning("Восстановление отменено")
             return 0
         if existing:
             print("  Сохраняем аварийную копию текущего состояния...")
-            backups.create_backup()
+            backups.create_backup(protected=archive)
         ui.section(1, 2, "Проверяем архив и восстанавливаем данные")
-        backups.restore_backup(archive, supplied_key=secret)
+        backups.restore_backup(archive, supplied_key=secret, target_root=target)
+        if target != ROOT.resolve():
+            # This process is exiting; rebase only the installers/schedulers
+            # so the restored instance becomes the global one.
+            ROOT = target
+            backups.ROOT = target
+            backups.DATA = target / "data"
+            backups.SETTINGS = target / "data" / "backup-settings.json"
+            backups.KEY = target / "data" / "backup.key"
+            backups.BACKUPS = target / "backups"
         if secret and not backups.KEY.exists():
             backups._secure_write(backups.KEY, secret.encode() + b"\n")
         ui.section(2, 2, "Восстановление завершено")
