@@ -55,7 +55,7 @@ async def update_store_payment_settings(methods: dict[str, bool], credentials: d
         stored = decrypt_credentials(row.encrypted_credentials) if row else {}
         for provider, values in credentials.items():
             if values:
-                stored[provider] = {str(k): str(v) for k, v in values.items() if v}
+                stored[provider] = {**stored.get(provider, {}), **{str(k): str(v) for k, v in values.items() if v}}
         current = (row.methods if row else DEFAULT_METHODS.copy()) | {k: bool(v) for k, v in methods.items()}
         required = {"yookassa": ("shop_id", "secret_key"), "yoomoney": ("receiver", "notification_secret"), "cryptopay": ("api_token",)}
         for provider, fields in required.items():
