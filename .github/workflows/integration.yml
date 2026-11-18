@@ -30,7 +30,7 @@ jobs:
       - name: Validate scripts, installer and Compose isolation
         run: |
           sh -n install.sh bootstrap.sh
-          python3 -m py_compile scripts/install.py scripts/check_updates.py
+          python3 -m py_compile scripts/install.py scripts/check_updates.py scripts/remnawave_setup.py scripts/backup_manager.py scripts/terminal_ui.py
           bash -n update.sh backup.sh
           python3 -m py_compile scripts/install.py
           python3 -m unittest discover -s tests -p 'test_installer.py' -v
@@ -167,6 +167,20 @@ jobs:
               assert not await trial_eligible(123456789)
           asyncio.run(main())
           PY
+      - name: Verify encrypted full backup and restore PostgreSQL and Redis
+        run: |
+          sudo mkdir -p data
+          printf '%s\\n' 'ci-test-only-recovery-key-not-for-production-12345' | sudo tee data/backup.key >/dev/null
+          sudo chmod 600 data/backup.key
+          sudo python3 scripts/backup_manager.py create
+          ARCHIVE="$(find backups -maxdepth 1 -name 'remnaum-full-*.rmb' | sort | tail -1)"
+          test -s "$ARCHIVE"
+          sudo python3 scripts/backup_manager.py inspect "$ARCHIVE" | grep -q '"product": "remnaum"'
+          docker compose exec -T postgres psql -U remnaum -d remnaum -c 'DELETE FROM promo_redemptions;'
+          test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM promo_redemptions;')" = "0"
+          sudo python3 scripts/backup_manager.py restore "$ARCHIVE"
+          test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM promo_redemptions;')" = "1"
+          docker compose exec -T app python -c "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=5).status==200"
       - name: Show logs on failure
         if: failure()
         run: docker compose logs --tail=200
