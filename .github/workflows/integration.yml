@@ -113,6 +113,10 @@ jobs:
           assert request('/api/v1/store/catalog').status == 200
           assert request('/api/v1/store/me').status == 401
           assert request('/admin/api/referrals').status == 401
+          assert request('/admin/api/welcome-photo', 'POST').status == 401
+          assert request('/admin/api/welcome-photo', 'DELETE').status == 401
+          import json
+          assert 'welcome_photo_file_id' not in json.load(request('/api/v1/store-profile'))
           assert request('/admin/api/trial').status == 401
           assert request('/admin/api/promos').status == 401
           assert request('/api/v1/webapp/offers').status == 401
