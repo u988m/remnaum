@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.dialects.postgresql import insert
 
 from app.config import settings
-from app.db.models import StoreTariffSettings, TariffDraft, User
+from app.db.models import StoreTariffSettings, TariffDraft, SelectedPlan, User
 from app.db.session import SessionLocal
 
 
@@ -131,6 +131,7 @@ async def update_tariff_draft(telegram_id: int, username: str | None, field: str
         minimum, maximum = getattr(settings, min_setting), getattr(settings, max_setting)
         setattr(draft, model_field, max(minimum, min(maximum, getattr(draft, model_field) + delta)))
         draft.amount_minor = await calculate_store_price(draft.duration_days, draft.traffic_gb, draft.device_limit)
+        await session.execute(delete(SelectedPlan).where(SelectedPlan.user_id == user.id))
         await session.commit()
         pricing = await get_store_tariff_pricing()
         return TariffQuote(draft.duration_days, draft.traffic_gb, draft.device_limit, draft.amount_minor, pricing["currency"])
@@ -175,6 +176,7 @@ async def set_tariff_draft(
             draft.traffic_gb = traffic_gb
             draft.device_limit = device_limit
             draft.amount_minor = amount
+        await session.execute(delete(SelectedPlan).where(SelectedPlan.user_id == user.id))
         await session.commit()
     pricing = await get_store_tariff_pricing()
     return TariffQuote(duration_days, traffic_gb, device_limit, amount, pricing["currency"])
