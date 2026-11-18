@@ -31,7 +31,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 BACKUPS = ROOT / "backups"
 DATA = ROOT / "data"
-KEY = DATA / "backup.key"
+KEY = BACKUPS / ".recovery-key"
 SETTINGS = DATA / "backup-settings.json"
 MAGIC = b"REMNAUM-BACKUP-V1\n"
 EXCLUDE_TOP = {"backups", ".pytest_cache", "__pycache__", ".venv", ".mypy_cache"}
