@@ -1,0 +1,7 @@
+{
+    email {$ACME_EMAIL}
+}
+{$PUBLIC_DOMAIN}, {$WEBAPP_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy nginx:80
+}
