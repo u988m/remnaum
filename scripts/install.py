@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 from remnawave_setup import (
     discover_squads, select_squads, validate_uuid_list,
     local_panel_for_url, panel_webhook_secret, apply_local_panel_webhook,
-    discover_local_panel, read_panel_env,
+    discover_local_panel, read_panel_env, public_webhook_ready,
     panel_api_url,
 )
 
@@ -699,19 +699,21 @@ def main() -> int:
             print("Если прокси не настроен автоматически, используйте примеры в generated/.")
         panel_env = local_panel_for_url(cfg["REMNAWAVE_BASE_URL"])
         if panel_env is not None:
-            print("\\n🔗 Подключаем исходящие события Remnawave...")
-            try:
-                applied = apply_local_panel_webhook(
-                    panel_env,
-                    "https://" + cfg["PUBLIC_DOMAIN"] + "/webhooks/remnawave",
-                    cfg["REMNAWAVE_WEBHOOK_SECRET"],
-                    prompt,
-                )
-                if not applied:
-                    print("Настройка панели пропущена. Данные для ручного подключения есть в .env.")
-            except (ValueError, OSError, subprocess.CalledProcessError) as exc:
-                print("Не удалось автоматически обновить вебхук панели. Её прежние настройки сохранены.")
-                print("Проверьте настройки и логи панели; вебхук: https://" + cfg["PUBLIC_DOMAIN"] + "/webhooks/remnawave")
+            webhook_url = "https://" + cfg["PUBLIC_DOMAIN"] + "/webhooks/remnawave"
+            if not public_webhook_ready(webhook_url):
+                print("Публичный HTTPS ещё не отвечает: вебхук панели не изменяем.")
+                print("Когда DNS/прокси заработают, снова запустите install.sh → 1.")
+            else:
+                print("\\n🔗 Подключаем исходящие события Remnawave...")
+                try:
+                    applied = apply_local_panel_webhook(
+                        panel_env, webhook_url, cfg["REMNAWAVE_WEBHOOK_SECRET"], prompt,
+                    )
+                    if not applied:
+                        print("Настройка панели пропущена. Данные для подключения есть в .env.")
+                except (ValueError, OSError, subprocess.CalledProcessError):
+                    print("Не удалось обновить вебхук панели. Её прежние настройки сохранены.")
+                    print("Проверьте состояние панели и повторите настройку.")
         else:
             print("Локальная панель не совпадает с адресом API; её настройки не меняем.")
     install_update_timer()
