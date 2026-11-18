@@ -180,6 +180,10 @@ jobs:
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM promo_redemptions;')" = "0"
           sudo python3 scripts/backup_manager.py restore "$ARCHIVE"
           test "$(sudo docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM promo_redemptions;')" = "1"
+          for i in $(seq 1 35); do
+            if sudo docker compose exec -T app python -c "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=3).status==200" >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
           sudo docker compose exec -T app python -c "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=5).status==200"
       - name: Show logs on failure
         if: failure()
