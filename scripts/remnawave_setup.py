@@ -232,6 +232,26 @@ def apply_env_changes(path: Path, changes: dict[str, str]) -> Path:
     return backup
 
 
+def public_webhook_ready(webhook_url: str) -> bool:
+    """Require valid public TLS proxy before enabling outgoing Panel notifications."""
+    parsed = urlsplit(webhook_url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        return False
+    health_url = "https://" + parsed.netloc + "/health"
+    try:
+        request = urllib.request.Request(health_url, headers={"User-Agent": "Remnaum-Installer"})
+        with urllib.request.urlopen(request, timeout=6) as response:
+            if response.status != 200:
+                return False
+            body = response.read(4097)
+        if len(body) > 4096:
+            return False
+        value = json.loads(body)
+        return isinstance(value, dict) and value.get("status") == "ok"
+    except (OSError, ValueError):
+        return False
+
+
 def apply_local_panel_webhook(
     env_path: Path,
     webhook_url: str,
