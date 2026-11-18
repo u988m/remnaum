@@ -364,17 +364,17 @@ def install_update_timer() -> bool:
     unit = Path("/etc/systemd/system/remnaum-update-check.service")
     timer = Path("/etc/systemd/system/remnaum-update-check.timer")
     unit.write_text(
-        "[Unit]\\nDescription=Remnaum GitHub update checker\\n"
-        "[Service]\\nType=oneshot\\nUser=root\\n"
-        f"Environment=REMNAUM_GIT_USER={username}\\n"
-        f"WorkingDirectory={source}\\n"
-        f"ExecStart=/usr/bin/python3 {source}/scripts/check_updates.py\\n",
+        "[Unit]\nDescription=Remnaum GitHub update checker\n"
+        "[Service]\nType=oneshot\nUser=root\n"
+        f"Environment=REMNAUM_GIT_USER={username}\n"
+        f"WorkingDirectory={source}\n"
+        f"ExecStart=/usr/bin/python3 {source}/scripts/check_updates.py\n",
         encoding="utf-8",
     )
     timer.write_text(
-        "[Unit]\\nDescription=Check Remnaum updates every six hours\\n"
-        "[Timer]\\nOnBootSec=5min\\nOnUnitInactiveSec=6h\\nPersistent=true\\nRandomizedDelaySec=10m\\n"
-        "[Install]\\nWantedBy=timers.target\\n",
+        "[Unit]\nDescription=Check Remnaum updates every six hours\n"
+        "[Timer]\nOnBootSec=5min\nOnUnitInactiveSec=6h\nPersistent=true\nRandomizedDelaySec=10m\n"
+        "[Install]\nWantedBy=timers.target\n",
         encoding="utf-8",
     )
     os.chmod(unit, 0o644)
