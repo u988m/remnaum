@@ -52,6 +52,16 @@ class SubscriptionDetails(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class TermsAcceptance(Base):
+    __tablename__ = "terms_acceptances"
+    __table_args__ = (UniqueConstraint("user_id", "terms_version", name="uq_terms_acceptance_user_version"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    terms_version: Mapped[str] = mapped_column(String(32))
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Payment(Base):
     __tablename__ = "payments"
 
