@@ -11,8 +11,8 @@ import install as installer
 
 class InstallerTests(unittest.TestCase):
     def test_dns_hostname_validation(self):
-        self.assertTrue(installer.valid_domain("webhook.example.net"))
-        self.assertTrue(installer.valid_domain("vpn-shop.example.com"))
+        self.assertTrue(installer.valid_domain("webhook.myvpn.site"))
+        self.assertTrue(installer.valid_domain("vpn-shop.myvpn.site"))
         for value in ("localhost", "localhost:8080", "127.0.0.1", "bad/domain",
                       "evil\nkey", "-bad.example.com", "example.com:443", "webhook.example.com", "app.example.net"):
             with self.subTest(value=value):
@@ -50,8 +50,8 @@ class InstallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             with patch.object(installer, "ROOT", Path(temp)):
                 installer.generate_proxy_snippets({
-                    "PUBLIC_DOMAIN": "webhook.example.net",
-                    "WEBAPP_DOMAIN": "app.example.net",
+                    "PUBLIC_DOMAIN": "webhook.myvpn.site",
+                    "WEBAPP_DOMAIN": "app.myvpn.site",
                     "REMNAUM_LOCAL_PORT": "18080",
                     "REMNAUM_PROXY_NETWORK": "remnawave-network",
                 })
@@ -63,12 +63,12 @@ class InstallerTests(unittest.TestCase):
 
     def test_panel_mode_connects_only_to_existing_proxy_network(self):
         existing = {
-            "PUBLIC_DOMAIN": "hook.example.net",
-            "WEBAPP_DOMAIN": "app.example.net",
+            "PUBLIC_DOMAIN": "hook.myvpn.site",
+            "WEBAPP_DOMAIN": "app.myvpn.site",
             "TELEGRAM_BOT_USERNAME": "test_bot",
             "TELEGRAM_BOT_TOKEN": "1234567:ABC",
             "ADMIN_IDS": "123456789",
-            "REMNAWAVE_BASE_URL": "https://panel.example.net",
+            "REMNAWAVE_BASE_URL": "https://panel.myvpn.site",
             "REMNAWAVE_API_TOKEN": "remote-secret",
             "REMNAWAVE_ACTIVE_INTERNAL_SQUADS": "test-id",
             "POSTGRES_PASSWORD": "db-secret",
@@ -87,12 +87,12 @@ class InstallerTests(unittest.TestCase):
 
     def test_refuse_panel_domain_collision(self):
         existing = {
-            "PUBLIC_DOMAIN": "panel.example.net",
-            "WEBAPP_DOMAIN": "app.example.net",
+            "PUBLIC_DOMAIN": "panel.myvpn.site",
+            "WEBAPP_DOMAIN": "app.myvpn.site",
             "TELEGRAM_BOT_USERNAME": "test_bot",
             "TELEGRAM_BOT_TOKEN": "test",
             "ADMIN_IDS": "123",
-            "REMNAWAVE_BASE_URL": "https://panel.example.net",
+            "REMNAWAVE_BASE_URL": "https://panel.myvpn.site",
             "REMNAWAVE_API_TOKEN": "secret",
             "REMNAWAVE_ACTIVE_INTERNAL_SQUADS": "uuid",
         }
