@@ -645,8 +645,8 @@ async def admin_upload_welcome_photo(
             raise HTTPException(status_code=413, detail="Фото должно быть меньше 5 МБ")
     image = bytes(chunks)
     if not (
-        image.startswith(b"\\xff\\xd8\\xff")
-        or image.startswith(b"\\x89PNG\\r\\n\\x1a\\n")
+        image.startswith(b"\xff\xd8\xff")
+        or image.startswith(b"\x89PNG\r\n\x1a\n")
     ):
         raise HTTPException(status_code=422, detail="Файл не похож на изображение")
     if not bot:
