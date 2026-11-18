@@ -11,6 +11,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -210,6 +211,52 @@ def choose_mode(existing: dict[str, str], requested: str | None) -> str:
     return "panel" if selection == "1" else "standalone"
 
 
+def choose_action(existing: dict[str, str], requested: str | None) -> str:
+    if requested:
+        if requested == "update" and not existing:
+            raise ValueError("Сначала установите Remnaum.")
+        return requested
+    print("\n===== Remnaum =====")
+    print("  1 — Установить / настроить")
+    print("  2 — Обновить")
+    choice = prompt("Выберите действие (1/2)", default="1")
+    if choice not in ("1", "2"):
+        raise ValueError("Выберите 1 или 2")
+    if choice == "2" and not existing:
+        raise ValueError("Сначала установите Remnaum.")
+    return "install" if choice == "1" else "update"
+
+
+def wait_for_app_health(max_attempts: int = 35) -> bool:
+    check = [
+        "docker", "compose", "exec", "-T", "app", "python", "-c",
+        "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).status == 200",
+    ]
+    for _ in range(max_attempts):
+        if run(check, check=False, quiet=True).returncode == 0:
+            return True
+        time.sleep(2)
+    return False
+
+
+def perform_update(existing: dict[str, str]) -> int:
+    if not existing.get("COMPOSE_FILE"):
+        raise ValueError("Сначала выберите режим установки через пункт 1.")
+    if not docker_ready():
+        raise RuntimeError("Docker Compose недоступен.")
+    if not shutil.which("git"):
+        raise RuntimeError("Для обновления необходим git.")
+    print("\n[1/3] Резервная копия базы и обновление кода")
+    run(["bash", "update.sh"])
+    print("[2/3] Проверка контейнеров")
+    run(["docker", "compose", "ps"])
+    print("[3/3] Проверка приложения")
+    if not wait_for_app_health():
+        raise RuntimeError("API не отвечает. Проверьте docker compose logs --tail=100 app")
+    print("\nRemnaum обновлён. База и секреты сохранены.")
+    return 0
+
+
 def config_for_install(existing: dict[str, str], mode: str,
                        network_override: str | None, port: int) -> dict[str, str]:
     cfg = existing.copy()
@@ -300,7 +347,8 @@ def config_for_install(existing: dict[str, str], mode: str,
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Install Remnaum in a standalone or shared Panel deployment.")
+    parser = argparse.ArgumentParser(description="Мастер установки и обновления Remnaum.")
+    parser.add_argument("--action", choices=("install", "update"), help="Выбор без меню")
     parser.add_argument("--mode", choices=("panel", "standalone"),
                         help="Optional topology selection (otherwise guided interactive prompt)")
     parser.add_argument("--proxy-network",
@@ -313,6 +361,10 @@ def main() -> int:
         raise RuntimeError("Run with sudo: sudo sh install.sh")
     os.chdir(ROOT)
     existing = read_env()
+    action = choose_action(existing, args.action)
+    if action == "update":
+        return perform_update(existing)
+    print("\n[1/4] Способ установки")
     mode = choose_mode(existing, args.mode)
     if existing.get("DEPLOY_MODE") and existing["DEPLOY_MODE"] != mode:
         answer = prompt(f"Switch installation from {existing['DEPLOY_MODE']} to {mode}? Type YES")
@@ -320,6 +372,7 @@ def main() -> int:
             print("No changes were made")
             return 0
 
+    print("\n[2/4] Проверяем Docker и порты")
     if not docker_ready():
         if mode == "panel":
             raise RuntimeError("Docker Compose is missing. On a Panel host, install it manually without replacing existing Docker.")
@@ -334,6 +387,7 @@ def main() -> int:
     if mode == "panel" and existing.get("DEPLOY_MODE") != "panel" and not loopback_available(port):
         raise RuntimeError(f"127.0.0.1:{port} is busy; choose --local-port with a free port.")
 
+    print("\n[3/4] Настройки магазина")
     cfg = config_for_install(existing, mode, args.proxy_network, port)
     if not existing:
         base = ROOT / ".env.example"
@@ -357,9 +411,12 @@ def main() -> int:
     else:
         print("\nStandalone mode: Remnaum Caddy will own 80/443; Nginx stays private.")
 
+    print("\n[4/4] Сборка и запуск контейнеров")
     run(["docker", "compose", "config", "--quiet"])
-    run(["docker", "compose", "up", "-d", "--build", "--remove-orphans"])
-    print("\nRemnaum containers started. No demo users or payments were added.")
+    run(["docker", "compose", "up", "-d", "--build"])
+    if not wait_for_app_health():
+        raise RuntimeError("API не отвечает. Проверьте docker compose logs --tail=100 app")
+    print("\nRemnaum запущен. Тестовые данные не создавались.")
     print("Telegram webhook: " + cfg["TELEGRAM_WEBHOOK_URL"])
     print("Mini App: " + cfg["WEBAPP_URL"])
     print("Remnawave events: https://" + cfg["PUBLIC_DOMAIN"] + "/webhooks/remnawave")
