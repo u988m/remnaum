@@ -1,3 +1,5 @@
+from html import escape
+
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
@@ -95,6 +97,6 @@ async def subscription_handler(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "menu:support")
 async def support_handler(callback: CallbackQuery) -> None:
     await callback.answer()
-    support = settings.support_contact or "Контакт поддержки ещё не настроен."
+    support = escape(settings.support_contact) if settings.support_contact else "Контакт поддержки ещё не настроен."
     if callback.message:
         await callback.message.edit_text(f"🆘 <b>Поддержка</b>\n\n{support}", reply_markup=back_menu())
