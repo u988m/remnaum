@@ -1,16 +1,23 @@
 """Encrypted full-backup utilities: offline unit tests, no real Docker/Telegram."""
+import hashlib
+import hmac
 import io
 import os
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
+import tracemalloc
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import backup_manager as backup
+
+
+KEY = "example-recovery-key-longer-than-24"
 
 
 class BackupTests(unittest.TestCase):
@@ -54,6 +61,72 @@ class BackupTests(unittest.TestCase):
             target.write_bytes(changed)
             with self.assertRaisesRegex(ValueError, "повреждён"):
                 backup.unpack_encrypted(target, restored, key)
+
+    def test_v1_archive_from_legacy_writer(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            data = b"backup from before streaming support"
+            src = folder / "source"
+            src.write_bytes(data)
+            ciphertext = subprocess.run([
+                "openssl", "enc", "-aes-256-cbc", "-salt", "-pbkdf2",
+                "-iter", "280000", "-md", "sha256", "-pass", "stdin", "-in", str(src),
+            ], input=KEY.encode() + b"\n", check=True, capture_output=True).stdout
+            mac_key = hashlib.pbkdf2_hmac("sha256", KEY.encode(), b"remnaum-backup-hmac-v1", 280000)
+            archive = folder / "old.rmb"
+            archive.write_bytes(b"REMNAUM-BACKUP-V1\n" + hmac.digest(mac_key, ciphertext, "sha256") + ciphertext)
+            backup.unpack_encrypted(archive, src, KEY.encode())
+            self.assertEqual(src.read_bytes(), data)
+
+    def test_large_roundtrip_has_bounded_memory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            source, archive, restored = (folder / name for name in ("source", "backup.rmb", "restored"))
+            with source.open("wb") as stream:
+                for _ in range(24):
+                    stream.write(os.urandom(1024 * 1024))
+            tracemalloc.start()
+            try:
+                backup.pack_encrypted(source, archive, KEY.encode())
+                backup.unpack_encrypted(archive, restored, KEY.encode())
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+            self.assertLess(peak, 8 * 1024 * 1024)
+            with source.open("rb") as original, restored.open("rb") as recovered:
+                self.assertEqual(hashlib.file_digest(original, "sha256").digest(),
+                                 hashlib.file_digest(recovered, "sha256").digest())
+
+    def test_failed_archive_publication_preserves_existing_file_and_cleans_staging(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            source, archive = folder / "source", folder / "backup.rmb"
+            source.write_bytes(b"source")
+            archive.write_bytes(b"previous backup")
+            with patch.object(backup.os, "replace", side_effect=OSError("publication failure")):
+                with self.assertRaisesRegex(OSError, "publication failure"):
+                    backup.pack_encrypted(source, archive, KEY.encode())
+            self.assertEqual(archive.read_bytes(), b"previous backup")
+            self.assertEqual(set(folder.iterdir()), {source, archive})
+
+    def test_restore_rejects_incomplete_archive_before_touching_installation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            source, archive = folder / "test.tar.gz", folder / "backup.rmb"
+            with tarfile.open(source, "w:gz") as tar:
+                for name in ("metadata.json", "install/.env", "install/compose.yaml", "redis.rdb"):
+                    data = b'{"product":"remnaum","format":1}'
+                    member = tarfile.TarInfo(name)
+                    member.size = len(data)
+                    tar.addfile(member, io.BytesIO(data))
+            backup.pack_encrypted(source, archive, KEY.encode())
+            target = folder / "store"
+            with patch.object(backup, "DATA", folder / "data"), patch.object(backup.subprocess, "run",
+                            wraps=subprocess.run) as command:
+                with self.assertRaisesRegex(ValueError, "database.dump"):
+                    backup.restore_backup(archive, supplied_key=KEY, target_root=target)
+                self.assertFalse(any(call.args[0][0] == "docker" for call in command.call_args_list))
+            self.assertEqual(list(target.iterdir()), [])
 
     def test_new_key_is_not_included_in_archive(self):
         with tempfile.TemporaryDirectory() as temp:
