@@ -69,9 +69,16 @@ class PremiumMenuTests(unittest.TestCase):
         with patch("app.bot.handlers.settings.webapp_url", "https://miniapp.example.com/app"):
             ordinary = main_menu(is_admin=False)
             owner = main_menu(is_admin=True)
-        self.assertEqual([len(row) for row in ordinary.inline_keyboard], [2, 2, 2, 2, 1])
-        self.assertEqual([len(row) for row in owner.inline_keyboard], [2, 2, 2, 2, 1, 1])
-        self.assertFalse(any("управлен" in b.text.lower() for r in ordinary.inline_keyboard for b in r))
+        self.assertEqual([[button.text for button in row] for row in ordinary.inline_keyboard], [
+            ["🛒 Тарифы", "🔐 Подписка"],
+            ["📱 Устройства"],
+            ["🧾 Покупки", "👤 Профиль"],
+            ["🎁 Бонусы", "💬 Помощь"],
+            ["📖 Подключение"],
+            ["✨ Mini App"],
+        ])
+        self.assertEqual(owner.inline_keyboard[:-1], ordinary.inline_keyboard)
+        self.assertEqual(owner.inline_keyboard[-1][0].text, "⚙️ Админка")
         self.assertEqual(owner.inline_keyboard[-1][0].web_app.url, "https://miniapp.example.com/admin")
         callbacks = [b.callback_data for r in ordinary.inline_keyboard for b in r if b.callback_data]
         self.assertIn("menu:bonuses", callbacks)
@@ -84,6 +91,21 @@ class PremiumMenuTests(unittest.TestCase):
 
 
 class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_long_plan_title_keeps_price_and_a_full_width_button(self):
+        from app.bot.handlers import plans_handler
+
+        callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
+        plan = {"id": 4, "title": "Годовая подписка\nна все устройства и всю семью",
+                "price_rub": 499, "price_rub_minor": 49900}
+        with patch("app.bot.handlers.list_plans", return_value=[plan]), \
+             patch("app.bot.handlers.welcome_image_path", return_value=None):
+            await plans_handler(callback)
+        markup = callback.message.edit_text.await_args.kwargs["reply_markup"]
+        (button,) = markup.inline_keyboard[0]
+        self.assertNotIn("\n", button.text)
+        self.assertTrue(button.text.endswith("… · 499 ₽"))
+        self.assertEqual(button.callback_data, "plan:select:4")
+
     async def test_welcome_caption_fits_with_emoji(self):
         from html import unescape
         from app.bot.handlers import send_home_menu
@@ -198,6 +220,7 @@ class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Устройств добавлено: 2", review)
         self.assertIn("570.00 ₽", review)
         keyboard = message.edit_text.call_args.kwargs["reply_markup"]
+        self.assertEqual([button.text for button in keyboard.inline_keyboard[0]], ["➖ 1", "➕ 1"])
         self.assertIn("plan:confirm:4:2:" + plan_revision(plan), [
             button.callback_data for row in keyboard.inline_keyboard for button in row
         ])

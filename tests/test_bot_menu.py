@@ -115,7 +115,7 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
             await press(handlers.fixed_plan_checkout_handler, methods_page, f"plan:pay:platega:{order}")
             create_external.assert_awaited_once()
             self.assertEqual(set(messages), {101})
-            self.assertEqual([row[0].text for row in messages[101].reply_markup.inline_keyboard], ["Оплатить", "← Назад"])
+            self.assertEqual([row[0].text for row in messages[101].reply_markup.inline_keyboard], ["💳 Оплатить", "← Назад"])
 
             await press(handlers.fixed_plan_checkout_handler, messages[101], f"plan:confirm:{order}")
             await press(handlers.fixed_plan_checkout_handler, messages[101], f"plan:pay:stars:{order}")

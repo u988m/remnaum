@@ -51,24 +51,23 @@ def _admin_webapp_url() -> str:
 
 
 def main_menu(*, is_admin: bool = False) -> InlineKeyboardMarkup:
-    """Short, balanced two-column navigation instead of a wall of buttons."""
     rows = [
-        [InlineKeyboardButton(text="Тарифы", callback_data="menu:plans"),
-         InlineKeyboardButton(text="Подписка", callback_data="menu:subscription")],
-        [InlineKeyboardButton(text="Устройства", callback_data="menu:devices"),
-         InlineKeyboardButton(text="Покупки", callback_data="menu:purchases")],
-        [InlineKeyboardButton(text="Профиль", callback_data="menu:profile"),
-         InlineKeyboardButton(text="Бонусы", callback_data="menu:bonuses")],
-        [InlineKeyboardButton(text="Подключение", callback_data="menu:connect"),
-         InlineKeyboardButton(text="Поддержка", callback_data="menu:support")],
+        [InlineKeyboardButton(text="🛒 Тарифы", callback_data="menu:plans"),
+         InlineKeyboardButton(text="🔐 Подписка", callback_data="menu:subscription")],
+        [InlineKeyboardButton(text="📱 Устройства", callback_data="menu:devices")],
+        [InlineKeyboardButton(text="🧾 Покупки", callback_data="menu:purchases"),
+         InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile")],
+        [InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses"),
+         InlineKeyboardButton(text="💬 Помощь", callback_data="menu:support")],
+        [InlineKeyboardButton(text="📖 Подключение", callback_data="menu:connect")],
     ]
     if settings.webapp_url.startswith("https://"):
         rows.append([InlineKeyboardButton(
-            text="Mini App", web_app=WebAppInfo(url=settings.webapp_url),
+            text="✨ Mini App", web_app=WebAppInfo(url=settings.webapp_url),
         )])
     if is_admin and settings.webapp_url.startswith("https://"):
         rows.append([InlineKeyboardButton(
-            text="Панель управления", web_app=WebAppInfo(url=_admin_webapp_url()),
+            text="⚙️ Админка", web_app=WebAppInfo(url=_admin_webapp_url()),
         )])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -166,7 +165,7 @@ async def admin_command_handler(message: Message) -> None:
         await show_command_section(message, "Доступ к панели управления запрещён.", back_menu())
         return
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Открыть панель", web_app=WebAppInfo(url=_admin_webapp_url()))],
+        [InlineKeyboardButton(text="⚙️ Открыть админку", web_app=WebAppInfo(url=_admin_webapp_url()))],
         back_menu().inline_keyboard[0],
     ])
     await show_command_section(message, "<b>Панель управления</b>", keyboard)
@@ -177,8 +176,8 @@ async def help_handler(message: Message) -> None:
     await show_command_section(
         message, "Для подключения откройте инструкцию. Если нужна помощь, напишите в поддержку.",
         InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Подключение", callback_data="menu:connect"),
-             InlineKeyboardButton(text="Поддержка", callback_data="menu:support")],
+            [InlineKeyboardButton(text="📖 Подключение", callback_data="menu:connect")],
+            [InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support")],
             back_menu().inline_keyboard[0],
         ]),
     )
@@ -216,8 +215,12 @@ async def plans_handler(callback: CallbackQuery) -> None:
     plans = await list_plans()
     rows = []
     for plan in plans[:20]:
+        title = " ".join(plan["title"].split())
+        if len(title) > 20:
+            title = title[:19].rstrip() + "…"
+        price = f"{plan['price_rub']:g} ₽" if plan["price_rub_minor"] else f"{plan['price_stars']} ⭐"
         rows.append([InlineKeyboardButton(
-            text=f"{plan['title']} · {plan['price_rub']:g} ₽" if plan["price_rub_minor"] else f"{plan['title']} · {plan['price_stars']} ⭐",
+            text=f"{title} · {price}",
             callback_data=f"plan:select:{plan['id']}",
         )])
     rows.append([InlineKeyboardButton(text="← Меню", callback_data="menu:home")])
@@ -248,23 +251,22 @@ async def fixed_plan_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     controls = []
     if extra_devices:
-        controls.append(InlineKeyboardButton(text="− 1 устройство", callback_data=f"plan:select:{plan_id}:{extra_devices - 1}"))
+        controls.append(InlineKeyboardButton(text="➖ 1", callback_data=f"plan:select:{plan_id}:{extra_devices - 1}"))
     if extra_devices < max_extra_devices(plan):
-        controls.append(InlineKeyboardButton(text="+ 1 устройство", callback_data=f"plan:select:{plan_id}:{extra_devices + 1}"))
+        controls.append(InlineKeyboardButton(text="➕ 1", callback_data=f"plan:select:{plan_id}:{extra_devices + 1}"))
     price = f"{quote.amount_minor / 100:.2f} ₽" if quote.amount_minor else ""
     if quote.stars is not None:
         price = " / ".join(filter(None, (price, f"{quote.stars} ⭐")))
     key = f"{plan_id}:{extra_devices}:{plan_revision(plan)}"
     rows = [controls] if controls else []
     rows.extend([
-        [InlineKeyboardButton(text="Выбрать оплату", callback_data=f"plan:confirm:{key}")],
+        [InlineKeyboardButton(text="💳 Выбрать оплату", callback_data=f"plan:confirm:{key}")],
         [InlineKeyboardButton(text="← К тарифам", callback_data="menu:plans")],
     ])
     if callback.message:
         details = [_plan_summary(quote)]
-        if extra_devices:
-            details.append(f"Устройств добавлено: {extra_devices}")
         if quote.unit_minor is not None:
+            details.append(f"Устройств добавлено: {extra_devices}")
             addon_price = f"{quote.unit_minor / 100:.2f} ₽"
             if plan.extra_device_price_stars is not None:
                 addon_price += f" / {plan.extra_device_price_stars} ⭐"
@@ -274,7 +276,7 @@ async def fixed_plan_handler(callback: CallbackQuery) -> None:
 
 
 def _plan_summary(quote: PlanQuote) -> str:
-    return (f"<b>{escape(quote.name)}</b>\n{quote.duration_days} дн. · {format_traffic(quote.traffic_gb)}"
+    return (f"📦 <b>{escape(quote.name)}</b>\n{quote.duration_days} дн. · {format_traffic(quote.traffic_gb)}"
             f"\nУстройств: {quote.device_limit}")
 
 
@@ -300,8 +302,8 @@ async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
     rows = []
     if not accepted:
         rows.extend([
-            [InlineKeyboardButton(text="Прочитать условия продажи", url=terms)],
-            [InlineKeyboardButton(text="Принимаю условия", callback_data=f"plan:accept:{key}")],
+            [InlineKeyboardButton(text="📄 Условия продажи", url=terms)],
+            [InlineKeyboardButton(text="✅ Принимаю", callback_data=f"plan:accept:{key}")],
         ])
         text = "Перед оплатой примите условия продажи."
     elif action.startswith("pay:"):
@@ -315,12 +317,12 @@ async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
         methods, credentials = await get_store_payment_settings()
         configured = public_payment_settings(methods, credentials)["configured"]
         if quote.stars is not None and methods.get("telegram_stars") and configured.get("telegram_stars"):
-            rows.append([InlineKeyboardButton(text=f"Telegram Stars · {quote.stars} ⭐", callback_data=f"plan:pay:stars:{key}")])
+            rows.append([InlineKeyboardButton(text=f"⭐ Stars · {quote.stars}", callback_data=f"plan:pay:stars:{key}")])
         if quote.amount_minor > 0:
             for provider, title in PROVIDER_LABELS.items():
                 if methods.get(provider) and configured.get(provider):
                     rows.append([InlineKeyboardButton(
-                        text=f"{title} · {quote.amount_minor / 100:.2f} ₽", callback_data=f"plan:pay:{provider}:{key}",
+                        text=f"💳 {title} · {quote.amount_minor / 100:.2f} ₽", callback_data=f"plan:pay:{provider}:{key}",
                     )])
         text = "Выберите способ оплаты." if rows else "Для этого заказа нет доступных способов оплаты."
     rows.append([InlineKeyboardButton(text="← К заказу", callback_data=f"plan:select:{plan_id}:{extras}")])
@@ -364,7 +366,7 @@ async def send_external_invoice(message: Message, telegram_id: int, name: str, *
     await edit_menu_message(
         message, f"<b>Заказ №{payment.id}</b>\n{PROVIDER_LABELS[name]} · {payment.amount / 100:.2f} ₽",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Оплатить", url=link.url)], [back],
+            [InlineKeyboardButton(text="💳 Оплатить", url=link.url)], [back],
         ]),
     )
 
@@ -380,7 +382,7 @@ async def send_stars_invoice(message: Message, telegram_id: int, **order) -> Non
         await edit_menu_message(message, escape(str(exc)), reply_markup=reply_markup)
         return
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"Оплатить · {stars} ⭐", pay=True)], [back],
+        [InlineKeyboardButton(text="Оплатить ⭐", pay=True)], [back],
     ])
     try:
         profile = await get_store_profile()
@@ -426,7 +428,7 @@ async def stars_pre_checkout_handler(query: PreCheckoutQuery) -> None:
 
 async def show_payment_result(bot, chat_id: int, text: str) -> None:
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Подписка", callback_data="menu:subscription")],
+        [InlineKeyboardButton(text="🔐 Подписка", callback_data="menu:subscription")],
         back_menu().inline_keyboard[0],
     ])
     async with menu_session(bot, chat_id, wait=3) as menu:
