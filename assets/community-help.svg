@@ -1,1 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="176" height="40" viewBox="0 0 176 40" role="img" aria-label="Помощь"><rect width="176" height="40" rx="9" fill="#159B84"/><text x="88" y="25" font-family="Arial,DejaVu Sans,sans-serif" font-size="15" font-weight="600" fill="#fff" text-anchor="middle">Помощь</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="48" viewBox="0 0 120 48" role="img" aria-label="Помощь">
+<rect x="1" y="1" width="118" height="46" rx="13" fill="#121519" stroke="#3B4149" stroke-width="1.5"/>
+<rect x="8" y="8" width="32" height="32" rx="10" fill="#63E6BE" fill-opacity=".13"/>
+<g transform="translate(0 1)" fill="none" stroke="#63E6BE" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M13 7.5a3.4 3.4 0 0 1 6.3 1.7c0 2.3-2.9 2.7-2.9 4.6"/><circle cx="16.4" cy="17.4" r="0.9" fill="#63E6BE" stroke="none"/></g>
+<text x="46" y="29" fill="#F6F7F9" font-family="Arial,Helvetica,sans-serif" font-size="13" font-weight="700">Помощь</text>
+</svg>
