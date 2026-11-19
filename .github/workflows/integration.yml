@@ -17,6 +17,8 @@ jobs:
       - name: Prepare isolated topology
         run: |
           cp .env.example .env
+          # Replace the documented placeholder before starting production-mode containers.
+          sed -i 's|^APP_SECRET_KEY=.*|APP_SECRET_KEY=integration-test-only-secret-do-not-use-in-production-123456|' .env
           chmod 600 .env
           if [ "${{ matrix.mode }}" = panel ]; then
             sed -i 's|^DEPLOY_MODE=.*|DEPLOY_MODE=panel|' .env
