@@ -211,8 +211,8 @@ jobs:
           PY
       - name: Simulate reinstall over an existing PostgreSQL volume
         run: |
-          sed -i 's|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=fresh-reinstall-password-123|' .env
-          sed -i 's|^DATABASE_URL=.*|DATABASE_URL=postgresql+asyncpg://remnaum:fresh-reinstall-password-123@postgres:5432/remnaum|' .env
+          sudo sed -i 's|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=fresh-reinstall-password-123|' .env
+          sudo sed -i 's|^DATABASE_URL=.*|DATABASE_URL=postgresql+asyncpg://remnaum:fresh-reinstall-password-123@postgres:5432/remnaum|' .env
           # A removed source directory does not remove Docker volumes.
           # The recovery must require explicit consent and keep old records.
           printf 'да\n' | sudo env PYTHONPATH=scripts python3 -c '
