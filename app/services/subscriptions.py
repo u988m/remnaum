@@ -9,7 +9,7 @@ from app.services.squads import fetch_catalog, require_available
 from app.config import settings
 from app.db.models import Payment, Subscription, SubscriptionDetails, TrialClaim, User
 from app.db.session import SessionLocal
-from app.services.remnawave import RemnawaveClient
+from app.services.remnawave import RemnawaveClient, panel_client
 from app.services.referrals import pending_rewards_for_payment, grant_referral_reward
 from app.services.promos import pending_promo_redemptions
 from app.services.users import BlockedCustomer
@@ -151,8 +151,6 @@ async def provision_paid_payment(payment_id: int) -> bool:
         promo_credits = await pending_promo_redemptions(session, user.id)
         bonus_days = sum(reward.days for reward in pending_rewards) + sum(p.bonus_days for p in promo_credits)
         total_days = days + bonus_days
-        if not settings.remnawave_base_url or not settings.remnawave_api_token:
-            raise RuntimeError("Remnawave is not configured")
 
         subscription = await session.scalar(
             select(Subscription)
@@ -163,7 +161,9 @@ async def provision_paid_payment(payment_id: int) -> bool:
         )
         username = f"tg_{user.telegram_id}"
         traffic_bytes = traffic_gb * 1024 * 1024 * 1024
-        panel = RemnawaveClient()
+        panel = await panel_client(RemnawaveClient, session=session)
+        if not panel.base_url or not panel.token:
+            raise RuntimeError("Remnawave is not configured")
 
         panel_user = await resolve_panel_user(panel, user.telegram_id, subscription)
         if subscription is not None and not panel_user and not snapshot.get("allow_recreate"):

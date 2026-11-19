@@ -17,7 +17,7 @@ from app.db.models import (
 )
 from app.db.session import SessionLocal
 from app.services.notification_settings import NotificationPreferences, NotificationSettings, get_notification_settings
-from app.services.remnawave import RemnawaveClient
+from app.services.remnawave import RemnawaveClient, panel_client
 from app.services.subscriptions import _unwrap, panel_expiry
 
 log = logging.getLogger(__name__)
@@ -220,9 +220,9 @@ async def scan_subscription_notifications(bot: Bot, panel: RemnawaveClient) -> N
 
 
 async def run_subscription_notifications(bot: Bot) -> None:
-    panel = RemnawaveClient()
     while True:
         try:
+            panel = await panel_client(RemnawaveClient)
             await scan_subscription_notifications(bot, panel)
         except Exception:
             log.exception("Subscription notification scan failed")

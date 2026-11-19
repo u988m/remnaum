@@ -17,6 +17,7 @@ from app.services.squads import refresh_catalog
 from app.services.payment_recovery import run_payment_recovery_forever
 from app.services.subscription_notifications import run_subscription_notifications
 from app.services.legacy_settings import migrate_legacy_payment_settings
+from app.web.browser_auth import router as auth_router
 from app.web.routes import router as api_router
 from app.web.storefront import router as store_router
 
@@ -51,7 +52,7 @@ async def _run_telegram() -> None:
         try:
             await bot.delete_webhook(drop_pending_updates=False)
             await dispatcher.start_polling(
-                bot, handle_signals=False, close_bot_session=False, tasks_shutdown_timeout=5,
+                bot, allowed_updates=dispatcher.resolve_used_update_types(), handle_signals=False, close_bot_session=False, tasks_shutdown_timeout=5,
             )
             return
         except asyncio.CancelledError:
@@ -103,6 +104,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title=settings.app_name, version=__version__, lifespan=lifespan)
 app.include_router(api_router)
+app.include_router(auth_router)
 app.include_router(store_router)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "static"), name="static")
 

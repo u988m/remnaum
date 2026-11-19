@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.db.models import InternalSquadCatalog, SquadPolicy
 from app.db.session import SessionLocal
-from app.services.remnawave import RemnawaveClient
+from app.services.remnawave import RemnawaveClient, panel_client
 
 
 def parse_catalog(payload):
@@ -29,7 +29,7 @@ def parse_catalog(payload):
 
 
 async def fetch_catalog():
-    client = RemnawaveClient()
+    client = await panel_client(RemnawaveClient)
     items = {}
     params = {}
     while True:

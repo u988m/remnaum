@@ -6,7 +6,8 @@ const $=id=>document.getElementById(id);
 const orderDialog = $("page-order");
 const deviceEditor = $("device-editor");
 let awaitingBack = false;
-const rootPage = new URLSearchParams(location.search).get("section") === "account" ? "account" : "vpn";
+const requestedPage = new URLSearchParams(location.search).get("section");
+const rootPage = ["account", "support", "tickets"].includes(requestedPage) ? requestedPage : "vpn";
 const primaryPages = new Set(["vpn", "bonuses", "devices", "account"]);
 const orderScreens = new Map();
 const scrollPositions = new Map();
@@ -42,6 +43,7 @@ function renderScreen(next) {
     orderDialog.close();
   }
   if (next.page === "notifications") loadNotificationPreferences();
+  if (next.page === "tickets") loadTickets();
   if (!order && previous.page !== next.page) {
     window.scrollTo(0, scrollPositions.get(next.id) || 0);
     if (previous.origin !== next.page) {
@@ -106,9 +108,81 @@ async function api(path, body, method = body ? "POST" : "GET") {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await response.json();
-  if (!response.ok) throw Error(typeof data.detail === "string" ? data.detail : "Ошибка запроса");
+  if (!response.ok) {
+    const message = data.detail?.message || (typeof data.detail === "string" ? data.detail : "Ошибка запроса");
+    if (data.detail?.channel_url) {
+      if (orderDialog.open) orderDialog.close();
+      $("app").hidden = $("bottom-nav").hidden = true;
+      $("loading").hidden = false;
+      $("loading").textContent = message;
+      $("required-channel").href = data.detail.channel_url;
+      $("channel-options").hidden = false;
+    }
+    throw Object.assign(Error(message), {status: response.status});
+  }
   return data;
 }
+
+const loadTickets = ticketPanel($("user-tickets"), (path, data, method) =>
+  api("/api/v1/webapp/tickets" + path, data, method));
+$("check-channel").onclick = () => location.reload();
+
+const colorLabels = {
+  bg: "Фон", surface: "Карточки", "surface-raised": "Выделенные карточки",
+  input: "Поля ввода", border: "Границы", "border-strong": "Активные границы",
+  text: "Текст", muted: "Вторичный текст", subtle: "Приглушённый текст",
+  primary: "Кнопки", "on-primary": "Текст на кнопках", overlay: "Затемнение",
+  glow: "Свечение", grid: "Сетка", focus: "Фокус", success: "Успешные действия", danger: "Опасные действия",
+};
+const themeRoot = document.documentElement;
+const themeInputs = new Map();
+let themeColors = {};
+const themeDefaults = {overlay: "#090909", glow: "#ffffff", grid: "#ffffff"};
+for (const [key, title] of Object.entries(colorLabels)) {
+  const label = document.createElement("label");
+  const input = document.createElement("input");
+  const original = getComputedStyle(themeRoot).getPropertyValue("--color-" + key).trim();
+  themeDefaults[key] ??= original.length === 4 ? "#" + [...original.slice(1)].map(char => char.repeat(2)).join("") : original;
+  input.type = "color";
+  input.value = themeDefaults[key];
+  input.oninput = () => {
+    themeColors[key] = input.value;
+    applyTheme(themeColors);
+  };
+  themeInputs.set(key, input);
+  label.append(title, input);
+  $("theme-colors").append(label);
+}
+
+function applyTheme(colors) {
+  for (const key of themeInputs.keys()) {
+    const value = colors[key];
+    if (value) {
+      const opacity = {overlay: "eb", glow: "1f", grid: "0d"}[key] || "";
+      themeRoot.style.setProperty("--color-" + key, value + opacity);
+    } else themeRoot.style.removeProperty("--color-" + key);
+    themeInputs.get(key).value = value || themeDefaults[key];
+  }
+}
+
+async function saveTheme(colors, button) {
+  button.disabled = true;
+  try {
+    const saved = await api("/api/v1/webapp/theme", {colors}, "PUT");
+    themeColors = saved.colors;
+    applyTheme(themeColors);
+    $("theme-status").textContent = "Тема сохранена.";
+  } catch (error) {
+    $("theme-status").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+$("theme-form").onsubmit = event => {
+  event.preventDefault();
+  saveTheme({...themeColors}, event.submitter);
+};
+$("theme-reset").onclick = event => saveTheme({}, event.currentTarget);
 
 const notificationPreferencesForm = $("notification-preferences");
 const notificationPreferencesStatus = $("notification-preferences-status");
@@ -358,8 +432,8 @@ const subscriptionStatuses = {active: "Активна", disabled: "Отключ�
 function openCheckoutUrl(url){
   const address = new URL(url);
   if (address.protocol !== "https:") throw Error("Некорректный адрес провайдера");
-  if (address.hostname === "t.me" && tg?.openTelegramLink) tg.openTelegramLink(url);
-  else if (tg?.openLink) tg.openLink(url);
+  if (tg?.initData && address.hostname === "t.me" && tg?.openTelegramLink) tg.openTelegramLink(url);
+  else if (tg?.initData && tg?.openLink) tg.openLink(url);
   else window.open(url,"_blank","noopener,noreferrer");
 }
 let availablePlans = new Map();
@@ -397,6 +471,7 @@ async function loadOrderMethods(order) {
   try {
     const {methods, terms_url: termsUrl, presentation} = await api("/api/v1/payment-methods");
     order.methods = methods;
+    if (!tg?.initData) order.methods.telegram_stars = false;
     order.labels = presentation ? Object.fromEntries(presentation.map(item => [item.provider, item.label])) : providerLabels;
     order.termsUrl = termsUrl;
     const limit = availableExtraDevices(order);
@@ -491,7 +566,11 @@ function renderOrder(order) {
     ? `${plan.devices_included + order.minDevices - 1} → ${deviceLimit}` : String(deviceLimit);
   $("order-extra-row").hidden = !limit || Boolean(order.invoice);
   $("order-devices-label").textContent = order.upgrade ? "Новые устройства" : "Доп. устройства";
-  $("order-extra").value = newSlots ? "+" + countWith(newSlots, deviceWords) : "0";
+  const quantity = $("order-extra");
+  quantity.value = newSlots;
+  quantity.min = order.upgrade ? 1 : 0;
+  quantity.max = limit - (order.upgrade ? order.minDevices - 1 : 0);
+  quantity.disabled = !order.methods || order.busy || limit < order.minDevices;
   $("order-minus").disabled = !order.methods || order.busy || devices <= order.minDevices;
   $("order-plus").disabled = !order.methods || order.busy || devices >= limit;
   $("order-unit").hidden = !canPay || unit == null;
@@ -524,6 +603,17 @@ function renderOrder(order) {
   if (order.invoice?.url) $("order-open-invoice").href = order.invoice.url;
 }
 
+$("order-extra").onchange = event => {
+  const order = currentOrder();
+  if (!order || order.busy) return;
+  const value = event.target.valueAsNumber;
+  if (Number.isInteger(value)) {
+    const total = value + (order.upgrade ? order.minDevices - 1 : 0);
+    order.devices = Math.min(availableExtraDevices(order), Math.max(order.minDevices, total));
+    order.message = "";
+  }
+  renderOrder(order);
+};
 for (const [button, delta] of [["order-minus", -1], ["order-plus", 1]]) {
   $(button).onclick = () => {
     const order = currentOrder();
@@ -543,7 +633,7 @@ $("order-terms").onchange = event => {
 };
 $("order-retry-methods").onclick = () => loadOrderMethods(currentOrder());
 $("order-open-invoice").onclick = event => {
-  if (!tg?.openLink) return;
+  if (!tg?.initData || !tg?.openLink) return;
   event.preventDefault();
   openCheckoutUrl(currentOrder().invoice.url);
 };
@@ -585,7 +675,7 @@ $("order-payment").onsubmit = async event => {
       order.invoice = invoice;
       pendingPayment = invoice.payment_id;
       order.message = "Счёт №" + invoice.payment_id + " создан.";
-      if (order === currentOrder() && tg?.openLink) openCheckoutUrl(invoice.url);
+      if (order === currentOrder() && tg?.initData && tg?.openLink) openCheckoutUrl(invoice.url);
     }
   } catch (error) {
     order.message = error.message;
@@ -601,6 +691,7 @@ async function loadReadyPlans() {
       api("/api/v1/plans"), api("/api/v1/payment-methods").catch(() => null),
     ]);
     const methods = paymentInfo?.methods;
+    if (methods && !tg?.initData) methods.telegram_stars = false;
     const rublesFirst = paymentInfo?.presentation?.[0]?.provider !== "telegram_stars";
     const rublesAvailable = !methods || Object.keys(providerLabels).some(key => key !== "telegram_stars" && methods[key]);
     availablePlans = new Map(result.items.map(plan => [plan.id, plan]));
@@ -796,8 +887,17 @@ function renderSubscription(subscription) {
 
 async function start() {
   try {
-    if (!tg?.initData) throw Error("Откройте Mini App через кнопку в Telegram");
     const data = await api("/api/v1/webapp/bootstrap");
+    $("login-options").hidden = $("channel-options").hidden = true;
+    $("google-link").hidden = !data.google_link_available;
+    $("browser-logout").hidden = !data.browser_provider;
+    if (data.channel_required) {
+      const check = () => {
+        if (!document.hidden && !$("app").hidden) refreshSubscription().catch(() => {});
+      };
+      document.addEventListener("visibilitychange", check);
+      window.setInterval(check, 10000);
+    }
     renderProfile(data.profile, data.user);
     renderSubscription(data.subscription);
     $("admin-entry").hidden = !data.is_admin;
@@ -811,8 +911,15 @@ async function start() {
     history.scrollRestoration = "manual";
     navigationReady = true;
     renderScreen(restoredScreen || screen);
-    await loadReadyPlans();
+    await Promise.all([
+      loadReadyPlans(),
+      api("/api/v1/webapp/theme").then(data => {
+        themeColors = data.colors;
+        applyTheme(themeColors);
+      }).catch(() => {}),
+    ]);
   } catch (error) {
+    if (error.status === 401 && !tg?.initData) $("login-options").hidden = false;
     $("loading").hidden = false;
     $("loading").textContent = error.message;
   }

@@ -9,6 +9,8 @@ class BotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(main, "bot", AsyncMock()) as bot:
             await main._register_telegram_webhook()
         self.assertIn("pre_checkout_query", bot.set_webhook.call_args.kwargs["allowed_updates"])
+        self.assertIn("chat_member", bot.set_webhook.call_args.kwargs["allowed_updates"])
+        self.assertIn("my_chat_member", bot.set_webhook.call_args.kwargs["allowed_updates"])
         self.assertFalse(bot.set_webhook.call_args.kwargs["drop_pending_updates"])
 
     async def test_polling_clears_prior_webhook_without_dropping_updates(self):
@@ -19,5 +21,5 @@ class BotRuntimeTests(unittest.IsolatedAsyncioTestCase):
             await main._run_telegram()
         bot.delete_webhook.assert_awaited_once_with(drop_pending_updates=False)
         polling.assert_awaited_once_with(
-            bot, handle_signals=False, close_bot_session=False, tasks_shutdown_timeout=5,
+            bot, allowed_updates=main.dispatcher.resolve_used_update_types(), handle_signals=False, close_bot_session=False, tasks_shutdown_timeout=5,
         )

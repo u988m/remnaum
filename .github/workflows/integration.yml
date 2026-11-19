@@ -101,14 +101,14 @@ jobs:
           if [ "${{ matrix.mode }}" = panel-network ]; then
             docker compose exec -T app python -c "import socket; assert socket.gethostbyname('remnaum-api')"
           fi
-          test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT version_num FROM alembic_version;')" = "0007_subscription_notifications"
+          test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT version_num FROM alembic_version;')" = "0008_store_operations"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM users;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM payments;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM subscriptions;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM referral_rewards;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM remnawave_events;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM store_payment_settings;')" = "0"
-          for table in promo_codes promo_redemptions trial_settings trial_claims store_documents store_notification_settings user_notification_preferences subscription_notifications; do
+          for table in promo_codes promo_redemptions trial_settings trial_claims store_documents store_notification_settings user_notification_preferences subscription_notifications store_operations_settings google_identities support_tickets support_replies user_themes; do
             test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc "SELECT COUNT(*) FROM $table;")" = "0"
           done
           docker compose exec -T app python - <<'PY'
@@ -126,6 +126,8 @@ jobs:
               except urllib.error.HTTPError as exc:
                   return exc
           assert request('/store').status == 200
+          assert request('/').status == 200
+          assert request('/', host='webhook.example.com').status == 404
           assert request('/app').status == 200
           assert request('/admin').status == 200
           assert request('/api/v1/store-profile/welcome-image').status == 404
@@ -142,6 +144,9 @@ jobs:
           assert request('/admin/api/documents').status == 401
           assert request('/admin/api/documents/terms', 'PUT', payload='{"body":"test"}').status == 401
           assert request('/admin/api/notifications').status == 401
+          assert request('/admin/api/operations').status == 401
+          assert request('/api/v1/webapp/tickets').status == 401
+          assert request('/api/v1/webapp/theme').status == 401
           assert request('/api/v1/webapp/notifications').status == 401
           assert request('/admin/api/store-profile/welcome-image', 'PUT', payload='{"data_base64":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}').status == 401
           assert request('/api/v1/webapp/offers').status == 401

@@ -1,5 +1,5 @@
 from aiogram.types import User as TelegramUser
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.db.models import User
@@ -40,7 +40,14 @@ async def get_or_create_user(telegram_user: TelegramUser) -> bool:
         inserted_id = await session.scalar(statement)
         if inserted_id is None:
             await session.execute(
-                update(User).where(User.telegram_id == telegram_user.id).values(username=telegram_user.username)
+                update(User).where(User.telegram_id == telegram_user.id).values(username=telegram_user.username, bot_blocked_at=None)
             )
         await session.commit()
     return inserted_id is not None
+
+
+async def set_bot_blocked(telegram_id: int, blocked: bool) -> None:
+    async with SessionLocal.begin() as session:
+        await session.execute(update(User).where(User.telegram_id == telegram_id).values(
+            bot_blocked_at=func.now() if blocked else None,
+        ))

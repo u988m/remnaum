@@ -38,12 +38,12 @@ async def setup_bot() -> None:
                     )
         except Exception as exc:
             logging.getLogger(__name__).warning("Telegram command registration failed: %s", type(exc).__name__)
-        if settings.webapp_url.startswith("https://"):
+        if settings.webapp_root_url.startswith("https://"):
             try:
                 await bot.set_chat_menu_button(
                     menu_button=MenuButtonWebApp(
                         text="Mini App",
-                        web_app=WebAppInfo(url=settings.webapp_url),
+                        web_app=WebAppInfo(url=settings.webapp_root_url),
                     )
                 )
             except Exception as exc:

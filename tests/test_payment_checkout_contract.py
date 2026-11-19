@@ -152,7 +152,8 @@ class CheckoutContracts(unittest.IsolatedAsyncioTestCase):
         )
         methods = {"telegram_stars": True, "yookassa": True}
         credentials = {"yookassa": {"shop_id": "shop", "secret_key": "test-key"}}
-        with patch.object(handlers, "get_plan", return_value=plan), \
+        with patch.object(handlers, "get_operations", return_value={"extra_devices_max": 1000}), \
+             patch.object(handlers, "get_plan", return_value=plan), \
              patch.object(handlers, "get_terms_url", return_value=""), \
              patch.object(handlers, "has_accepted_current_terms") as accepted, \
              patch.object(handlers, "get_payment_presentation", return_value=[

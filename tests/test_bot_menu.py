@@ -82,6 +82,8 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
         device_key = "ab" * 16
         device = {"id": device_key, "name": "iPhone", "alias": "", "model": "iPhone",
                   "client": "Happ", "platform": "iOS", "os_version": "18"}
+        self.enterContext(patch.object(menu, "get_operations", return_value={"required_channel": ""}))
+        self.enterContext(patch.object(handlers, "get_operations", return_value={"extra_devices_max": 1000}))
         with (
             patch.object(menu, "redis", mock_redis),
             patch.object(handlers, "list_document_kinds", return_value=set()),

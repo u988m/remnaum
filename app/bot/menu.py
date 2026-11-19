@@ -11,7 +11,10 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from redis.asyncio import Redis
 from redis.exceptions import LockError
 
+from app.bot.membership import membership_required, send_subscription_prompt
 from app.config import settings
+from app.services.referrals import parse_referral_start
+from app.services.store_operations import get_operations
 from app.services.users import BLOCKED_MESSAGE, customer_is_blocked
 
 logger = logging.getLogger(__name__)
@@ -113,6 +116,16 @@ class MenuMiddleware(BaseMiddleware):
                         return None
                     if event.data not in state.callbacks:
                         await event.answer("Используйте кнопки текущего меню.")
+                        return None
+                if not is_callback or (event.data or "").partition(":")[0] != "channel":
+                    policy = await get_operations()
+                    if actor and await membership_required(state.bot, actor.id, policy):
+                        if is_callback:
+                            await event.answer()
+                        inviter = parse_referral_start(message.text) if not is_callback else None
+                        await send_subscription_prompt(state.bot, state.chat_id, policy, inviter=inviter)
+                        if not is_callback:
+                            await remove_command(message)
                         return None
                 return await handler(event, data)
         except LockError:
