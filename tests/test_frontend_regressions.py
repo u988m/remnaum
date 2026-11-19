@@ -22,17 +22,19 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         admin_js = (STATIC / "admin.js").read_text(encoding="utf-8")
         self.assertIn('loadReadyPlans()', mini_js)
         self.assertIn('loadAccountPanels()', mini_js)
-        self.assertEqual(mini.count('<button type="button" data-page='), 5)
-        for symbol in ("i-home", "i-shop", "i-shield", "i-gift", "i-user"):
+        self.assertEqual(mini.count('<button type="button" data-page='), 4)
+        for symbol in ("i-shop", "i-shield", "i-gift", "i-user"):
             self.assertIn('href="#' + symbol + '"', mini)
-        for page in ("devices", "guide"):
-            self.assertIn('class="quick-action" type="button" data-go-page="' + page + '"', mini)
+        for page in ("devices", "guide", "support"):
+            self.assertEqual(mini.count(f'data-go-page="{page}"'), 1)
+        self.assertIn('data-page="shop" aria-current="page"', mini)
         self.assertIn('id="admin-sidebar"', admin)
         self.assertIn('id="admin-menu-backdrop"', admin)
         self.assertIn('id="settings-accordion"', admin)
         self.assertIn('id="revenue-count"', admin)
         self.assertIn('id="stars-count"', admin)
         self.assertIn('id="dashboard-payments"', admin)
+        self.assertNotIn('class="toolbar dashboard-actions"', admin)
         self.assertIn('async function overview()', admin_js)
         self.assertIn('function setAdminMenu(open)', admin_js)
         self.assertIn('class="admin-icon-sprite"', admin)
@@ -52,8 +54,7 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('id="custom-plan"', mini)
         self.assertNotIn('id="buy"', mini)
         self.assertNotIn('function recalc()', mini_js)
-        self.assertIn('id="hero-action"', mini)
-        self.assertIn('id="hero-eyebrow"', mini)
+        self.assertNotIn('id="page-home"', mini)
         self.assertNotIn('async function adminApi(', mini_js)
         self.assertNotIn('id="referral-form"', mini)
         self.assertIn('async function adminApi(', admin_js)
@@ -68,7 +69,7 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         for panel in ('shop', 'vpn', 'bonuses', 'account'):
             self.assertIn(f'id="page-{panel}"', mini)
             self.assertIn(f'data-page="{panel}"', mini)
-        for page in ("home", "order", "devices", "purchases", "support", "guide"):
+        for page in ("order", "devices", "purchases", "support", "guide"):
             self.assertIn(f'id="page-{page}"', mini)
         for html in (mini, admin):
             self.assertIn('href="/static/theme.css"', html)
@@ -76,9 +77,7 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('maximum-scale=1,user-scalable=no', html)
         self.assertNotIn('id="hero-image"', mini)
         self.assertNotIn('profile?.welcome_image_url', mini_js)
-        self.assertIn('overflow:hidden; text-overflow:ellipsis;', (STATIC / "miniapp.css").read_text(encoding="utf-8"))
-        for icon in ("i-device", "i-book", "i-support"):
-            self.assertIn('id="' + icon + '"', mini)
+        self.assertIn('text-overflow: ellipsis;', (STATIC / "miniapp.css").read_text(encoding="utf-8"))
         self.assertIn('id="copy-referral"', mini)
 
     async def test_miniapp_javascript_has_no_missing_static_dom_ids(self):
@@ -104,6 +103,8 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
             store = (await store_page(Request(scope))).body.decode()
         self.assertIn('src="/static/store.js"', store)
         self.assertIn('id="login"', store)
+        self.assertIn('href="/static/theme.css"', store)
+        self.assertEqual(store.count('type="submit"'), 1)
         for name in ("miniapp", "admin", "store"):
             js = (STATIC / f"{name}.js").read_text(encoding="utf-8")
             check = subprocess.run(["node", "--check"], input=js, text=True, capture_output=True)

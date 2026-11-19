@@ -83,6 +83,7 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
             patch.object(handlers, "get_or_create_user", return_value=False),
             patch.object(handlers, "get_store_profile", return_value=profile),
             patch.object(handlers, "get_user_subscription", return_value=None),
+            patch.object(handlers, "retry_paid_payments_for_user"),
             patch.object(handlers, "welcome_image_path", return_value=None),
             patch.object(handlers, "list_plans", return_value=[
                 {"id": 4, "title": "Тариф", "price_rub": 199, "price_rub_minor": 19900},
@@ -106,6 +107,13 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
 
             await press(handlers.fixed_plan_handler, first_menu, "plan:select:4")
             self.assertEqual(set(messages), {101})
+            await press(handlers.subscription_handler, messages[101], "menu:subscription")
+            buttons = messages[101].reply_markup.inline_keyboard
+            self.assertEqual([row[0].callback_data for row in buttons], ["menu:devices", "menu:connect", "menu:home"])
+            await press(handlers.devices_handler, messages[101], "menu:devices")
+            self.assertEqual(messages[101].reply_markup.inline_keyboard[0][0].callback_data, "menu:subscription")
+            await press(handlers.subscription_handler, messages[101], "menu:subscription")
+            await press(handlers.home_handler, messages[101], "menu:home")
             await press(handlers.plans_handler, messages[101], "menu:plans")
             await press(handlers.fixed_plan_handler, messages[101], "plan:select:4")
             self.assertIn("Тариф", messages[101].text)

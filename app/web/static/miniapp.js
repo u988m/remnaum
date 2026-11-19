@@ -1,7 +1,6 @@
 const tg = window.Telegram?.WebApp;
 tg?.ready?.();
 tg?.expand?.();
-let data=null;
 const $=id=>document.getElementById(id);
 function switchPage(page){
   document.querySelectorAll("[data-page-panel]").forEach(panel=>{
@@ -25,10 +24,11 @@ $("copy-referral").onclick=async()=>{
   try{
     if(!navigator.clipboard?.writeText)throw Error("clipboard unavailable");
     await navigator.clipboard.writeText(link);
-    $("copy-referral").textContent="✓ Ссылка скопирована";
+    $("referral-copy-status").textContent="Ссылка скопирована.";
     tg?.HapticFeedback?.notificationOccurred("success");
   }catch{
-    $("copy-referral").textContent="Откройте ссылку выше для копирования";
+    $("referral-copy-status").textContent="Нажмите и удерживайте ссылку для копирования.";
+    $("account-referral-link").hidden = false;
   }
 };
 
@@ -105,7 +105,6 @@ async function loadAccountPanels(){
     if(d.link){
       $("account-referral-link").href=d.link;
       $("account-referral-link").textContent=d.link;
-      $("account-referral-link").hidden = false;
       $("copy-referral").hidden=false;
       $("share-referral").href="https://t.me/share/url?url="+encodeURIComponent(d.link)+"&text="+encodeURIComponent("Приглашаю тебя в мой VPN-магазин!");
       $("share-referral").hidden=false;
@@ -264,26 +263,28 @@ async function loadReadyPlans() {
     const list = $("plans-list");
     list.replaceChildren();
     for (const plan of result.items) {
-      const item = document.createElement("article");
+      const item = document.createElement("button");
+      item.type = "button";
       item.className = "panel plan-card";
       item.dataset.featured = plan.is_featured;
-      const head = document.createElement("div");
+      const head = document.createElement("span");
       head.className = "section-title";
-      const title = document.createElement("h2");
+      const title = document.createElement("strong");
+      title.className = "plan-title";
       title.textContent = plan.name;
       head.append(title);
-      if (plan.badge || plan.is_featured) {
+      if (plan.badge) {
         const badge = document.createElement("span");
         badge.className = "status-pill";
-        badge.textContent = plan.badge || "Популярный";
+        badge.textContent = plan.badge;
         head.append(badge);
       }
-      const specs = document.createElement("p");
+      const specs = document.createElement("span");
       specs.className = "plan-spec";
       specs.textContent = `${plan.days} дней · ${trafficLabel(plan.traffic_gb)} · устройств: ${plan.devices_included}`;
       item.append(head, specs);
       if (plan.description) {
-        const description = document.createElement("p");
+        const description = document.createElement("span");
         description.className = "muted plan-description";
         description.textContent = plan.description;
         item.append(description);
@@ -291,12 +292,15 @@ async function loadReadyPlans() {
       const price = document.createElement("strong");
       price.className = "plan-price";
       price.textContent = plan.price_rub_minor > 0 ? money(plan.price_rub_minor) : plan.price_stars + " ⭐";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = (plan.is_featured ? "primary-btn" : "secondary-btn") + " full";
-      button.textContent = "Выбрать";
-      button.onclick = () => { if (!orderBusy) showOrder(plan); };
-      item.append(price, button);
+      const total = document.createElement("span");
+      total.className = "plan-total";
+      const arrow = document.createElement("span");
+      arrow.textContent = "→";
+      arrow.setAttribute("aria-hidden", "true");
+      total.append(price, arrow);
+      item.append(total);
+      item.setAttribute("aria-label", `${plan.name}, ${price.textContent}. Открыть заказ`);
+      item.onclick = () => { if (!orderBusy) showOrder(plan); };
       list.append(item);
     }
     $("plans-status").hidden = Boolean(result.items.length);
@@ -310,8 +314,11 @@ function renderProfile(profile, user) {
   const name = profile?.name || "Remnaum";
   $("store-name").textContent = name;
   $("store-mark").textContent = name.trim().charAt(0).toUpperCase() || "R";
-  $("store-tagline").textContent = profile?.tagline || "Ваш VPN — ваши правила";
-  $("welcome").textContent = profile?.description || "Выберите подписку и подключите свои устройства.";
+  const description = profile?.description?.trim() || profile?.tagline?.trim();
+  if (description) {
+    $("store-description").textContent = description;
+    $("store-description").hidden = false;
+  }
   for (const [id, url] of [["store-logo", profile?.logo_image_url]]) {
     if (url) {
       $(id).src = url;
@@ -328,6 +335,7 @@ function renderProfile(profile, user) {
       if (url.protocol === "https:" && !url.username && !url.password) {
         $("support-link").href = url.href;
         $("support-link").hidden = false;
+        $("support-text").hidden = true;
       }
     } catch { /* A plain-text support contact is valid. */ }
   }
@@ -337,17 +345,10 @@ function renderProfile(profile, user) {
 }
 
 function renderSubscription(subscription) {
-  if (!subscription) {
-    $("hero-eyebrow").textContent = "VPN · ВАШ ПЕРВЫЙ ТАРИФ";
-    $("home-subscription-status").textContent = "Нет активного доступа";
-    return;
-  }
-  $("hero-eyebrow").textContent = subscription.status === "active" ? "VPN · ВАШ ДОСТУП АКТИВЕН" : "VPN · ВАЖНО ПРОДЛИТЬ";
-  if (subscription.status === "active") $("hero-action").firstChild.textContent = "Продлить подписку ";
+  if (!subscription) return;
   $("no-subscription").hidden = true;
   $("subscription").hidden = false;
   const status = subscriptionStatuses[subscription.status] || subscription.status;
-  $("home-subscription-status").textContent = status;
   $("sub-status").dataset.status = subscription.status;
   $("sub-status").textContent = status;
   $("sub-expiry").textContent = subscription.expires_at ? new Date(subscription.expires_at).toLocaleDateString("ru-RU") : "—";
@@ -363,7 +364,7 @@ function renderSubscription(subscription) {
 async function start() {
   try {
     if (!tg?.initData) throw Error("Откройте Mini App через кнопку в Telegram");
-    data = await api("/api/v1/webapp/bootstrap");
+    const data = await api("/api/v1/webapp/bootstrap");
     renderProfile(data.profile, data.user);
     renderSubscription(data.subscription);
     $("admin-entry").hidden = !data.is_admin;

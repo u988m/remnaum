@@ -146,8 +146,10 @@ async def payment_return(failed: bool = False):
     message = ("Вы можете вернуться к заказу и выбрать способ оплаты." if failed
                else "Статус заказа обновится после подтверждения оплаты.")
     return HTMLResponse(
-        "<!doctype html><html lang='ru'><meta charset='utf-8'><title>Remnaum</title>"
-        f"<body><h2>{heading}</h2><p>{message}</p></body></html>"
+        "<!doctype html><html lang='ru' data-theme='monochrome'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'><title>Remnaum</title>"
+        "<link rel='stylesheet' href='/static/theme.css'><link rel='stylesheet' href='/static/store.css'></head>"
+        f"<body><main><section class='store-panel'><h2>{heading}</h2><p>{message}</p></section></main></body></html>"
     )
 
 
@@ -168,18 +170,18 @@ async def yoomoney_payment_form(payment_id: int):
     label = escape(f"remnaum-{payment_id}", quote=True)
     return_url = escape(f"{settings.public_base_url.rstrip('/')}/payments/return", quote=True)
     html = f"""<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Оплата через ЮMoney</title><link rel="stylesheet" href="/static/store.css"></head>
-<body><main><section class="card">
+<html lang="ru" data-theme="monochrome"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Оплата через ЮMoney</title><link rel="stylesheet" href="/static/theme.css"><link rel="stylesheet" href="/static/store.css"></head>
+<body><main><section class="store-panel">
 <h2>Оплата через ЮMoney</h2><p class="price">{amount} ₽</p>
-<form method="post" action="https://yoomoney.ru/quickpay/confirm">
+<form class="store-pay-methods" method="post" action="https://yoomoney.ru/quickpay/confirm">
 <input type="hidden" name="receiver" value="{receiver}">
 <input type="hidden" name="label" value="{label}">
 <input type="hidden" name="quickpay-form" value="button">
 <input type="hidden" name="sum" value="{amount}">
 <input type="hidden" name="successURL" value="{return_url}">
-<button type="submit" name="paymentType" value="PC">Кошелёк ЮMoney</button>
-<button type="submit" name="paymentType" value="AC">Банковская карта</button>
+<button class="secondary-btn" type="submit" name="paymentType" value="PC">Кошелёк ЮMoney</button>
+<button class="secondary-btn" type="submit" name="paymentType" value="AC">Банковская карта</button>
 </form></section></main></body></html>"""
     return HTMLResponse(html)
 

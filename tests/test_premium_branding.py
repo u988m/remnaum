@@ -71,17 +71,17 @@ class PremiumMenuTests(unittest.TestCase):
             owner = main_menu(is_admin=True)
         self.assertEqual([[button.text for button in row] for row in ordinary.inline_keyboard], [
             ["🛒 Тарифы", "🔐 Подписка"],
-            ["📱 Устройства"],
-            ["🧾 Покупки", "👤 Профиль"],
-            ["🎁 Бонусы", "💬 Помощь"],
-            ["📖 Подключение"],
-            ["✨ Mini App"],
+            ["🧾 Покупки", "🎁 Бонусы"],
+            ["👤 Профиль", "💬 Помощь"],
         ])
         self.assertEqual(owner.inline_keyboard[:-1], ordinary.inline_keyboard)
         self.assertEqual(owner.inline_keyboard[-1][0].text, "⚙️ Админка")
         self.assertEqual(owner.inline_keyboard[-1][0].web_app.url, "https://miniapp.example.com/admin")
         callbacks = [b.callback_data for r in ordinary.inline_keyboard for b in r if b.callback_data]
-        self.assertIn("menu:bonuses", callbacks)
+        self.assertCountEqual(callbacks, [
+            "menu:plans", "menu:subscription", "menu:purchases",
+            "menu:bonuses", "menu:profile", "menu:support",
+        ])
         self.assertEqual(len(callbacks), len(set(callbacks)))
 
     def test_bot_identity_prefers_confirmed_getme(self):

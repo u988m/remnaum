@@ -54,17 +54,11 @@ def main_menu(*, is_admin: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="🛒 Тарифы", callback_data="menu:plans"),
          InlineKeyboardButton(text="🔐 Подписка", callback_data="menu:subscription")],
-        [InlineKeyboardButton(text="📱 Устройства", callback_data="menu:devices")],
         [InlineKeyboardButton(text="🧾 Покупки", callback_data="menu:purchases"),
-         InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile")],
-        [InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses"),
+         InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses")],
+        [InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile"),
          InlineKeyboardButton(text="💬 Помощь", callback_data="menu:support")],
-        [InlineKeyboardButton(text="📖 Подключение", callback_data="menu:connect")],
     ]
-    if settings.webapp_url.startswith("https://"):
-        rows.append([InlineKeyboardButton(
-            text="✨ Mini App", web_app=WebAppInfo(url=settings.webapp_url),
-        )])
     if is_admin and settings.webapp_url.startswith("https://"):
         rows.append([InlineKeyboardButton(
             text="⚙️ Админка", web_app=WebAppInfo(url=_admin_webapp_url()),
@@ -173,14 +167,8 @@ async def admin_command_handler(message: Message) -> None:
 
 @router.message(Command("help"))
 async def help_handler(message: Message) -> None:
-    await show_command_section(
-        message, "Для подключения откройте инструкцию. Если нужна помощь, напишите в поддержку.",
-        InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📖 Подключение", callback_data="menu:connect")],
-            [InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support")],
-            back_menu().inline_keyboard[0],
-        ]),
-    )
+    text, keyboard = await support_menu()
+    await show_command_section(message, text, keyboard)
 
 
 @router.callback_query(F.data == "menu:home")
@@ -592,10 +580,15 @@ async def subscription_handler(callback: CallbackQuery) -> None:
     except Exception:
         pass
     subscription = await get_user_subscription(callback.from_user.id)
+    rows = [
+        [InlineKeyboardButton(text="📱 Устройства", callback_data="menu:devices")],
+        [InlineKeyboardButton(text="📖 Инструкция", callback_data="menu:connect")],
+        back_menu().inline_keyboard[0],
+    ]
     if subscription is None:
         await edit_menu_message(callback.message, 
             "🔐 <b>Моя подписка</b>\n\nАктивная VPN-подписка пока не найдена.",
-            reply_markup=back_menu(),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
         return
 
@@ -609,13 +602,9 @@ async def subscription_handler(callback: CallbackQuery) -> None:
         f"Устройства: <b>{subscription['device_limit'] or '—'}</b>"
     )
     url = subscription.get("subscription_url")
-    keyboard = back_menu()
     if isinstance(url, str) and url.startswith("https://"):
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔗 Получить ссылку подключения", url=url)],
-            [InlineKeyboardButton(text="← Меню", callback_data="menu:home")],
-        ])
-    await edit_menu_message(callback.message, details, reply_markup=keyboard)
+        rows.insert(0, [InlineKeyboardButton(text="🔗 Подключить VPN", url=url)])
+    await edit_menu_message(callback.message, details, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
 @router.callback_query(F.data == "menu:connect")
@@ -623,12 +612,6 @@ async def connection_help_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     if not callback.message:
         return
-    subscription = await get_user_subscription(callback.from_user.id)
-    link = subscription.get("subscription_url") if subscription else None
-    rows = []
-    if isinstance(link, str) and link.startswith("https://"):
-        rows.append([InlineKeyboardButton(text="🔗 Моя ссылка подключения", url=link)])
-    rows.append([InlineKeyboardButton(text="← Меню", callback_data="menu:home")])
     await edit_menu_message(callback.message, 
         "📖 <b>Как подключить VPN</b>\n\n"
         "1. Установите приложение-клиент, совместимое с подпиской вашей панели Remnawave.\n"
@@ -636,14 +619,11 @@ async def connection_help_handler(callback: CallbackQuery) -> None:
         "3. Импортируйте ссылку в клиент и обновите список серверов.\n"
         "4. Выберите сервер и включите соединение.\n\n"
         "Если профиль не открывается, напишите в поддержку магазина.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        reply_markup=back_menu("menu:subscription"),
     )
 
 
-@router.callback_query(F.data == "menu:support")
-async def support_handler(callback: CallbackQuery) -> None:
-    await callback.answer()
-    from app.services.store_profile import get_store_profile
+async def support_menu() -> tuple[str, InlineKeyboardMarkup]:
     profile = await get_store_profile()
     contact = str(profile.get("support_contact") or "").strip()
     support = escape(contact) if contact else "Связь с поддержкой пока не настроена."
@@ -661,11 +641,18 @@ async def support_handler(callback: CallbackQuery) -> None:
     if button_url:
         rows.append([InlineKeyboardButton(text="💬 Написать в поддержку", url=button_url)])
     rows.append([InlineKeyboardButton(text="← Меню", callback_data="menu:home")])
+    text = "💬 <b>Поддержка</b>"
+    if not button_url:
+        text += f"\n\n{support}"
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data == "menu:support")
+async def support_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
     if callback.message:
-        await edit_menu_message(callback.message, 
-            f"💬 <b>Помощь и поддержка</b>\n\n{support}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
-        )
+        text, keyboard = await support_menu()
+        await edit_menu_message(callback.message, text, reply_markup=keyboard)
 
 
 @router.callback_query(F.data == "menu:devices")
@@ -702,7 +689,7 @@ async def devices_handler(callback: CallbackQuery) -> None:
             lines.append("Подключите VPN, чтобы увидеть зарегистрированные устройства.")
         message = chr(10).join(lines)
     if callback.message:
-        await edit_menu_message(callback.message, message.replace(chr(92) + "n", chr(10)), reply_markup=back_menu())
+        await edit_menu_message(callback.message, message.replace(chr(92) + "n", chr(10)), reply_markup=back_menu("menu:subscription"))
 
 
 @router.callback_query(F.data == "menu:purchases")
