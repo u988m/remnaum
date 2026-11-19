@@ -405,7 +405,7 @@ def _read_backup_manifest(archive: tarfile.TarFile, paths: dict) -> dict:
         member = paths.get(Path(name))
         if member is None:
             raise ValueError(f"В архиве отсутствует {name}")
-        if not member.isfile() or (name != "install/.env" and not member.size):
+        if not member.isfile() or not member.size:
             raise ValueError(f"Некорректный компонент архива: {name}")
     member = paths.get(Path("metadata.json"))
     if member is None:

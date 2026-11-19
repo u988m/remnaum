@@ -128,6 +128,32 @@ class BackupTests(unittest.TestCase):
                 self.assertFalse(any(call.args[0][0] == "docker" for call in command.call_args_list))
             self.assertFalse(target.exists())
 
+    def test_reject_empty_configuration_and_invalid_manifest(self):
+        components = {
+            "metadata.json": b'{"product":"remnaum","format":1}',
+            "install/.env": b"COMPOSE_FILE=compose.yaml",
+            "install/compose.yaml": b"services: {}",
+            "database.dump": b"PGDMP",
+            "redis.rdb": b"REDIS",
+        }
+        cases = [
+            ("install/.env", b"", "Некорректный компонент"),
+            ("metadata.json", b'{"product":"remnaum","format":true}', "не принадлежит Remnaum"),
+        ]
+        for name, content, message in cases:
+            with self.subTest(component=name):
+                stream = io.BytesIO()
+                with tarfile.open(fileobj=stream, mode="w:gz") as tar:
+                    for path, data in (components | {name: content}).items():
+                        member = tarfile.TarInfo(path)
+                        member.size = len(data)
+                        tar.addfile(member, io.BytesIO(data))
+                stream.seek(0)
+                with tarfile.open(fileobj=stream, mode="r:gz", tarinfo=backup.RestoreTarInfo) as tar:
+                    paths, _ = backup._scan_backup(tar)
+                    with self.assertRaisesRegex(ValueError, message):
+                        backup._read_backup_manifest(tar, paths)
+
     def test_new_key_is_not_included_in_archive(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
