@@ -69,11 +69,13 @@ sudo remnaum
 
 ## 💬 Связь с нами
 
-<p align="center">
-  <a href="https://t.me/remnaum/6"><img src="assets/community-help.svg" alt="Помощь" width="176"></a>
-  <a href="https://t.me/remnaum/3"><img src="assets/community-bugs.svg" alt="Сообщить об ошибке" width="176"></a>
-  <a href="https://t.me/remnaum/5"><img src="assets/community-ideas.svg" alt="Предложить идею" width="176"></a>
-</p>
+<table align="center">
+  <tr>
+    <td align="center"><a href="https://t.me/remnaum/6"><strong>❓ Помощь</strong></a></td>
+    <td align="center"><a href="https://t.me/remnaum/3"><strong>🐛 Ошибки</strong></a></td>
+    <td align="center"><a href="https://t.me/remnaum/5"><strong>💡 Идеи</strong></a></td>
+  </tr>
+</table>
 
 <div align="center">
 
