@@ -15,7 +15,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.error import HTTPError
+from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 import terminal_ui as ui
 import backup_manager as backups
@@ -29,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ENV_PATH = ROOT / ".env"
 DOMAIN_RE = re.compile(r"(?=.{4,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}")
 NETWORK_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
+BOT_TOKEN_RE = re.compile(r"[0-9]{5,20}:[A-Za-z0-9_-]{20,}")
 
 
 def identify_telegram_bot(token: str) -> tuple[str, str] | None:
@@ -36,7 +38,7 @@ def identify_telegram_bot(token: str) -> tuple[str, str] | None:
 
     Token stays in memory; a failed request is never printed or logged.
     """
-    if not re.fullmatch(r"[0-9]{5,20}:[A-Za-z0-9_-]{20,}", token):
+    if not BOT_TOKEN_RE.fullmatch(token):
         return None
     try:
         request = Request(
@@ -51,6 +53,10 @@ def identify_telegram_bot(token: str) -> tuple[str, str] | None:
         if not isinstance(username, str) or not re.fullmatch(r"[A-Za-z0-9_]{5,32}", username):
             return None
         return username, str(name or username)[:80]
+    except HTTPError as exc:
+        if exc.code in (401, 404):
+            raise ValueError("Telegram отклонил токен. Получите действующий токен в BotFather.") from None
+        return None
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
@@ -97,18 +103,7 @@ def write_env(changes: dict[str, str], path: Path = ENV_PATH) -> None:
     for key, value in changes.items():
         if key not in emitted:
             output.append(f"{key}={clean(value)}")
-    temporary = path.with_name(".env.tmp")
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write("\n".join(output) + "\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-        os.chmod(path, 0o600)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
+    backups._secure_write(path, ("\n".join(output) + "\n").encode())
 
 
 def prompt(label: str, *, default: str = "", hidden: bool = False, required: bool = True) -> str:
@@ -551,33 +546,100 @@ def choose_mode(existing: dict[str, str], requested: str | None) -> str:
 
 def choose_action(existing: dict[str, str], requested: str | None) -> str:
     if requested:
-        if requested == "update" and not existing:
+        if requested in ("update", "password") and not existing:
             raise ValueError("Сначала установите Remnaum.")
         return requested
     ui.header()
-    ui.menu("Выберите действие", [
+    options = [
         ("1", "Установить / настроить"),
         ("2", "Обновить до новой версии"),
         ("3", "Резервные копии и восстановление"),
-    ])
-    choice = prompt("Ваш выбор (1/2/3)", default="1")
-    if choice not in ("1", "2", "3"):
-        raise ValueError("Выберите 1, 2 или 3")
+    ]
+    actions = {"1": "install", "2": "update", "3": "backup"}
+    if existing:
+        options.append(("4", "Сменить пароль PostgreSQL"))
+        actions["4"] = "password"
+    ui.menu("Выберите действие", options)
+    choice = prompt("Ваш выбор", default="1")
+    if choice not in actions:
+        raise ValueError("Выберите действие из меню")
     if choice == "2" and not existing:
         raise ValueError("Сначала установите Remnaum.")
-    return {"1": "install", "2": "update", "3": "backup"}[choice]
+    return actions[choice]
 
 
 def wait_for_app_health(max_attempts: int = 35) -> bool:
     check = [
         "docker", "compose", "exec", "-T", "app", "python", "-c",
-        "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).status == 200",
+        "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=4).status == 200",
     ]
     for _ in range(max_attempts):
         if run(check, check=False, quiet=True).returncode == 0:
             return True
         time.sleep(2)
     return False
+
+
+def validate_postgres_password(password: str) -> None:
+    if not re.fullmatch(r"[A-Za-z0-9._~-]{12,128}", password):
+        raise ValueError("Пароль PostgreSQL: 12–128 символов, латиница, цифры и . _ ~ -")
+
+
+def local_postgres_url(current: str, password: str) -> str:
+    url = urlsplit(current)
+    if (url.scheme != "postgresql+asyncpg" or url.username != "remnaum"
+            or url.hostname != "postgres" or url.port not in (None, 5432)
+            or url.path != "/remnaum" or url.query or url.fragment):
+        raise ValueError("Смена пароля поддерживает штатную базу Remnaum в Docker Compose")
+    address = url.netloc.rsplit("@", 1)[-1]
+    return urlunsplit(url._replace(netloc=f"remnaum:{password}@{address}"))
+
+
+def rotate_postgres_password(password: str, *, path: Path = ENV_PATH) -> None:
+    validate_postgres_password(password)
+    # Serialize with backup and restore so an archive cannot capture the
+    # configuration midway through a password change.
+    with backups._lock(".deploy.lock"), backups._lock():
+        existing = read_env(path)
+        if not existing.get("COMPOSE_FILE"):
+            raise ValueError("Сначала настройте Remnaum через пункт 1")
+        database_url = local_postgres_url(existing.get("DATABASE_URL", ""), password)
+        original_env = path.read_bytes()
+        backups.prepare_branding_directory(ROOT)
+        run(["docker", "compose", "start", "postgres"])
+        backups.wait_for_postgres(ROOT)
+        # Save the actual verifier, even if the previous .env password was wrong.
+        verifier = backups.postgres_admin("SELECT COALESCE(rolpassword, '') FROM pg_authid WHERE rolname = 'remnaum';\n")
+        old_password = "'" + verifier.replace("'", "''") + "'" if verifier else "NULL"
+        recreate_app = ["docker", "compose", "up", "-d", "--no-deps", "--force-recreate", "app"]
+        replacing_app = False
+        try:
+            write_env({"POSTGRES_PASSWORD": password, "DATABASE_URL": database_url}, path)
+            backups.set_postgres_password(password)
+            run(["docker", "compose", "run", "--rm", "--no-deps", "-T", "--entrypoint", "python",
+                 "app", "-m", "app.db.check_connection"])
+            replacing_app = True
+            run(recreate_app)
+            if not wait_for_app_health():
+                raise RuntimeError("Приложение не прошло проверку готовности после смены пароля")
+        except (Exception, KeyboardInterrupt):
+            try:
+                backups.postgres_admin(f"SET standard_conforming_strings = on;\nALTER ROLE remnaum PASSWORD {old_password};\n")
+                backups._secure_write(path, original_env)
+                if replacing_app:
+                    run(recreate_app)
+            except (Exception, KeyboardInterrupt):
+                raise RuntimeError("Откат пароля не завершён. Повторите смену пароля для восстановления доступа.") from None
+            raise
+
+
+def change_postgres_password() -> None:
+    password = prompt("Новый пароль PostgreSQL", hidden=True)
+    validate_postgres_password(password)
+    if password != prompt("Повторите новый пароль PostgreSQL", hidden=True):
+        raise ValueError("Пароли не совпадают")
+    rotate_postgres_password(password)
+    ui.ok("Пароль PostgreSQL обновлён. Приложение подключилось к существующей базе.")
 
 
 def refresh_all_remnawave_squads(existing: dict[str, str]) -> bool:
@@ -593,7 +655,6 @@ def perform_update(existing: dict[str, str]) -> int:
     if not shutil.which("git"):
         raise RuntimeError("Для обновления необходим git.")
     ui.section(1, 3, "Создание резервной копии и загрузка обновлений")
-    offer_backup_key()
     run(["bash", "update.sh"])
     ui.section(2, 3, "Проверка контейнеров")
     run(["docker", "compose", "ps"])
@@ -667,7 +728,10 @@ def install_update_timer() -> bool:
         print("Systemd недоступен: автоматические уведомления GitHub можно проверять вручную.")
         return False
     source = str(ROOT.resolve())
-    username = os.environ.get("SUDO_USER", "") or pwd.getpwuid(ROOT.stat().st_uid).pw_name
+    git_path = ROOT / ".git"
+    username = os.environ.get("SUDO_USER", "") or pwd.getpwuid(
+        (git_path if git_path.exists() else ROOT).stat().st_uid
+    ).pw_name
     if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username):
         username = "root"
     unit = Path("/etc/systemd/system/remnaum-update-check.service")
@@ -713,8 +777,7 @@ def config_for_install(existing: dict[str, str], mode: str,
         print("  База данных: remnaum. Надёжный пароль будет сгенерирован автоматически.")
         user_password = prompt("Свой пароль PostgreSQL? Введите пароль или нажмите Enter для автоматического", required=False, hidden=True)
         if user_password:
-            if not re.fullmatch(r"[A-Za-z0-9._~-]{12,128}", user_password):
-                raise ValueError("Пароль PostgreSQL: от 12 символов, латиница, цифры и . _ ~ -")
+            validate_postgres_password(user_password)
             cfg["POSTGRES_PASSWORD"] = user_password
         cfg["DATABASE_URL"] = (f"postgresql+asyncpg://remnaum:{cfg['POSTGRES_PASSWORD']}"
                                "@postgres:5432/remnaum")
@@ -759,6 +822,8 @@ def config_for_install(existing: dict[str, str], mode: str,
 
     if not cfg.get("TELEGRAM_BOT_TOKEN"):
         cfg["TELEGRAM_BOT_TOKEN"] = prompt("Токен Telegram-бота из BotFather", hidden=True)
+        if not BOT_TOKEN_RE.fullmatch(cfg["TELEGRAM_BOT_TOKEN"]):
+            raise ValueError("Неверный формат токена Telegram. Проверьте токен из BotFather.")
     if not cfg.get("TELEGRAM_BOT_USERNAME"):
         info = identify_telegram_bot(cfg["TELEGRAM_BOT_TOKEN"])
         if info is not None:
@@ -821,7 +886,7 @@ def config_for_install(existing: dict[str, str], mode: str,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Мастер установки и обновления Remnaum.")
-    parser.add_argument("--action", choices=("install", "update", "backup"), help="Выбор без меню")
+    parser.add_argument("--action", choices=("install", "update", "backup", "password"), help="Выбор без меню")
     parser.add_argument("--mode", choices=("panel", "standalone"),
                         help="Optional topology selection (otherwise guided interactive prompt)")
     parser.add_argument("--proxy-network",
@@ -839,6 +904,9 @@ def main() -> int:
     action = choose_action(existing, args.action)
     if action == "update":
         return perform_update(existing)
+    if action == "password":
+        change_postgres_password()
+        return 0
     if action == "backup":
         return show_backup_menu(existing)
     choose_install_dir(existing, args.install_dir, no_relocate=args.no_relocate)
@@ -870,6 +938,7 @@ def main() -> int:
 
     ui.section(3, 5, "Настройки Remnaum")
     cfg = config_for_install(existing, mode, args.proxy_network, port)
+    offer_backup_key()
     if not existing:
         base = ROOT / ".env.example"
         if not base.exists():
@@ -878,7 +947,7 @@ def main() -> int:
     else:
         write_env({k: value for k, value in cfg.items() if existing.get(k) != value})
 
-    (ROOT / "data").mkdir(exist_ok=True)
+    backups.prepare_branding_directory(ROOT)
     if mode == "panel":
         generate_proxy_snippets(cfg)
         print("\nPanel mode: Remnaum will NOT publish 80 or 443.")
@@ -927,7 +996,6 @@ def main() -> int:
                     print("Проверьте состояние панели и повторите настройку.")
         else:
             print("Локальная панель не совпадает с адресом API; её настройки не меняем.")
-    offer_backup_key()
     install_global_command()
     backups.configure_timer()
     install_update_timer()
@@ -945,6 +1013,9 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except (RuntimeError, ValueError, OSError, subprocess.CalledProcessError, EOFError) as exc:
-        print(f"Installation failed: {exc}", file=sys.stderr)
+    except KeyboardInterrupt:
+        print("Операция прервана.", file=sys.stderr)
+        sys.exit(130)
+    except (RuntimeError, ValueError, OSError, subprocess.SubprocessError, EOFError) as exc:
+        print(f"Ошибка Remnaum: {exc}", file=sys.stderr)
         sys.exit(1)

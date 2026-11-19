@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextlib import suppress
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -28,13 +29,33 @@ async def _register_telegram_webhook() -> None:
                 settings.telegram_webhook_url,
                 secret_token=settings.telegram_webhook_secret,
                 drop_pending_updates=False,
+                allowed_updates=dispatcher.resolve_used_update_types(),
             )
             log.info("Telegram webhook registered")
             return
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            log.warning("Could not register Telegram webhook yet: %s", exc)
+            log.warning("Could not register Telegram webhook yet: %s", type(exc).__name__)
+            await asyncio.sleep(30)
+
+
+async def _run_telegram() -> None:
+    await setup_bot()
+    if settings.telegram_use_webhook:
+        await _register_telegram_webhook()
+        return
+    while True:
+        try:
+            await bot.delete_webhook(drop_pending_updates=False)
+            await dispatcher.start_polling(
+                bot, handle_signals=False, close_bot_session=False, tasks_shutdown_timeout=5,
+            )
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("Telegram polling will retry: %s", type(exc).__name__)
             await asyncio.sleep(30)
 
 
@@ -54,34 +75,29 @@ async def lifespan(_: FastAPI):
     await refresh_catalog()
     await migrate_legacy_payment_settings()
 
-    polling_task = None
-    webhook_task = None
-    if settings.telegram_bot_token:
-        await setup_bot()
-        if settings.telegram_use_webhook and settings.telegram_webhook_url:
-            if not settings.telegram_webhook_secret:
-                raise RuntimeError("TELEGRAM_WEBHOOK_SECRET is required in webhook mode")
-            webhook_task = asyncio.create_task(_register_telegram_webhook())
-        elif not settings.telegram_use_webhook:
-            polling_task = asyncio.create_task(dispatcher.start_polling(bot))
+    telegram_task = None
+    if bot is not None:
+        if settings.telegram_use_webhook and not (settings.telegram_webhook_url and settings.telegram_webhook_secret):
+            raise RuntimeError("TELEGRAM_WEBHOOK_URL and TELEGRAM_WEBHOOK_SECRET are required in webhook mode")
+        telegram_task = asyncio.create_task(_run_telegram())
     sync_task = asyncio.create_task(_sync_squads_periodically())
     payment_recovery_task = asyncio.create_task(run_payment_recovery_forever())
     try:
         yield
     finally:
-        for task in (polling_task, webhook_task, sync_task, payment_recovery_task):
-            if task:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+        if telegram_task and not settings.telegram_use_webhook:
+            with suppress(RuntimeError, TimeoutError):
+                await asyncio.wait_for(dispatcher.stop_polling(), timeout=10)
+        tasks = [task for task in (telegram_task, sync_task, payment_recovery_task) if task]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         if bot:
             await bot.session.close()
         await engine.dispose()
 
 
-app = FastAPI(title=settings.app_name, version="1.0.0-rc.8", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.0.1", lifespan=lifespan)
 app.include_router(api_router)
 app.include_router(store_router)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "static"), name="static")

@@ -1,10 +1,12 @@
 # Changelog
 
-## 1.0.0
+Первый публичный релиз Remnaum — **0.0.1**. Ниже сохранена история этапов разработки; обозначения `rc.*` не являются выпущенными версиями `1.0.0`.
+
+## 0.0.1 — первый релиз
 
 - Added per-plan Internal Squad selection, persistent panel discovery and payment snapshots. Same-tariff renewals preserve existing assignments. Paid tariff changes apply the purchased squads. Flexible and trial access have separate owner-managed settings.
 
-## 1.0.0-rc.8 — Remnawave 3.x compatibility and automatic squad synchronization
+## Этап разработки rc.8 — Remnawave 3.x compatibility and automatic squad synchronization
 
 - Installer now auto-selects **every** existing Internal Squad from `GET /api/internal-squads` with no manual choice; all found UUIDs are assigned to new VPN subscribers.
 - Installer reconfiguration and `remnaum → Обновить` resync the squad list, including newly added groups. If the Panel cannot be reached, existing UUIDs are preserved.
@@ -13,7 +15,7 @@
 - Added regression tests and refreshed the Russian installation instructions.
 
 
-## 1.0.0-rc.7 — Unified bot, Mini App, admin and owner branding
+## Этап разработки rc.7 — Unified bot, Mini App, admin and owner branding
 
 - Telegram bot: compact symmetric two-column menu, grouped bonus activities, direct Mini App entry and administrator-only owner button and /admin command scope.
 - Branded /start: owner uploads a validated JPG/PNG/WebP cover via admin, stored persistently as stripped optimized JPEG; bot displays it above the menu.
@@ -25,7 +27,7 @@
 - Automated tests for image security, private owner navigation, bot welcome and independent frontend assets.
 
 
-## 1.0.0-rc.6 — Automated Remnawave setup and full disaster recovery
+## Этап разработки rc.6 — Automated Remnawave setup and full disaster recovery
 
 - Auto-detect local Remnawave Panel URL and enumerate internal squads from the authenticated API, with an explicit fallback only if discovery is unavailable.
 - Safely synchronize local Panel outgoing webhook, preserving other webhook destinations and existing signing secrets, with a backup and service-only restart; require a healthy public HTTPS Remnaum endpoint before enabling.
@@ -38,7 +40,7 @@
 - Integration CI validates actual backup, database mutation and restoration in all three deployment configurations.
 
 
-## 1.0.0-rc.5 — Automated setup, update notices, checkout and modern frontend
+## Этап разработки rc.5 — Automated setup, update notices, checkout and modern frontend
 
 - GitHub update checker on VPS with a six-hour systemd timer, deduplicated Telegram administrator notifications and [Remnaum news](https://t.me/remnaum/4) button. Uses existing Git credentials or public GitHub API.
 - Guided install location selection; safe checkout copy and automatic dependencies. New `bootstrap.sh` downloads source on a fresh public VPS. Port conflict resolution proposes reuse of an existing proxy.
@@ -48,7 +50,7 @@
 - Expanded integration checks for static assets, unauthenticated checkout protection, clean setup, and update-notice deduplication.
 
 
-## 1.0.0-rc.4 — Trial, promo campaigns and purchase reliability
+## Этап разработки rc.4 — Trial, promo campaigns and purchase reliability
 
 - Optional one-time free trial configurable in the Telegram admin dashboard; Remnawave provisioning has a per-user lock and remote trial marker for safe retry.
 - Promo codes grant owner-defined bonus days once per customer, with campaign redemption limits and a database credit ledger; credits apply to the next verified subscription payment.
@@ -60,7 +62,7 @@
 - Digital VPN purchases in Telegram continue to use Stars; other payment systems operate on the separate standalone website.
 
 
-## 1.0.0-rc.3 — Storefront, encrypted settings and referrals
+## Этап разработки rc.3 — Storefront, encrypted settings and referrals
 
 - Independent `/store` storefront for regular browsers using signed Telegram Login Widget and short-lived secure sessions.
 - External payment methods YooKassa, YooMoney and Crypto Pay are configured only through encrypted PostgreSQL settings (not read from .env for live checkout).
@@ -74,7 +76,7 @@
 - Remaining blockers: live end-to-end billing/panel tests, robust migrations, full device management and more advanced automation.
 
 
-## 1.0.0-rc.2 — Two installation topologies
+## Этап разработки rc.2 — Two installation topologies
 
 - Add `sudo sh install.sh` wizard for standalone VPS or co-hosted Remnawave Panel.
 - Co-hosted Panel mode never binds public 80/443. Optional shared `remnawave-network` alias `remnaum-api:8080` and host-only port `127.0.0.1:18080`.
@@ -84,7 +86,7 @@
 - Add installer validation tests and CI for standalone, local Panel and shared-network Panel topologies.
 
 
-## 1.0.0-rc.1 — Public installation testing candidate
+## Этап разработки rc.1 — Public installation testing candidate
 
 - Interactive installation for webhook and Mini App domains, BotFather token, Telegram admin IDs and Remnawave Panel API credentials.
 - Automatic HTTPS via Caddy and internal Nginx proxy with isolated PostgreSQL and Redis persistent volumes.

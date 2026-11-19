@@ -5,9 +5,10 @@ cd "$(dirname "$0")"
 
 # The repository may be private. Pull using the original sudo user's GitHub
 # credentials, without making git files owned by root.
+git_owner="${SUDO_USER:-$(stat -c %U .git)}"
 git_user() {
-  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
-    runuser -u "$SUDO_USER" -- git -C "$PWD" "$@"
+  if [[ "$(id -u)" == 0 && "$git_owner" != root ]]; then
+    runuser -u "$git_owner" -- git -C "$PWD" "$@"
   else
     git -c safe.directory="$PWD" -C "$PWD" "$@"
   fi
@@ -19,6 +20,11 @@ if ! grep -q "^COMPOSE_FILE=" .env; then
   echo "Режим установки не задан. Запустите sudo sh install.sh и выберите 1." >&2
   exit 1
 fi
+
+mkdir -p data
+(umask 077; touch data/.deploy.lock)
+exec 9<data/.deploy.lock
+flock -n 9 || { echo "Другое обновление или смена пароля уже выполняется." >&2; exit 1; }
 
 echo "Создаём резервную копию базы..."
 bash backup.sh
@@ -34,5 +40,6 @@ if ! docker compose run --rm --no-deps -T --entrypoint python app -m app.db.chec
   exit 1
 fi
 echo "Запускаем контейнеры..."
-docker compose up -d
+python3 -c 'import sys; sys.path.insert(0, "scripts"); from backup_manager import ROOT, prepare_branding_directory; prepare_branding_directory(ROOT)'
+docker compose up -d --wait --wait-timeout 120
 echo "Обновление выполнено; Docker volumes сохранены."

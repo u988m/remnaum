@@ -6,33 +6,55 @@ if [ "$(id -u)" -ne 0 ]; then
   echo "Запустите от root: curl ... | sudo sh" >&2
   exit 1
 fi
-if [ -r /dev/tty ]; then
-  exec 3</dev/tty
-else
-  echo "Для выбора каталога нужен интерактивный терминал." >&2
+if ! ( : </dev/tty ) 2>/dev/null; then
+  echo "Для установки нужен интерактивный терминал." >&2
   exit 1
 fi
+exec 3</dev/tty
+is_project() {
+  [ -f "$1/install.sh" ] && [ -f "$1/scripts/install.py" ] && [ -f "$1/compose.yaml" ]
+}
+
+DEFAULT=/opt/remnaum
+# The launcher contains the actual location selected on a previous installation.
+# Read its path as data instead of sourcing the file.
+if [ -r /usr/local/bin/remnaum ]; then
+  INSTALLED=$(sed -n 's|^cd \(/[A-Za-z0-9_./-]*\)$|\1|p' /usr/local/bin/remnaum)
+  if [ -n "$INSTALLED" ] && is_project "$INSTALLED" && [ -f "$INSTALLED/.env" ]; then
+    DEFAULT=$INSTALLED
+  fi
+fi
 printf '\n🌊 Remnaum — автоматическая установка\n'
-printf 'Папка для установки [/opt/remnaum]: '
-IFS= read -r DEST <&3 || true
-DEST=${DEST:-/opt/remnaum}
+printf 'Папка проекта [%s]: ' "$DEFAULT"
+IFS= read -r DEST <&3 || exit 1
+DEST=${DEST:-$DEFAULT}
 case "$DEST" in
-  /) echo "Нельзя устанавливать в /" >&2; exit 1 ;;
   /*) ;;
   *) echo "Введите абсолютный путь, например /opt/remnaum" >&2; exit 1 ;;
 esac
+DEST=$(realpath -m -- "$DEST")
 case "$DEST" in
-  *' '*|*'..'*|*'%'*|*'"'*|*"'"*) echo "Путь содержит запрещённые символы" >&2; exit 1 ;;
+  /|/etc|/etc/*|/bin|/bin/*|/usr|/usr/*|/dev|/dev/*|/proc|/proc/*|/sys|/sys/*|*[!A-Za-z0-9_./-]*)
+    echo "Выберите отдельный каталог проекта, например /opt/remnaum." >&2
+    exit 1 ;;
 esac
-if [ -f "$DEST/install.sh" ] && [ -f "$DEST/scripts/install.py" ]; then
+if is_project "$DEST"; then
   echo "Проект найден: $DEST"
   cd "$DEST"
   exec sh ./install.sh --no-relocate </dev/tty
 fi
-if [ -e "$DEST" ] && [ "$(ls -A "$DEST")" ]; then
-  echo "Каталог уже занят: $DEST. Данные не тронуты." >&2
-  exit 1
+if [ -e "$DEST" ]; then
+  if [ ! -d "$DEST" ] || [ "$(ls -A -- "$DEST")" ]; then
+    echo "Каталог уже занят: $DEST. Данные сохранены." >&2
+    exit 1
+  fi
 fi
+printf 'Проект не найден. Скачать Remnaum в %s? (Д/н): ' "$DEST"
+IFS= read -r ANSWER <&3 || exit 1
+case "$ANSWER" in
+  ''|д|Д|да|Да|y|Y|yes|YES) ;;
+  *) exit 0 ;;
+esac
 if ! command -v git >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
   if ! command -v apt-get >/dev/null 2>&1; then
     echo "Для установки нужны git и Python3 (автоустановка доступна на Ubuntu/Debian)." >&2
@@ -58,7 +80,9 @@ mkdir -p "$(dirname "$DEST")"
 if [ -d "$DEST" ]; then
   rmdir "$DEST"
 fi
-mv "$TEMP/project" "$DEST"
+mv -T "$TEMP/project" "$DEST"
+rmdir "$TEMP"
+trap - EXIT INT TERM
 echo "Проект скачан: $DEST"
 cd "$DEST"
 exec sh ./install.sh --no-relocate </dev/tty
