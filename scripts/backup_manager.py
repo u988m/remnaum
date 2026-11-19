@@ -42,17 +42,14 @@ MAX_TELEGRAM_BYTES = 45 * 1024 * 1024
 
 def _secure_write(path: Path, value: bytes) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "wb") as stream:
+    with tempfile.TemporaryDirectory(prefix="remnaum-write-", dir=path.parent) as tmp:
+        temporary = Path(tmp) / "data"
+        with temporary.open("xb") as stream:
+            os.fchmod(stream.fileno(), 0o600)
             stream.write(value)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
-        os.chmod(path, 0o600)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def load_settings() -> dict:
@@ -123,21 +120,18 @@ def pack_encrypted(plaintext: Path, destination: Path, password: bytes) -> None:
             "-pass", "stdin", "-in", str(plaintext), "-out", str(encrypted),
         ], input=password + b"\n", check=True, capture_output=True)
         digest = hmac.new(_crypt_key(password), digestmod=hashlib.sha256)
-        with encrypted.open("rb") as src:
+        target = Path(tmp) / "archive.rmb"
+        with target.open("xb") as out, encrypted.open("rb") as src:
+            os.fchmod(out.fileno(), 0o600)
+            out.write(MAGIC + bytes(digest.digest_size))
             for chunk in iter(lambda: src.read(1024 * 1024), b""):
                 digest.update(chunk)
-        target = destination.with_name("." + destination.name + ".tmp")
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            with os.fdopen(fd, "wb") as out, encrypted.open("rb") as src:
-                out.write(MAGIC + digest.digest())
-                shutil.copyfileobj(src, out, length=1024 * 1024)
-                out.flush()
-                os.fsync(out.fileno())
-            os.replace(target, destination)
-            os.chmod(destination, 0o600)
-        finally:
-            target.unlink(missing_ok=True)
+                out.write(chunk)
+            out.seek(len(MAGIC))
+            out.write(digest.digest())
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(target, destination)
 
 
 def unpack_encrypted(archive: Path, plaintext: Path, password: bytes) -> None:
@@ -145,7 +139,7 @@ def unpack_encrypted(archive: Path, plaintext: Path, password: bytes) -> None:
         raise ValueError("Архив не найден или является ссылкой")
     if not shutil.which("openssl"):
         raise RuntimeError("Для восстановления требуется OpenSSL")
-    with tempfile.TemporaryDirectory(prefix="remnaum-decrypt-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="remnaum-decrypt-", dir=plaintext.parent) as tmp:
         payload = Path(tmp) / "payload.enc"
         digest = hmac.new(_crypt_key(password), digestmod=hashlib.sha256)
         with archive.open("rb") as handle:
@@ -160,11 +154,14 @@ def unpack_encrypted(archive: Path, plaintext: Path, password: bytes) -> None:
             raise ValueError("Повреждённый архив Remnaum")
         if not hmac.compare_digest(mac, digest.digest()):
             raise ValueError("Неверный ключ восстановления или архив повреждён")
+        decoded = Path(tmp) / "decoded"
         subprocess.run([
             "openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2",
             "-iter", "280000", "-md", "sha256",
-            "-pass", "stdin", "-in", str(payload), "-out", str(plaintext),
+            "-pass", "stdin", "-in", str(payload), "-out", str(decoded),
         ], input=password + b"\n", check=True, capture_output=True)
+        decoded.chmod(0o600)
+        os.replace(decoded, plaintext)
 
 
 def _docker(*args: str, cwd: Path = ROOT, stdin=None, stdout=None, timeout=240) -> None:
@@ -308,13 +305,18 @@ def send_to_telegram(archive: Path, chat_id: str) -> None:
 
 
 def _safe_extract(archive: tarfile.TarFile, target: Path) -> None:
+    seen = set()
     for member in archive.getmembers():
         name = Path(member.name)
         if (name.is_absolute() or not name.parts or ".." in name.parts
                 or not (member.isfile() or member.isdir())
-                or member.size > 2 * 1024 ** 3):
+                or name in seen):
             raise ValueError("Небезопасное содержимое резервного архива")
-        if name.parts[0] not in {"install", "metadata.json", "database.dump", "redis.rdb"}:
+        seen.add(name)
+        if name.parts[0] != "install" and (
+            len(name.parts) != 1 or name.name not in {"metadata.json", "database.dump", "redis.rdb"}
+            or not member.isfile()
+        ):
             raise ValueError("Неизвестный компонент архива")
     # Never follow an archive-supplied symlink/hardlink.
     for member in archive.getmembers():
@@ -328,21 +330,34 @@ def _safe_extract(archive: tarfile.TarFile, target: Path) -> None:
         os.chmod(path, 0o600 if path.name == ".env" else 0o644)
 
 
+def _read_backup_manifest(archive: tarfile.TarFile) -> dict:
+    for name in ("database.dump", "redis.rdb", "install/.env", "install/compose.yaml"):
+        try:
+            member = archive.getmember(name)
+        except KeyError:
+            raise ValueError(f"В архиве отсутствует {name}") from None
+        if not member.isfile() or (name in {"database.dump", "redis.rdb"} and not member.size):
+            raise ValueError(f"Некорректный компонент архива: {name}")
+    try:
+        member = archive.getmember("metadata.json")
+    except KeyError:
+        raise ValueError("Нет метаданных архива") from None
+    if not member.isfile() or member.size > 8192:
+        raise ValueError("Некорректные метаданные архива")
+    with archive.extractfile(member) as metadata:
+        info = json.load(metadata)
+    if not isinstance(info, dict) or info.get("product") != "remnaum" or info.get("format") != 1:
+        raise ValueError("Архив не принадлежит Remnaum")
+    return info
+
+
 def inspect_backup(archive: Path, *, supplied_key: str | None = None) -> dict:
     password = key_bytes(supplied=supplied_key)
     with tempfile.TemporaryDirectory(prefix="remnaum-inspect-") as tmp:
         plain = Path(tmp) / "archive.tar.gz"
         unpack_encrypted(archive, plain, password)
         with tarfile.open(plain, "r:gz") as tar:
-            metadata = tar.extractfile("metadata.json")
-            if metadata is None:
-                raise ValueError("Нет метаданных архива")
-            info = json.loads(metadata.read(8192))
-            if info.get("product") != "remnaum" or info.get("format") != 1:
-                raise ValueError("Архив не принадлежит Remnaum")
-            if not tar.getmember("database.dump").size:
-                raise ValueError("Архив не содержит PostgreSQL")
-            return info
+            return _read_backup_manifest(tar)
 
 
 def restore_backup(archive: Path, *, supplied_key: str | None = None, target_root: Path | None = None) -> None:
@@ -367,13 +382,10 @@ def restore_backup(archive: Path, *, supplied_key: str | None = None, target_roo
             unpack_encrypted(archive, plain, password)
             extracted = folder / "extracted"
             with tarfile.open(plain, "r:gz") as tar:
+                metadata = _read_backup_manifest(tar)
                 _safe_extract(tar, extracted)
-            metadata = json.loads((extracted / "metadata.json").read_text())
-            if metadata.get("product") != "remnaum" or metadata.get("format") != 1:
-                raise ValueError("Это не резервная копия Remnaum")
             install_dir = extracted / "install"
-            if not (install_dir / ".env").is_file() or not (install_dir / "compose.yaml").exists():
-                raise ValueError("В архиве нет .env или Docker Compose")
+
             print("Восстанавливаем данные и настройки в", target)
             subprocess.run(["docker", "compose", "stop", "app"], cwd=target,
                            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
