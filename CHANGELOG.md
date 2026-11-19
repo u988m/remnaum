@@ -2,7 +2,7 @@
 
 ## 1.0.0
 
-- Added per-plan Internal Squad selection, persistent panel discovery and payment snapshots. Renewals preserve existing paid subscriber assignments.
+- Added per-plan Internal Squad selection, persistent panel discovery and payment snapshots. Same-tariff renewals preserve existing assignments. Paid tariff changes apply the purchased squads. Flexible and trial access have separate owner-managed settings.
 
 ## 1.0.0-rc.8 — Remnawave 3.x compatibility and automatic squad synchronization
 

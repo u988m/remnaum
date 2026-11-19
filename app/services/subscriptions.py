@@ -81,18 +81,22 @@ async def provision_paid_payment(payment_id: int) -> bool:
             panel_user_id = _panel_identity(panel_user)
             description = str(panel_user.get("description") or "")
             markers = {part.strip() for part in description.split("|")}
+            # Reconcile a previous panel write before using the local tariff identity.
             if marker not in markers:
-                first_purchase = subscription is None
-                if subscription is not None and await session.scalar(
-                    select(TrialClaim.id).where(TrialClaim.user_id == user.id, TrialClaim.status == "completed")
-                ):
-                    previous_payment = await session.scalar(select(Payment.id).where(
-                        Payment.user_id == user.id, Payment.status == "succeeded"
-                    ).limit(1))
-                    first_purchase = previous_payment is None
+                pending_ids = await session.scalars(select(Payment.id).where(
+                    Payment.user_id == user.id, Payment.status == "paid", Payment.id != payment_id
+                ))
+                if any(f"remnaum-payment:{other}" in markers for other in pending_ids):
+                    raise RuntimeError("Retry the previously applied payment first")
+            if marker not in markers:
                 previous = await session.scalar(select(Payment).where(
                     Payment.user_id == user.id, Payment.status == "succeeded"
                 ).order_by(Payment.id.desc()).limit(1))
+                first_purchase = subscription is None
+                if subscription is not None and previous is None:
+                    first_purchase = bool(await session.scalar(select(TrialClaim.id).where(
+                        TrialClaim.user_id == user.id, TrialClaim.status == "completed"
+                    )))
                 previous_order = json.loads(previous.payload or "{}") if previous else {}
                 plan_changed = ("plan_id" in previous_order and "plan_id" in order
                                 and previous_order["plan_id"] != order["plan_id"])
