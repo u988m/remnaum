@@ -71,9 +71,9 @@ sudo remnaum
 
 <table align="center">
   <tr>
-    <td align="center"><a href="https://t.me/remnaum/6"><strong>❓ Помощь</strong></a></td>
-    <td align="center"><a href="https://t.me/remnaum/3"><strong>🐛 Ошибки</strong></a></td>
-    <td align="center"><a href="https://t.me/remnaum/5"><strong>💡 Идеи</strong></a></td>
+    <td align="center"><a href="https://t.me/remnaum/6"><img src="assets/community-help.svg" alt="Помощь" width="104"></a></td>
+    <td align="center"><a href="https://t.me/remnaum/3"><img src="assets/community-bugs.svg" alt="Ошибки" width="104"></a></td>
+    <td align="center"><a href="https://t.me/remnaum/5"><img src="assets/community-ideas.svg" alt="Идеи" width="104"></a></td>
   </tr>
 </table>
 
