@@ -11,6 +11,7 @@
 <body>
 <main>
   <header class="topbar" hidden>
+    <button class="icon-button" id="shop-back" type="button" aria-label="Назад" hidden><svg aria-hidden="true"><use href="#i-back"/></svg></button>
     <span class="brand-logo"><span id="store-mark" aria-hidden="true">R</span><img id="store-logo" alt="" hidden></span>
     <strong id="store-name">Remnaum</strong>
   </header>
@@ -24,39 +25,6 @@
       <div id="plans-list" class="plan-list" aria-label="Готовые тарифы"></div>
       <p class="panel muted" id="plans-status" role="status">Загружаем тарифы…</p>
 
-    </section>
-    <section class="page" id="page-order" data-page-panel="order" hidden>
-      <button class="text-btn" type="button" data-go-page="shop">← К тарифам</button>
-      <h1 id="order-title">Ваш заказ</h1>
-      <div class="panel order-panel">
-        <p id="order-specification" class="muted"></p>
-        <p id="order-renewal-note" class="renewal-note" hidden></p>
-        <dl class="order-details">
-          <div><dt>Всего устройств</dt><dd id="order-device-total" aria-live="polite"></dd></div>
-          <div id="order-unit-row"><dt>За доп. устройство</dt><dd id="order-unit"></dd></div>
-          <div id="order-extra-row">
-            <dt>Доп. устройства</dt>
-            <dd class="stepper">
-              <button type="button" id="order-minus" aria-label="Убрать устройство">−</button>
-              <output id="order-extra" aria-live="polite">0</output>
-              <button type="button" id="order-plus" aria-label="Добавить устройство">+</button>
-            </dd>
-          </div>
-        </dl>
-        <form id="order-payment" hidden>
-          <label class="form-field">Способ оплаты<select id="order-method" required></select></label>
-          <dl class="order-cost">
-            <div><dt>Тариф</dt><dd id="order-base-amount"></dd></div>
-            <div id="order-extra-cost" hidden><dt>Доп. устройства</dt><dd id="order-extra-amount"></dd></div>
-          </dl>
-          <div class="checkout-summary"><span>Итого</span><strong id="order-total" aria-live="polite"></strong></div>
-          <label class="check" id="order-consent" hidden><input id="order-terms" type="checkbox"><span>Принимаю <a id="order-terms-link" target="_blank" rel="noopener">условия продажи</a></span></label>
-          <button class="primary-btn full" type="submit" id="order-pay">Оплатить</button>
-        </form>
-        <p class="status" id="order-status" role="status"></p>
-        <a class="primary-btn full" id="order-open-invoice" target="_blank" rel="noopener" hidden>Открыть счёт</a>
-        <button class="secondary-btn full" type="button" id="order-show-purchases" data-go-page="purchases" hidden>Мои покупки</button>
-      </div>
     </section>
     <section class="page" id="page-vpn" data-page-panel="vpn">
       <div class="landing-brand">
@@ -88,21 +56,18 @@
     </section>
     <section class="page" id="page-devices" data-page-panel="devices" hidden>
       <section class="panel device-summary">
-        <div class="section-title"><h1>Устройства</h1><button class="action refresh-action" id="devices-refresh" type="button">Обновить</button></div>
+        <div class="section-title"><h1>Устройства</h1><button class="icon-button" id="devices-refresh" type="button" aria-label="Обновить устройства"><svg aria-hidden="true"><use href="#i-refresh"/></svg></button></div>
         <p id="device-count" class="muted" role="status">Загружаем устройства…</p>
         <progress id="device-capacity" aria-label="Занятые места" hidden></progress>
-        <button class="secondary-btn full" type="button" id="device-upgrade" hidden>Увеличить лимит</button>
+        <button class="secondary-btn full" type="button" id="device-upgrade" hidden>Добавить устройства</button>
       </section>
       <div class="device-list" id="account-device-info"></div>
     </section>
     <section class="page" id="page-purchases" data-page-panel="purchases" hidden>
-      <button class="text-btn" type="button" data-go-page="account">← Профиль</button>
-      <h1>Покупки</h1>
-      <button class="secondary-btn" id="repeat-plan" type="button" hidden>Купить снова</button>
+      <div class="section-title purchase-title"><h1>Покупки</h1><button class="secondary-btn" id="repeat-plan" type="button" hidden>Купить снова</button></div>
       <div class="panel" id="account-purchase-info" role="status">Загружаем историю…</div>
     </section>
     <section class="page" id="page-guide" data-page-panel="guide" hidden>
-      <button class="text-btn" type="button" data-go-page="vpn">← Подписка</button>
       <h1>Как подключиться</h1>
       <section class="panel" id="connection-guide">
         <ol class="steps">
@@ -162,7 +127,7 @@
         <strong>Админ-панель</strong><span>Управление магазином</span>
       </button>
       <div class="profile-actions">
-        <button class="profile-action" type="button" data-go-page="purchases"><strong>Покупки</strong><span>Счета и статусы оплаты</span></button>
+        <button class="profile-action" type="button" data-go-page="purchases"><strong>Покупки</strong><span>История и статусы оплаты</span></button>
       </div>
     </section>
   </div>
@@ -174,7 +139,52 @@
   <button type="button" data-page="support"><svg aria-hidden="true"><use href="#i-help"/></svg><span>Помощь</span></button>
   <button type="button" data-page="account"><svg aria-hidden="true"><use href="#i-user"/></svg><span>Профиль</span></button>
 </nav>
+<dialog class="order-dialog" id="page-order" aria-labelledby="order-title">
+  <div class="order-sheet">
+    <header class="order-heading">
+      <div><p class="muted" id="order-kind"></p><h1 id="order-title">Подписка</h1></div>
+      <button class="icon-button" id="order-close" type="button" aria-label="Закрыть заказ" autofocus><svg aria-hidden="true"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="order-body" id="order-body">
+      <div class="order-plan">
+        <p id="order-specification"></p>
+        <p id="order-renewal-note" class="muted" hidden></p>
+        <div id="order-device-row"><span>Устройства</span><strong id="order-device-total" aria-live="polite"></strong></div>
+      </div>
+      <div id="order-extra-row" class="order-devices" hidden>
+        <div><strong id="order-devices-label">Доп. устройства</strong><p class="muted" id="order-unit" hidden></p></div>
+        <div class="stepper">
+          <button type="button" id="order-minus" aria-label="Убрать одно устройство">−</button>
+          <output id="order-extra" aria-live="polite">0</output>
+          <button type="button" id="order-plus" aria-label="Добавить одно устройство">+</button>
+        </div>
+      </div>
+      <form id="order-payment" hidden>
+        <details id="order-method">
+          <summary>
+            <span class="payment-choice-mark" id="order-method-mark" aria-hidden="true"></span>
+            <span><small>Способ оплаты</small><strong id="order-method-name"></strong></span>
+            <svg aria-hidden="true"><use href="#i-chevron"/></svg>
+          </summary>
+          <div id="order-method-options" role="group" aria-label="Доступные способы оплаты"></div>
+        </details>
+        <label class="check" id="order-consent" hidden><input id="order-terms" type="checkbox"><span>Принимаю <a id="order-terms-link" target="_blank" rel="noopener">условия продажи</a></span></label>
+        <button class="primary-btn" type="submit" id="order-pay"><span>Оплатить</span><strong id="order-total" aria-live="polite"></strong></button>
+      </form>
+      <p class="status" id="order-status" role="status"></p>
+      <div class="invoice-actions" id="invoice-actions" hidden>
+        <a class="primary-btn" id="order-open-invoice" target="_blank" rel="noopener" hidden>Открыть счёт</a>
+        <button class="secondary-btn" type="button" id="order-show-purchases" data-go-page="purchases">Мои покупки</button>
+      </div>
+      <button class="secondary-btn" id="order-retry-methods" type="button" hidden>Повторить загрузку</button>
+    </div>
+  </div>
+</dialog>
 <svg class="svg-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+<symbol id="i-back" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+<symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5m10-4a8 8 0 0 0-13-2m12 12a8 8 0 0 1-13-2"/></symbol>
 <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></symbol>
 <symbol id="i-device" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/></symbol>
 <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="m6 6 4 4m4 4 4 4m0-12-4 4m-4 4-4 4"/></symbol>

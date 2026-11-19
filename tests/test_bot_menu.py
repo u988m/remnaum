@@ -71,7 +71,8 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
             await middleware(lambda event, _: handler(event), callback, {"bot": bot})
 
         plan = TariffPlan(id=4, title="Тариф", duration_days=30, traffic_gb=0, device_limit=2,
-                          price_rub_minor=19900, price_stars=99, is_active=True)
+                          price_rub_minor=19900, price_stars=99, extra_device_price_rub_minor=1000,
+                          extra_device_price_stars=10, is_active=True)
         order = f"4:0:{plan_revision(plan)}"
         profile = {"name": "Magazin", "tagline": "VPN", "description": ""}
         mock_redis = SimpleNamespace(lock=lock, get=AsyncMock(side_effect=storage.get),
@@ -83,7 +84,7 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
             patch.object(bot.session, "make_request", side_effect=send),
             patch.object(handlers, "get_or_create_user", return_value=False),
             patch.object(handlers, "get_store_profile", return_value=profile),
-            patch.object(handlers, "get_user_subscription", return_value=None),
+            patch.object(handlers, "get_user_subscription", return_value=None) as get_subscription,
             patch.object(handlers, "retry_paid_payments_for_user"),
             patch.object(handlers, "welcome_image_path", return_value=None),
             patch.object(handlers, "list_plans", return_value=[
@@ -133,6 +134,25 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
             await press(handlers.fixed_plan_checkout_handler, messages[102], f"plan:confirm:{order}")
             self.assertEqual(set(messages), {103})
             self.assertNotIn(102, messages)
+
+            await press(handlers.fixed_plan_handler, messages[103], "plan:select:4:0")
+            await press(handlers.plans_handler, messages[103], "menu:plans")
+            await press(handlers.home_handler, messages[103], "menu:home")
+            get_subscription.return_value = {
+                "status": "active", "expires_at": None, "traffic_gb": 0, "device_limit": 2, "plan_id": 4,
+            }
+            await press(handlers.subscription_handler, messages[103], "menu:subscription")
+            await press(handlers.fixed_plan_handler, messages[103], "plan:select:4:0:r")
+            self.assertEqual(messages[103].reply_markup.inline_keyboard[0][0].text, "+ Устройство")
+            await press(handlers.fixed_plan_handler, messages[103], "plan:select:4:1:r")
+            renewal_order = f"4:1:{plan_revision(plan)}:r"
+            await press(handlers.fixed_plan_checkout_handler, messages[103], f"plan:confirm:{renewal_order}")
+            await press(handlers.fixed_plan_checkout_handler, messages[103], f"plan:pay:platega:{renewal_order}")
+            await press(handlers.fixed_plan_checkout_handler, messages[103], f"plan:confirm:{renewal_order}")
+            await press(handlers.fixed_plan_handler, messages[103], "plan:select:4:1:r")
+            self.assertEqual(messages[103].reply_markup.inline_keyboard[-1][0].callback_data, "menu:subscription")
+            await press(handlers.subscription_handler, messages[103], "menu:subscription")
+            self.assertIn("Моя подписка", messages[103].text)
 
             blocked_user.return_value = True
             await start(3)

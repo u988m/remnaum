@@ -2,26 +2,84 @@ const tg = window.Telegram?.WebApp;
 tg?.ready?.();
 tg?.expand?.();
 const $=id=>document.getElementById(id);
-function switchPage(page){
-  document.querySelector(".topbar").hidden = page === "vpn";
-  document.querySelectorAll("[data-page-panel]").forEach(panel=>{
-    const visible=panel.dataset.pagePanel===page;
-    panel.hidden=!visible;
-    panel.classList.toggle("active",visible);
-  });
-  document.querySelectorAll("#bottom-nav [data-page]").forEach(button=>{
-    const active = button.dataset.page === ({order: "vpn", shop: "vpn", guide: "vpn", purchases: "account"}[page] || page);
-    if(active)button.setAttribute("aria-current","page");else button.removeAttribute("aria-current");
-  });
-  window.scrollTo({top:0,behavior:"smooth"});
-  if (page === "purchases") loadPurchases();
-  if (page === "devices") loadDevices();
-  if (page === "vpn") refreshSubscription().catch(() => {});
-  if (page === "bonuses") { loadOffers(); loadReferrals(); }
+const orderDialog = $("page-order");
+const rootPage = new URLSearchParams(location.search).get("section") === "account" ? "account" : "vpn";
+const primaryPages = new Set(["vpn", "bonuses", "devices", "support", "account"]);
+const orderScreens = new Map();
+const scrollPositions = new Map();
+let screen = {page: rootPage, tab: rootPage, depth: 0, id: 0};
+let screenId = 0;
+let navigationReady = false;
+
+function renderScreen(next) {
+  const previous = screen;
+  screenId = Math.max(screenId, next.id);
+  const order = next.page === "order" ? orderScreens.get(next.id) : null;
+  if (next.page === "order" && !order) {
+    next = {...next, page: next.origin || next.tab};
+  }
+  screen = next;
+  const visiblePage = order ? next.origin : next.page;
+  const topbar = document.querySelector(".topbar");
+  topbar.hidden = visiblePage === "vpn";
+  $("shop-back").hidden = !next.depth;
+  for (const panel of document.querySelectorAll("[data-page-panel]")) {
+    panel.hidden = panel.dataset.pagePanel !== visiblePage;
+  }
+  for (const button of document.querySelectorAll("#bottom-nav [data-page]")) {
+    if (button.dataset.page === next.tab) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  }
+  if (order) {
+    renderOrder(order);
+    if (!orderDialog.open) orderDialog.showModal();
+    $("order-body").scrollTop = 0;
+  } else if (orderDialog.open) {
+    orderDialog.close();
+  }
+  if (!order && previous.page !== next.page) {
+    window.scrollTo(0, scrollPositions.get(next.id) || 0);
+    if (previous.origin !== next.page) {
+      if (next.page === "purchases") loadPurchases();
+      if (next.page === "devices") loadDevices();
+      if (next.page === "vpn") refreshSubscription().catch(() => {});
+      if (next.page === "bonuses") { loadOffers(); loadReferrals(); }
+    }
+  }
+  if (next.depth) tg?.BackButton?.show?.();
+  else tg?.BackButton?.hide?.();
+}
+
+function switchPage(page, order = null) {
+  if (!navigationReady || (page === screen.page && !order)) return;
+  if (!orderDialog.open) scrollPositions.set(screen.id, window.scrollY);
+  const next = {
+    page, id: ++screenId, depth: screen.depth + 1, tab: primaryPages.has(page) ? page : screen.tab,
+  };
+  if (order) {
+    next.origin = screen.page;
+    orderScreens.set(next.id, order);
+  }
+  history.pushState({miniShop: next}, "");
+  renderScreen(next);
   tg?.HapticFeedback?.selectionChanged?.();
 }
-document.querySelectorAll("[data-page], [data-go-page]").forEach(button=>{
-  button.addEventListener("click",()=>switchPage(button.dataset.page||button.dataset.goPage));
+
+function goBack() {
+  if (screen.depth) history.back();
+}
+
+for (const button of document.querySelectorAll("[data-page], [data-go-page]")) {
+  button.addEventListener("click", () => switchPage(button.dataset.page || button.dataset.goPage));
+}
+$("shop-back").onclick = $("order-close").onclick = goBack;
+orderDialog.addEventListener("cancel", event => { event.preventDefault(); goBack(); });
+orderDialog.addEventListener("click", event => { if (event.target === orderDialog) goBack(); });
+tg?.BackButton?.onClick?.(goBack);
+window.addEventListener("popstate", event => {
+  if (!navigationReady || !event.state?.miniShop) return;
+  if (!orderDialog.open) scrollPositions.set(screen.id, window.scrollY);
+  renderScreen(event.state.miniShop);
 });
 $("copy-referral").onclick=async()=>{
   const link=$("account-referral-link").href;
@@ -166,7 +224,7 @@ async function loadReferrals() {
   }
 }
 const providerLabels={telegram_stars:"Telegram Stars",yookassa:"ЮKassa",yoomoney:"ЮMoney",cryptopay:"Crypto Pay",platega:"Platega"};
-const rubles = new Intl.NumberFormat("ru-RU", {style: "currency", currency: "RUB", maximumFractionDigits: 2});
+const rubles = new Intl.NumberFormat("ru-RU", {style: "currency", currency: "RUB", minimumFractionDigits: 0});
 const money = minor => rubles.format(minor / 100);
 const trafficLabel = value => value == null ? "—" : value === 0 ? "Безлимит" : value + " ГБ";
 const subscriptionStatuses = {active: "Активна", disabled: "Отключена", expired: "Истекла", deleted: "Удалена"};
@@ -180,178 +238,241 @@ function openCheckoutUrl(url){
 let availablePlans = new Map();
 let currentSubscription = null;
 let purchaseHistory = [];
-let selectedPlan = null;
-let extraDevices = 0;
-let orderBusy = false;
-let checkout = null;
 let pendingPayment = null;
 
-async function showOrder(plan, {devices = 0, renewal = false} = {}) {
-  if (orderBusy) return;
-  const currentCheckout = {};
-  checkout = currentCheckout;
-  selectedPlan = plan;
-  extraDevices = Math.min(Math.max(0, devices), plan.max_extra_devices);
-  $("order-title").textContent = plan.name;
-  $("order-specification").textContent = `${plan.days} дней · ${trafficLabel(plan.traffic_gb)}`;
-  $("order-renewal-note").hidden = !renewal;
-  $("order-renewal-note").textContent = currentSubscription?.status === "active"
-    ? `Добавим ${plan.days} дн. к действующей подписке.` : `Новый срок: ${plan.days} дн.`;
-  $("order-terms").checked = false;
-  updateOrder();
-  switchPage("order");
-  try {
-    const {methods, terms_url: termsUrl} = await api("/api/v1/payment-methods");
-    if (checkout !== currentCheckout) return;
-    Object.assign(checkout, {methods, termsUrl});
-    extraDevices = Math.min(extraDevices, availableExtraDevices());
-    if (extraDevices < devices) {
-      $("order-renewal-note").hidden = false;
-      $("order-renewal-note").textContent += " Проверьте число устройств: условия тарифа изменились.";
-    }
-    updateOrder();
-  } catch {
-    if (checkout === currentCheckout) $("order-status").textContent =
-      "Не удалось загрузить способы оплаты. Вернитесь к тарифам и откройте заказ ещё раз.";
+const plurals = new Intl.PluralRules("ru");
+const deviceWords = {one: "устройство", few: "устройства", many: "устройств", other: "устройства"};
+const dayWords = {one: "день", few: "дня", many: "дней", other: "дня"};
+const countWith = (count, words) => count + " " + words[plurals.select(count)];
+const providerMarks = {telegram_stars: "★", yookassa: "ЮК", yoomoney: "ЮМ", cryptopay: "₿", platega: "P"};
+const providerAmount = (provider, amount) => provider === "telegram_stars"
+  ? amount.toLocaleString("ru-RU") + " ⭐" : money(amount);
+const currentOrder = () => screen.page === "order" ? orderScreens.get(screen.id) : null;
+
+function showOrder(plan, {devices = 0, renewal = false, upgrade = false} = {}) {
+  const order = {
+    plan, devices: Math.min(Math.max(0, devices), plan.max_extra_devices), renewal, upgrade,
+    minDevices: upgrade ? devices : 0, termsAccepted: false, provider: "",
+  };
+  if (renewal) {
+    const extendsActive = currentSubscription?.status === "active";
+    const duration = countWith(plan.days, dayWords);
+    order.note = extendsActive ? "+" + duration + " к текущему сроку" : "Новый срок — " + duration;
   }
+  $("order-method").open = false;
+  switchPage("order", order);
+  loadOrderMethods(order);
 }
 
-function availableExtraDevices() {
-  const methods = checkout.methods;
-  if (!methods) return 0;
-  const external = Object.keys(methods).some(method => method !== "telegram_stars" && methods[method]);
+async function loadOrderMethods(order) {
+  order.methodError = false;
+  if (order === currentOrder()) renderOrder(order);
+  try {
+    const {methods, terms_url: termsUrl} = await api("/api/v1/payment-methods");
+    order.methods = methods;
+    order.termsUrl = termsUrl;
+    const limit = availableExtraDevices(order);
+    if (!order.upgrade && order.devices > limit) {
+      order.devices = limit;
+      order.note = [order.note, "Лимит изменился. Проверьте число устройств."].filter(Boolean).join(". ");
+    }
+  } catch {
+    order.methodError = true;
+  }
+  if (order === currentOrder()) renderOrder(order);
+}
+
+function availableExtraDevices({plan, methods}) {
+  if (!methods) return plan.max_extra_devices;
+  const rublesAvailable = Object.keys(providerLabels).some(key => key !== "telegram_stars" && methods[key]);
   return Math.max(
-    external ? (selectedPlan.max_extra_devices_rub ?? selectedPlan.max_extra_devices) : 0,
-    methods.telegram_stars ? (selectedPlan.max_extra_devices_stars ?? selectedPlan.max_extra_devices) : 0,
+    rublesAvailable ? (plan.max_extra_devices_rub ?? plan.max_extra_devices) : 0,
+    methods.telegram_stars ? (plan.max_extra_devices_stars ?? plan.max_extra_devices) : 0,
   );
 }
 
-function orderTotals() {
-  const plan = selectedPlan;
-  const rub = extraDevices > (plan.max_extra_devices_rub ?? plan.max_extra_devices)
-    ? 0 : plan.price_rub_minor + extraDevices * (plan.extra_device_price_rub_minor ?? 0);
-  const stars = extraDevices > (plan.max_extra_devices_stars ?? plan.max_extra_devices)
-    || (extraDevices && plan.extra_device_price_stars == null)
-    ? null : plan.price_stars + extraDevices * (plan.extra_device_price_stars ?? 0);
+function orderTotals({plan, devices}) {
+  const rub = devices > (plan.max_extra_devices_rub ?? plan.max_extra_devices)
+    ? 0 : plan.price_rub_minor + devices * (plan.extra_device_price_rub_minor ?? 0);
+  const stars = devices > (plan.max_extra_devices_stars ?? plan.max_extra_devices)
+    || (devices && plan.extra_device_price_stars == null)
+    ? null : plan.price_stars + devices * (plan.extra_device_price_stars ?? 0);
   return {rub, stars};
 }
 
-function updateOrder() {
-  const {rub, stars} = orderTotals();
-  const extraLimit = checkout.methods ? availableExtraDevices() : selectedPlan.max_extra_devices;
-  $("order-extra").value = String(extraDevices);
-  $("order-device-total").textContent = extraDevices
-    ? `${selectedPlan.devices_included + extraDevices} · ${selectedPlan.devices_included} в тарифе`
-    : String(selectedPlan.devices_included);
-  $("order-unit-row").hidden = extraLimit === 0;
-  $("order-extra-row").hidden = extraLimit === 0;
-  $("order-minus").disabled = !checkout.methods || extraDevices === 0;
-  $("order-plus").disabled = !checkout.methods || extraDevices >= extraLimit;
-  const unit = $("order-unit");
-  const prices = [];
-  if (selectedPlan.extra_device_price_rub_minor != null) {
-    prices.push(money(selectedPlan.extra_device_price_rub_minor));
+function renderPaymentMethods(order, methods, totals) {
+  const options = $("order-method-options");
+  const signature = methods.join(",");
+  if (options.dataset.methods !== signature) {
+    options.dataset.methods = signature;
+    options.replaceChildren();
+    for (const provider of methods) {
+      const option = document.createElement("label");
+      option.className = "payment-choice";
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "payment-provider";
+      radio.value = provider;
+      const mark = document.createElement("span");
+      mark.className = "payment-choice-mark";
+      mark.textContent = providerMarks[provider];
+      mark.setAttribute("aria-hidden", "true");
+      const name = document.createElement("strong");
+      name.textContent = providerLabels[provider];
+      const price = document.createElement("span");
+      price.className = "payment-choice-price";
+      option.append(mark, name, price, radio);
+      radio.onchange = () => {
+        const active = currentOrder();
+        active.provider = provider;
+        renderOrder(active);
+        $("order-method").open = false;
+        $("order-method").querySelector("summary").focus({preventScroll:true});
+      };
+      options.append(option);
+    }
   }
-  if (selectedPlan.extra_device_price_stars != null) prices.push(selectedPlan.extra_device_price_stars + " ⭐");
-  unit.textContent = prices.join(" / ") || "Недоступно";
-  $("order-open-invoice").hidden = true;
-  $("order-show-purchases").hidden = true;
-  const select = $("order-method");
-  const previous = select.value;
-  select.replaceChildren();
-  for (const [key, label] of Object.entries(providerLabels)) {
-    if (!checkout.methods?.[key]) continue;
-    if (key === "telegram_stars" ? stars == null || stars < 1 : rub <= 0) continue;
-    select.add(new Option(label, key));
+  for (const option of options.children) {
+    const radio = option.querySelector("input");
+    radio.checked = radio.value === order.provider;
+    radio.disabled = Boolean(order.busy);
+    option.querySelector(".payment-choice-price").textContent =
+      providerAmount(radio.value, radio.value === "telegram_stars" ? totals.stars : totals.rub);
   }
-  if ([...select.options].some(option => option.value === previous)) select.value = previous;
-  const hasMethods = select.options.length > 0;
-  $("order-payment").hidden = !hasMethods;
-  $("order-consent").hidden = !checkout.termsUrl;
-  $("order-terms").required = Boolean(checkout.termsUrl);
-  if (checkout.termsUrl) $("order-terms-link").href = checkout.termsUrl;
-  $("order-status").textContent = !checkout.methods ? "Загружаем способы оплаты…"
-    : hasMethods ? "" : "Для этого заказа нет способов оплаты. Проверьте тариф или число устройств.";
-  if (hasMethods) updateProviderTotal();
+}
+
+function renderOrder(order) {
+  const {plan, devices} = order;
+  const limit = availableExtraDevices(order);
+  const totals = orderTotals(order);
+  const methods = limit < order.minDevices ? [] : Object.keys(providerLabels).filter(key =>
+    order.methods?.[key] && (key === "telegram_stars" ? totals.stars >= 1 : totals.rub > 0)
+  );
+  if (!methods.includes(order.provider)) order.provider = methods[0] || "";
+  const canPay = Boolean(order.provider);
+  const unit = order.provider === "telegram_stars" ? plan.extra_device_price_stars : plan.extra_device_price_rub_minor;
+  const newSlots = order.upgrade ? devices - order.minDevices + 1 : devices;
+  const deviceLimit = plan.devices_included + devices;
+  $("order-kind").textContent = order.upgrade ? "Продление с устройствами" : order.renewal ? "Продление" : "Подписка";
+  $("order-title").textContent = plan.name;
+  $("order-specification").textContent = countWith(plan.days, dayWords) + " · " + trafficLabel(plan.traffic_gb);
+  $("order-renewal-note").textContent = order.note || "";
+  $("order-renewal-note").hidden = !order.note;
+  $("order-device-total").textContent = order.upgrade
+    ? `${plan.devices_included + order.minDevices - 1} → ${deviceLimit}` : String(deviceLimit);
+  $("order-extra-row").hidden = !limit || Boolean(order.invoice);
+  $("order-devices-label").textContent = order.upgrade ? "Новые устройства" : "Доп. устройства";
+  $("order-extra").value = newSlots ? "+" + countWith(newSlots, deviceWords) : "0";
+  $("order-minus").disabled = !order.methods || order.busy || devices <= order.minDevices;
+  $("order-plus").disabled = !order.methods || order.busy || devices >= limit;
+  $("order-unit").hidden = !canPay || unit == null;
+  if (canPay && unit != null) {
+    $("order-unit").textContent = order.upgrade
+      ? "Все доп. места в заказе · " + providerAmount(order.provider, unit * devices)
+      : providerAmount(order.provider, unit) + " за устройство";
+  }
+  renderPaymentMethods(order, methods, totals);
+  $("order-payment").hidden = !canPay || Boolean(order.invoice);
+  $("order-method").classList.toggle("single-choice", methods.length === 1);
+  if (methods.length === 1) $("order-method").open = false;
+  $("order-method-mark").textContent = providerMarks[order.provider] || "";
+  $("order-method-name").textContent = providerLabels[order.provider] || "";
+  $("order-total").textContent = canPay ? providerAmount(order.provider,
+    order.provider === "telegram_stars" ? totals.stars : totals.rub) : "";
+  $("order-consent").hidden = !order.termsUrl;
+  $("order-terms").required = Boolean(order.termsUrl);
+  $("order-terms").checked = order.termsAccepted;
+  $("order-terms").disabled = Boolean(order.busy);
+  $("order-pay").disabled = Boolean(order.busy) || Boolean(order.termsUrl && !order.termsAccepted);
+  if (order.termsUrl) $("order-terms-link").href = order.termsUrl;
+  $("order-status").textContent = order.message || (order.methodError ? "Не удалось загрузить способы оплаты."
+    : !order.methods ? "Загружаем способы оплаты…"
+    : canPay ? "" : order.upgrade ? "Для увеличения лимита нет доступного способа оплаты."
+    : "Для этого заказа нет доступного способа оплаты.");
+  $("order-retry-methods").hidden = !order.methodError;
+  $("invoice-actions").hidden = !order.invoice;
+  $("order-open-invoice").hidden = !order.invoice?.url;
+  if (order.invoice?.url) $("order-open-invoice").href = order.invoice.url;
 }
 
 for (const [button, delta] of [["order-minus", -1], ["order-plus", 1]]) {
   $(button).onclick = () => {
-    if (!selectedPlan || orderBusy || !checkout.methods) return;
-    extraDevices = Math.max(0, Math.min(availableExtraDevices(), extraDevices + delta));
-    updateOrder();
+    const order = currentOrder();
+    if (!order?.methods || order.busy) return;
+    order.devices = Math.max(order.minDevices, Math.min(availableExtraDevices(order), order.devices + delta));
+    order.message = "";
+    renderOrder(order);
   };
 }
-
-function updateProviderTotal() {
-  const {rub, stars} = orderTotals();
-  const inStars = $("order-method").value === "telegram_stars";
-  const base = inStars ? selectedPlan.price_stars : selectedPlan.price_rub_minor;
-  const total = inStars ? stars : rub;
-  const format = inStars ? amount => amount + " ⭐" : money;
-  $("order-base-amount").textContent = format(base);
-  $("order-extra-cost").hidden = extraDevices === 0;
-  $("order-extra-amount").textContent = format(total - base);
-  $("order-total").textContent = format(total);
-}
-$("order-method").onchange = updateProviderTotal;
+$("order-method").querySelector("summary").onclick = event => {
+  if ($("order-method").classList.contains("single-choice") || currentOrder()?.busy) event.preventDefault();
+};
+$("order-terms").onchange = event => {
+  const order = currentOrder();
+  order.termsAccepted = event.target.checked;
+  renderOrder(order);
+};
+$("order-retry-methods").onclick = () => loadOrderMethods(currentOrder());
+$("order-open-invoice").onclick = event => {
+  if (!tg?.openLink) return;
+  event.preventDefault();
+  openCheckoutUrl(currentOrder().invoice.url);
+};
 
 $("order-payment").onsubmit = async event => {
   event.preventDefault();
-  if (orderBusy || !selectedPlan || (checkout.termsUrl && !$("order-terms").checked)) return;
-  const provider = $("order-method").value;
-  if (!provider) return;
-  const useStars = provider === "telegram_stars";
-  const payload = {plan_id: selectedPlan.id, extra_devices: extraDevices, revision: selectedPlan.revision};
-  orderBusy = true;
-  $("order-pay").disabled = true;
-  $("order-status").textContent = "Создаём счёт…";
+  const order = currentOrder();
+  if (!order?.provider || order.busy || order.invoice || (order.termsUrl && !order.termsAccepted)) return;
+  const {provider, plan, devices} = order;
+  const payload = {plan_id: plan.id, extra_devices: devices, revision: plan.revision};
+  order.busy = true;
+  order.message = "Создаём счёт…";
+  $("order-method").open = false;
+  renderOrder(order);
   try {
-    if (useStars && !tg?.openInvoice) throw Error("Откройте Mini App через Telegram");
-    if (checkout.termsUrl) await api("/api/v1/webapp/terms/accept", {accepted: true});
-    if (useStars) {
+    if (provider === "telegram_stars" && !tg?.openInvoice) throw Error("Оплата Stars доступна в Telegram.");
+    if (order.termsUrl) await api("/api/v1/webapp/terms/accept", {accepted: true});
+    if (provider === "telegram_stars") {
       const invoice = await api("/api/v1/webapp/plans/checkout", payload);
+      if (order !== currentOrder()) {
+        order.message = "Заказ закрыт. Для оплаты откройте его снова.";
+        return;
+      }
       const status = await new Promise(resolve => tg.openInvoice(invoice.invoice_url, resolve));
-      $("order-status").textContent = {
-        paid: "Telegram принял оплату. Статус подписки доступен в покупках.",
+      order.message = {
+        paid: "Платёж принят. Статус заказа появится в покупках.",
         cancelled: "Оплата отменена.",
         failed: "Telegram не подтвердил оплату. Попробуйте ещё раз.",
-        pending: "Telegram обрабатывает платёж. Статус доступен в покупках.",
+        pending: "Telegram обрабатывает платёж.",
       }[status] || "Проверьте статус заказа в покупках.";
       if (status === "paid" || status === "pending") {
+        order.invoice = invoice;
         pendingPayment = invoice.payment_id;
-        $("order-payment").hidden = true;
-        $("order-show-purchases").hidden = false;
         refreshAfterPayment();
       }
     } else {
       const invoice = await api("/api/v1/webapp/plans/external/checkout", {...payload, provider});
-      if (!invoice.url.startsWith("https://")) throw Error("Некорректный адрес провайдера");
-      const link = $("order-open-invoice");
-      link.href = invoice.url;
-      link.onclick = event => {
-        if (!tg?.openLink) return;
-        event.preventDefault();
-        openCheckoutUrl(invoice.url);
-      };
-      link.hidden = false;
-      $("order-payment").hidden = true;
-      $("order-show-purchases").hidden = false;
+      if (new URL(invoice.url).protocol !== "https:") throw Error("Некорректный адрес провайдера");
+      order.invoice = invoice;
       pendingPayment = invoice.payment_id;
-      $("order-status").textContent = "Счёт №" + invoice.payment_id + " создан.";
-      if (tg?.openLink) openCheckoutUrl(invoice.url);
+      order.message = "Счёт №" + invoice.payment_id + " создан.";
+      if (order === currentOrder() && tg?.openLink) openCheckoutUrl(invoice.url);
     }
   } catch (error) {
-    $("order-status").textContent = error.message;
+    order.message = error.message;
   } finally {
-    orderBusy = false;
-    $("order-pay").disabled = false;
+    order.busy = false;
+    if (order === currentOrder()) renderOrder(order);
   }
 };
 
 async function loadReadyPlans() {
   try {
-    const result = await api("/api/v1/plans");
+    const [result, paymentInfo] = await Promise.all([
+      api("/api/v1/plans"), api("/api/v1/payment-methods").catch(() => null),
+    ]);
+    const methods = paymentInfo?.methods;
+    const rublesAvailable = !methods || Object.keys(providerLabels).some(key => key !== "telegram_stars" && methods[key]);
     availablePlans = new Map(result.items.map(plan => [plan.id, plan]));
     renderRenewalActions();
     const list = $("plans-list");
@@ -375,7 +496,7 @@ async function loadReadyPlans() {
       }
       const specs = document.createElement("span");
       specs.className = "plan-spec";
-      specs.textContent = `${plan.days} дней · ${trafficLabel(plan.traffic_gb)} · устройств: ${plan.devices_included}`;
+      specs.textContent = `${countWith(plan.days, dayWords)} · ${trafficLabel(plan.traffic_gb)} · ${countWith(plan.devices_included, deviceWords)}`;
       item.append(head, specs);
       if (plan.description) {
         const description = document.createElement("span");
@@ -383,18 +504,30 @@ async function loadReadyPlans() {
         description.textContent = plan.description;
         item.append(description);
       }
-      const price = document.createElement("strong");
-      price.className = "plan-price";
-      price.textContent = plan.price_rub_minor > 0 ? money(plan.price_rub_minor) : plan.price_stars + " ⭐";
+      const prices = [];
+      if (rublesAvailable && plan.price_rub_minor > 0) prices.push(money(plan.price_rub_minor));
+      if ((!methods || methods.telegram_stars) && plan.price_stars > 0) {
+        prices.push(providerAmount("telegram_stars", plan.price_stars));
+      }
       const total = document.createElement("span");
       total.className = "plan-total";
+      if (!prices.length) {
+        const notice = document.createElement("span");
+        notice.textContent = "Оплата недоступна";
+        total.append(notice);
+      }
+      prices.forEach((amount, index) => {
+        const price = document.createElement(index ? "span" : "strong");
+        if (!index) price.className = "plan-price";
+        price.textContent = amount;
+        total.append(price);
+      });
       const arrow = document.createElement("span");
       arrow.textContent = "→";
       arrow.setAttribute("aria-hidden", "true");
-      total.append(price, arrow);
+      total.append(arrow);
       item.append(total);
-      item.setAttribute("aria-label", `${plan.name}, ${price.textContent}. Открыть заказ`);
-      item.onclick = () => { if (!orderBusy) showOrder(plan); };
+      item.onclick = () => showOrder(plan);
       list.append(item);
     }
     $("plans-status").hidden = Boolean(result.items.length);
@@ -451,8 +584,8 @@ function renderRenewalActions() {
     renewal: true,
   }) : null;
   const purchasedSlots = plan ? Math.max(0, (currentSubscription.device_limit ?? plan.devices_included) - plan.devices_included) : 0;
-  $("device-upgrade").hidden = !plan || purchasedSlots >= plan.max_extra_devices;
-  $("device-upgrade").onclick = plan ? () => showOrder(plan, {devices: purchasedSlots + 1, renewal: true}) : null;
+  $("device-upgrade").hidden = !plan || currentSubscription.status !== "active" || purchasedSlots >= plan.max_extra_devices;
+  $("device-upgrade").onclick = plan ? () => showOrder(plan, {devices: purchasedSlots + 1, renewal: true, upgrade: true}) : null;
   const purchase = purchaseHistory.find(item => item.status === "succeeded" && availablePlans.has(item.plan_id));
   $("repeat-plan").hidden = !purchase;
   $("repeat-plan").onclick = purchase
@@ -523,10 +656,16 @@ async function start() {
     renderProfile(data.profile, data.user);
     renderSubscription(data.subscription);
     $("admin-entry").hidden = !data.is_admin;
-    if (data.is_admin) $("admin-entry").onclick = () => window.location.assign("/admin" + window.location.hash);
+    if (data.is_admin) $("admin-entry").onclick = () => window.location.assign("/admin?from=profile" + window.location.hash);
     $("loading").hidden = true;
     $("app").hidden = false;
     $("bottom-nav").hidden = false;
+    const restoredScreen = history.state?.miniShop;
+    if (restoredScreen) screenId = restoredScreen.id;
+    else history.replaceState({miniShop: screen}, "");
+    history.scrollRestoration = "manual";
+    navigationReady = true;
+    renderScreen(restoredScreen || screen);
     await loadReadyPlans();
   } catch (error) {
     $("loading").hidden = false;
