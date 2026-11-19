@@ -10,6 +10,7 @@ class MigrationRevisionTests(unittest.TestCase):
     def test_alembic_has_single_head(self):
         config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
         script = ScriptDirectory.from_config(config)
-        self.assertEqual(script.get_heads(), ["0002_tariff_plan_options"])
+        self.assertEqual(script.get_heads(), ["0003_customer_management"])
+        self.assertEqual(script.get_revision("0003_customer_management").down_revision, "0002_tariff_plan_options")
         self.assertEqual(script.get_revision("0002_tariff_plan_options").down_revision, "0001_legacy_baseline")
         self.assertEqual(script.get_revision("0001_legacy_baseline").down_revision, None)

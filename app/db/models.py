@@ -11,6 +11,8 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     username: Mapped[str | None] = mapped_column(String(64))
+    display_name: Mapped[str | None] = mapped_column(String(80))
+    blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -61,7 +63,7 @@ class TermsAcceptance(Base):
 class Payment(Base):
     __tablename__ = "payments"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
     provider: Mapped[str] = mapped_column(String(32))
     provider_payment_id: Mapped[str | None] = mapped_column(String(128), unique=True)
     amount: Mapped[int] = mapped_column(Integer)
@@ -145,7 +147,7 @@ class ReferralReward(Base):
     __tablename__ = "referral_rewards"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     inviter_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
-    invited_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True, nullable=False)
+    invited_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
     source_payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id"), unique=True, nullable=False)
     days: Mapped[int] = mapped_column(Integer, nullable=False)
     redeemed_payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id"), index=True, nullable=True)

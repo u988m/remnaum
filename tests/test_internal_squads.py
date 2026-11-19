@@ -14,10 +14,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
 from app.db.base import Base
-from app.db.models import Payment, Subscription, TariffPlan, TermsAcceptance, User
+from app.db.models import Payment, Referral, ReferralReward, Subscription, TariffPlan, TermsAcceptance, User
 from app.db.session import initialize_schema
 from app.services.payment_providers import PaymentLink, VerifiedPayment
-from app.services import payment_service, plans, squads, subscriptions, tariffs, trials
+from app.services import customer_admin, payment_service, plans, squads, subscriptions, tariffs, trials, users
 from app.web import routes
 
 A, B = str(uuid4()), str(uuid4())
@@ -43,7 +43,7 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.engine = engine
         self.sessions = async_sessionmaker(engine, expire_on_commit=False)
         with ExitStack() as stack:
-            for module in (payment_service, plans, squads, subscriptions, tariffs, trials):
+            for module in (customer_admin, payment_service, plans, squads, subscriptions, tariffs, trials, users):
                 stack.enter_context(patch.object(module, "SessionLocal", self.sessions))
             stack.enter_context(patch.object(settings, "remnawave_base_url", "https://panel.test"))
             stack.enter_context(patch.object(settings, "remnawave_api_token", "test"))
@@ -52,6 +52,7 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.panel = AsyncMock()
             self.panel.get_user_by_username.return_value = {}
             stack.enter_context(patch.object(payment_service, "RemnawaveClient", return_value=self.panel))
+            stack.enter_context(patch.object(customer_admin, "RemnawaveClient", return_value=self.panel))
             self.addCleanup(stack.pop_all().close)
 
     async def sync(self, *ids):
@@ -59,6 +60,73 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
             {"uuid": key, "name": name} for key, name in ids
         ]}}
         return await squads.refresh_catalog()
+
+    async def test_admin_manages_customer_and_retains_detached_payment_ledger(self):
+        async with self.engine.begin() as conn:
+            await initialize_schema(conn)
+        await self.sync((A, "Basic"))
+        plan = await plans.save_plan(PLAN | {"internal_squads": [A]})
+        async with self.sessions.begin() as session:
+            customer = User(telegram_id=42, username="customer")
+            inviter = User(telegram_id=43)
+            session.add_all([customer, inviter])
+            await session.flush()
+            payment = Payment(user_id=customer.id, provider="telegram_stars", provider_payment_id="receipt-42",
+                              currency="XTR", amount=10, status="succeeded")
+            session.add(payment)
+            await session.flush()
+            session.add_all([
+                Referral(inviter_id=inviter.id, invited_id=customer.id),
+                ReferralReward(inviter_id=inviter.id, invited_id=customer.id, source_payment_id=payment.id, days=3),
+            ])
+
+        await customer_admin.change_display_name(42, "  Клиент  ")
+        panel_account = {"response": {"id": 5, "telegramId": 42, "subscriptionUrl": "https://panel.test/sub"}}
+        self.panel.create_user.return_value = panel_account
+        await customer_admin.save_customer_subscription(42, plan["id"], ACTIVE_EXPIRY, 20, 3)
+        self.panel.create_user.assert_awaited_once_with(
+            "tg_42", ACTIVE_EXPIRY, telegram_id=42, traffic_limit_bytes=20 * 1024 ** 3,
+            hwid_device_limit=3, active_internal_squads=[A],
+        )
+        self.panel.get_user_by_username.return_value = panel_account
+        self.panel.update_user.return_value = panel_account
+        new_expiry = ACTIVE_EXPIRY + timedelta(days=20)
+        await customer_admin.save_customer_subscription(42, plan["id"], new_expiry, 30, 4)
+        current = await subscriptions.get_user_subscription(42)
+        self.assertEqual((current["expires_at"], current["traffic_gb"], current["device_limit"]), (new_expiry, 30, 4))
+        async with self.sessions() as session:
+            self.assertEqual((await session.get(User, customer.id)).display_name, "Клиент")
+
+        await customer_admin.set_customer_block(42, True)
+        self.panel.disable_user.assert_awaited_once_with(5)
+        self.assertTrue(await users.customer_is_blocked(42))
+        with self.assertRaises(users.BlockedCustomer):
+            async with self.sessions.begin() as session:
+                await users.upsert_active_customer(session, 42, "customer")
+        with patch.object(payment_service, "get_terms_url", return_value=""), self.assertRaises(users.BlockedCustomer):
+            await payment_service.create_stars_payment_for_user(42, plan_id=plan["id"], revision=plan["revision"])
+        await customer_admin.set_customer_block(42, False)
+        self.panel.enable_user.assert_awaited_once_with(5)
+        self.assertFalse(await users.customer_is_blocked(42))
+
+        await customer_admin.remove_customer(42, delete_account=False)
+        self.panel.request.assert_awaited_once_with("DELETE", "/api/users/5")
+        self.panel.get_user_by_username.return_value = {}
+        self.assertIsNone(await subscriptions.get_user_subscription(42))
+        async with self.sessions() as session:
+            self.assertEqual((await session.get(Payment, payment.id)).user_id, customer.id)
+        await customer_admin.remove_customer(42, delete_account=True)
+        async with self.sessions() as session:
+            self.assertIsNone(await session.get(User, customer.id))
+            self.assertIsNone(await session.scalar(select(Referral)))
+            retained = await session.get(Payment, payment.id)
+            self.assertEqual((retained.user_id, retained.amount, retained.status), (None, 10, "succeeded"))
+            reward = await session.scalar(select(ReferralReward))
+            self.assertEqual((reward.inviter_id, reward.invited_id, reward.days), (inviter.id, None, 3))
+        with patch.object(routes, "SessionLocal", self.sessions), patch.object(routes, "_require_telegram_admin"):
+            result = await routes.admin_payments(10, 0, "valid")
+        self.assertEqual(result["total"], 1)
+        self.assertIsNone(result["items"][0]["telegram_id"])
 
     async def test_repeated_monthly_orders_extend_once_and_charge_stars_per_device(self):
         async with self.engine.begin() as conn:

@@ -77,7 +77,7 @@ async def claim_trial(telegram_id: int) -> dict:
         user = await session.scalar(
             select(User).where(User.telegram_id == telegram_id).with_for_update()
         )
-        if user is None:
+        if user is None or user.blocked_at:
             raise ValueError("Register with /start first")
         config = await session.get(TrialSettings, 1)
         if not config or not config.enabled:

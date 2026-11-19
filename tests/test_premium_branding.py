@@ -11,7 +11,7 @@ from PIL import Image
 from fastapi import HTTPException
 
 from app.services import store_media
-from app.bot.handlers import main_menu, _admin_webapp_url
+from app.bot.handlers import main_menu
 from app.services.bot_identity import bot_username, remember_bot
 from app.web import routes
 
@@ -65,10 +65,9 @@ class StoreWelcomeImageTests(unittest.TestCase):
 
 
 class PremiumMenuTests(unittest.TestCase):
-    def test_balanced_user_menu_and_owner_only_admin(self):
+    def test_balanced_user_menu_with_admin_in_mini_app(self):
         with patch("app.bot.handlers.settings.webapp_url", "https://miniapp.example.com/app"):
-            ordinary = main_menu(is_admin=False)
-            owner = main_menu(is_admin=True)
+            ordinary = main_menu()
         self.assertEqual([[button.text for button in row] for row in ordinary.inline_keyboard], [
             ["✨ Mini App"],
             ["👤 Профиль", "🔐 Подписка"],
@@ -76,9 +75,6 @@ class PremiumMenuTests(unittest.TestCase):
             ["🧾 Покупки", "💬 Поддержка"],
         ])
         self.assertEqual(ordinary.inline_keyboard[0][0].web_app.url, "https://miniapp.example.com/app")
-        self.assertEqual(owner.inline_keyboard[:-1], ordinary.inline_keyboard)
-        self.assertEqual(owner.inline_keyboard[-1][0].text, "⚙️ Админка")
-        self.assertEqual(owner.inline_keyboard[-1][0].web_app.url, "https://miniapp.example.com/admin")
         callbacks = [b.callback_data for r in ordinary.inline_keyboard for b in r if b.callback_data]
         self.assertCountEqual(callbacks, [
             "menu:plans", "menu:subscription", "menu:purchases",
@@ -115,7 +111,7 @@ class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
         message = SimpleNamespace(answer_photo=AsyncMock(), answer=AsyncMock())
         with patch("app.bot.handlers.home_text", AsyncMock(return_value="<b>" + "😀&amp;" * 400 + "</b>")), \
              patch("app.bot.handlers.welcome_image_path", return_value=Path("/tmp/welcome.jpg")):
-            await send_home_menu(message, 123, {}, is_admin=False)
+            await send_home_menu(message, 123, {})
 
         message.answer_photo.assert_awaited_once()
         message.answer.assert_not_awaited()

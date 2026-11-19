@@ -31,10 +31,7 @@ async def setup_bot() -> None:
             await bot.set_my_commands(public_commands, scope=BotCommandScopeDefault())
             for admin_id in sorted(settings.admin_id_set):
                 try:
-                    await bot.set_my_commands(
-                        public_commands + [BotCommand(command="admin", description="Панель владельца")],
-                        scope=BotCommandScopeChat(chat_id=admin_id),
-                    )
+                    await bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=admin_id))
                 except Exception as exc:
                     logging.getLogger(__name__).warning(
                         "Could not register owner commands for %s: %s", admin_id, type(exc).__name__,

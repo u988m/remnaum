@@ -88,7 +88,7 @@ function renderRecentPayments(items) {
     const detail = document.createElement("p");
     detail.className = "muted";
     detail.textContent = [
-      payment.username ? "@" + payment.username : "Telegram " + payment.telegram_id,
+      payment.username ? "@" + payment.username : payment.telegram_id ? "Telegram " + payment.telegram_id : "Аккаунт удалён",
       new Date(payment.created_at).toLocaleString("ru-RU"),
     ].join(" · ");
     const summary = document.createElement("div");
@@ -172,10 +172,188 @@ async function overview() {
   }
 }
 $("overview-refresh").onclick = overview;
-async function loadUsers(){const d=await api("/admin/api/users?limit="+pageSize+"&offset="+userOffset);$("users-table").replaceChildren();d.items.forEach(u=>{row("users-table",[u.telegram_id,u.username?"@"+u.username:"—",u.subscription_status,u.expires_at?new Date(u.expires_at).toLocaleDateString():"—",new Date(u.created_at).toLocaleDateString()]);const tr=$("users-table").lastElementChild;const button=document.createElement("button");button.className="action";button.textContent="Подробнее";button.onclick=()=>showCustomer(u.telegram_id);tr.appendChild(cell(button.textContent));tr.lastElementChild.replaceChildren(button)});$("users-page").textContent="Показано "+(d.total?userOffset+1:0)+"–"+Math.min(userOffset+d.items.length,d.total)+" из "+d.total;$("users-prev").disabled=userOffset===0;$("users-next").disabled=userOffset+pageSize>=d.total}
-async function showCustomer(id){$("status").textContent="";try{const d=await api("/admin/api/users/"+encodeURIComponent(id));$("customer-title").textContent="Клиент "+d.telegram_id;$("customer-summary").textContent=(d.username?"@"+d.username+" · ":"")+"Зарегистрирован: "+new Date(d.created_at).toLocaleString();$("customer-subscriptions").replaceChildren();$("customer-payments").replaceChildren();d.subscriptions.forEach(x=>row("customer-subscriptions",[x.id,x.status,x.expires_at?new Date(x.expires_at).toLocaleString():"—",new Date(x.created_at).toLocaleString()]));d.payments.forEach(x=>row("customer-payments",[x.id,providerLabels[x.provider]||x.provider,formatPaymentAmount(x),paymentStatus(x.status),new Date(x.created_at).toLocaleString()]));$("customer-detail").hidden=false;$("customer-detail").scrollIntoView({behavior:"smooth",block:"nearest"})}catch(e){$("status").textContent=e.message}}
-$("customer-close").onclick=()=>{$("customer-detail").hidden=true};
-async function loadPayments(){const d=await api("/admin/api/payments?limit="+pageSize+"&offset="+paymentOffset);$("payments-table").replaceChildren();d.items.forEach(p=>row("payments-table",[p.id,p.telegram_id,providerLabels[p.provider]||p.provider,formatPaymentAmount(p),paymentStatus(p.status),new Date(p.created_at).toLocaleString()]));$("payments-page").textContent="Показано "+(d.total?paymentOffset+1:0)+"–"+Math.min(paymentOffset+d.items.length,d.total)+" из "+d.total;$("payments-prev").disabled=paymentOffset===0;$("payments-next").disabled=paymentOffset+pageSize>=d.total}
+let customer = null;
+let customerPlans = new Map();
+let openingCustomer = 0;
+let savingCustomer = false;
+const customerPath = id => "/admin/api/users/" + encodeURIComponent(id);
+const subscriptionLabels = {active:"Активна", disabled:"Отключена", expired:"Истекла", deleted:"Удалена", pending:"Ожидает"};
+
+async function loadUsers() {
+  const data = await api("/admin/api/users?limit=" + pageSize + "&offset=" + userOffset);
+  if (userOffset && !data.items.length) {
+    const lastOffset = Math.max(0, Math.floor((data.total - 1) / pageSize) * pageSize);
+    if (lastOffset < userOffset) {
+      userOffset = lastOffset;
+      return loadUsers();
+    }
+  }
+  $("users-table").replaceChildren();
+  for (const user of data.items) {
+    row("users-table", [
+      user.telegram_id, user.display_name || (user.username ? "@" + user.username : "—"),
+      user.blocked ? "Заблокирован" : (subscriptionLabels[user.subscription_status] || user.subscription_status),
+      user.expires_at ? new Date(user.expires_at).toLocaleDateString() : "—",
+      new Date(user.created_at).toLocaleDateString(),
+    ]);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "action";
+    button.textContent = "Управлять";
+    button.onclick = () => showCustomer(user.telegram_id);
+    const action = cell("");
+    action.append(button);
+    $("users-table").lastElementChild.append(action);
+  }
+  $("users-page").textContent = data.total
+    ? (userOffset + 1) + "–" + Math.min(userOffset + data.items.length, data.total) + " из " + data.total
+    : "Клиентов пока нет";
+  $("users-prev").disabled = userOffset === 0;
+  $("users-next").disabled = userOffset + pageSize >= data.total;
+}
+
+function localDateTime(date) {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function fillSubscriptionPlan() {
+  const plan = customerPlans.get(Number($("customer-plan").value));
+  if (!plan) return;
+  $("customer-traffic").value = plan.traffic_gb;
+  $("customer-devices").value = plan.devices_included;
+  if (!$("customer-expiry").value) {
+    $("customer-expiry").value = localDateTime(new Date(Date.now() + plan.days * 86400000));
+  }
+}
+$("customer-plan").onchange = fillSubscriptionPlan;
+
+async function showCustomer(id, {scroll = true} = {}) {
+  const request = ++openingCustomer;
+  $("status").textContent = "";
+  if (scroll) {
+    customer = null;
+    $("customer-detail").hidden = true;
+  }
+  try {
+    const [data, plans] = await Promise.all([api(customerPath(id)), api("/admin/api/plans")]);
+    if (request !== openingCustomer) return;
+    customer = data;
+    customerPlans = new Map(plans.items.map(plan => [plan.id, plan]));
+    const subscription = data.subscriptions[0];
+    $("customer-title").textContent = data.display_name || (data.username ? "@" + data.username : "Клиент");
+    $("customer-summary").textContent = "Telegram ID " + data.telegram_id + " · "
+      + (data.blocked ? "Заблокирован" : "Доступ к магазину открыт");
+    $("customer-name").value = data.display_name || "";
+    $("customer-block").textContent = data.blocked ? "Разблокировать" : "Заблокировать";
+    $("customer-block").hidden = data.is_admin;
+    $("customer-delete-open").hidden = data.is_admin;
+    $("customer-delete-form").hidden = true;
+    $("customer-delete-id").value = "";
+    $("customer-revoke").hidden = !subscription;
+    $("customer-subscription-title").textContent = subscription ? "Редактировать подписку" : "Выдать подписку";
+    $("customer-subscription-save").textContent = subscription ? "Сохранить подписку" : "Выдать подписку";
+    $("customer-subscription-save").disabled = data.blocked || !customerPlans.size;
+    $("customer-plan").replaceChildren(new Option("Выберите тариф", ""));
+    for (const plan of customerPlans.values()) {
+      $("customer-plan").add(new Option(plan.name + (plan.is_active ? "" : " · скрыт"), plan.id));
+    }
+    $("customer-plan").value = customerPlans.has(subscription?.plan_id) ? subscription.plan_id : "";
+    const expiresAt = subscription?.expires_at && new Date(subscription.expires_at);
+    $("customer-expiry").value = expiresAt && expiresAt > new Date() ? localDateTime(expiresAt) : "";
+    $("customer-traffic").value = subscription?.traffic_gb ?? "";
+    $("customer-devices").value = subscription?.device_limit ?? "";
+    $("customer-expiry").min = localDateTime(new Date());
+    $("customer-subscriptions").replaceChildren();
+    $("customer-payments").replaceChildren();
+    data.subscriptions.forEach(item => row("customer-subscriptions", [
+      item.id, subscriptionLabels[item.status] || item.status, item.expires_at ? new Date(item.expires_at).toLocaleString() : "—",
+      new Date(item.created_at).toLocaleString(),
+    ]));
+    data.payments.forEach(item => row("customer-payments", [
+      item.id, providerLabels[item.provider] || item.provider, formatPaymentAmount(item),
+      paymentStatus(item.status), new Date(item.created_at).toLocaleString(),
+    ]));
+    $("customer-feedback").textContent = "";
+    $("customer-detail").hidden = false;
+    if (scroll) $("customer-detail").scrollIntoView({behavior:"smooth", block:"start"});
+  } catch (error) {
+    if (request === openingCustomer) $("status").textContent = error.message;
+  }
+}
+
+$("customer-close").onclick = () => {
+  openingCustomer++;
+  customer = null;
+  $("customer-detail").hidden = true;
+};
+
+async function mutateCustomer(method, suffix, payload, success, deleted = false) {
+  if (!customer || savingCustomer) return;
+  const id = customer.telegram_id;
+  savingCustomer = true;
+  $("customer-detail").setAttribute("aria-busy", "true");
+  $("customer-feedback").textContent = "Сохраняем…";
+  try {
+    await adminApi(method, customerPath(id) + suffix, payload);
+    await loadUsers().catch(error => { $("status").textContent = error.message; });
+    if (customer?.telegram_id === id) {
+      if (deleted) {
+        $("customer-close").click();
+        $("status").textContent = success;
+      } else {
+        await showCustomer(id, {scroll:false});
+        if (customer?.telegram_id === id) $("customer-feedback").textContent = success;
+      }
+    }
+  } catch (error) {
+    if (customer?.telegram_id === id) $("customer-feedback").textContent = error.message;
+  } finally {
+    savingCustomer = false;
+    $("customer-detail").removeAttribute("aria-busy");
+  }
+}
+
+$("customer-profile-form").onsubmit = event => {
+  event.preventDefault();
+  mutateCustomer("PATCH", "", {display_name:$("customer-name").value}, "Имя сохранено.");
+};
+$("customer-subscription-form").onsubmit = event => {
+  event.preventDefault();
+  mutateCustomer("PUT", "/subscription", {
+    plan_id:Number($("customer-plan").value),
+    expires_at:new Date($("customer-expiry").value).toISOString(),
+    traffic_gb:Number($("customer-traffic").value), device_limit:Number($("customer-devices").value),
+  }, "Подписка сохранена.");
+};
+$("customer-block").onclick = () => {
+  if (!customer) return;
+  const blocked = !customer.blocked;
+  mutateCustomer("PUT", "/block", {blocked}, blocked ? "Клиент заблокирован." : "Клиент разблокирован.");
+};
+$("customer-revoke").onclick = () => {
+  const prompt = "Удалить подписку и отключить VPN у клиента?";
+  const id = customer?.telegram_id;
+  const revoke = confirmed => {
+    if (confirmed && customer?.telegram_id === id) mutateCustomer("DELETE", "/subscription", null, "Подписка удалена.");
+  };
+  if (tg?.showConfirm && tg.isVersionAtLeast?.("6.2")) tg.showConfirm(prompt, revoke);
+  else revoke(window.confirm(prompt));
+};
+$("customer-delete-open").onclick = () => {
+  $("customer-delete-form").hidden = false;
+  $("customer-delete-id").focus();
+};
+$("customer-delete-cancel").onclick = () => { $("customer-delete-form").hidden = true; };
+$("customer-delete-form").onsubmit = event => {
+  event.preventDefault();
+  const confirmation = $("customer-delete-id").value.trim();
+  if (confirmation !== String(customer?.telegram_id)) {
+    $("customer-feedback").textContent = "Введите Telegram ID выбранного клиента.";
+    return;
+  }
+  mutateCustomer("DELETE", "", {confirm_telegram_id:Number(confirmation)}, "Аккаунт удалён.", true);
+};
+async function loadPayments(){const d=await api("/admin/api/payments?limit="+pageSize+"&offset="+paymentOffset);$("payments-table").replaceChildren();d.items.forEach(p=>row("payments-table",[p.id,p.telegram_id ?? "Аккаунт удалён",providerLabels[p.provider]||p.provider,formatPaymentAmount(p),paymentStatus(p.status),new Date(p.created_at).toLocaleString()]));$("payments-page").textContent="Показано "+(d.total?paymentOffset+1:0)+"–"+Math.min(paymentOffset+d.items.length,d.total)+" из "+d.total;$("payments-prev").disabled=paymentOffset===0;$("payments-next").disabled=paymentOffset+pageSize>=d.total}
 async function adminApi(method,path,body){const r=await fetch(path,{method,headers:{"X-Telegram-Init-Data":tg?.initData||"","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(typeof d.detail==="string"?d.detail:"Ошибка запроса");return d}
 let squadItems = [];
 let selectedSquads = [];
@@ -581,21 +759,6 @@ document.querySelectorAll("[data-provider-form]").forEach(form=>{
     savePaymentProvider(form.dataset.providerForm);
   });
 });
-const pricingKeys=["rub_per_day_minor","rub_per_gb_minor","rub_per_device_minor","stars_per_day","stars_per_gb","stars_per_device","currency"];
-async function loadPricing(){
-  const data=await adminApi("GET","/admin/api/tariff-pricing");
-  $("pricing-fields").replaceChildren();
-  pricingKeys.forEach(k=>{
-    const label=document.createElement("label");label.textContent=k;
-    const input=document.createElement("input");input.id="pricing-"+k;input.type=k==="currency"?"text":"number";
-    input.value=data[k];if(k!=="currency")input.min="0";
-    label.appendChild(input);$("pricing-fields").appendChild(label);
-  });
-}
-$("pricing-save").onclick=async()=>{try{
-  const pricing={};pricingKeys.forEach(k=>pricing[k]=k==="currency"?$("pricing-"+k).value:+$("pricing-"+k).value);
-  await adminApi("PUT","/admin/api/tariff-pricing",{pricing});$("status").textContent="Формула цен сохранена";
-}catch(e){$("status").textContent=e.message}};
 async function loadTrialSettings(){
   const d=await adminApi("GET","/admin/api/trial");
   $("trial-enabled").checked=d.enabled;$("trial-days").value=d.days;
@@ -674,7 +837,6 @@ const tabs = {
   referrals: {sections: ["referrals-view"], load: loadReferrals},
   brand: {sections: ["brand-view"], load: loadBrand},
   trial: {sections: ["trial-view"], load: loadTrialSettings},
-  pricing: {sections: ["pricing-view"], load: loadPricing},
   configuration: {sections: ["configuration-view"]},
   settings: {sections: ["payment-settings-view"], load: loadPaymentSettings},
 };
@@ -685,12 +847,12 @@ for (const [tab, provider] of Object.entries(providerByTab)) {
 
 let activeTab = null;
 async function openTab(requested, {updateHistory = true} = {}) {
-  const legacy = {promos: "bonuses", tariffs: "pricing", payment_methods: "settings"};
+  const legacy = {promos: "bonuses", tariffs: "plans", pricing: "plans", payment_methods: "settings"};
   let key = Object.hasOwn(legacy, requested) ? legacy[requested] : requested;
   if (!Object.hasOwn(tabs, key)) key = "overview";
   const tab = tabs[key];
   const provider = providerByTab[key];
-  const parentTab = provider || ["settings", "brand", "trial", "pricing"].includes(key)
+  const parentTab = provider || ["settings", "brand", "trial"].includes(key)
     ? "configuration" : key;
 
   $("status").textContent = "";
@@ -730,6 +892,7 @@ async function start() {
     $("loading").hidden = true;
     $("dashboard").hidden = false;
     adminMenuOpen.hidden = false;
+    document.querySelector(".admin-return-link").href = "/app" + window.location.hash;
     await openTab(tabFromLocation(), {updateHistory:false});
   } catch (error) {
     $("loading").textContent = error.message;
