@@ -126,12 +126,50 @@ class CheckoutContracts(unittest.IsolatedAsyncioTestCase):
              patch.object(routes,"get_store_payment_settings",AsyncMock(return_value=(
                  {"telegram_stars":True,"yookassa":True,"yoomoney":False,"cryptopay":False},
                  {"yookassa":{"shop_id":"shop","secret_key":"sensitive-secret"}}))), \
+             patch.object(routes,"get_terms_url",return_value=""), \
              patch.object(routes.settings,"public_base_url","https://hooks.example"):
             data=await routes.admin_payment_diagnostics(x_telegram_init_data="verified")
         self.assertEqual(data["verification"],"configuration_only")
         self.assertEqual(data["providers"]["yookassa"]["webhook_url"],
                          "https://hooks.example/webhooks/payments/yookassa")
         self.assertNotIn("sensitive-secret",json.dumps(data))
+
+    async def test_bot_offers_enabled_methods_when_no_terms_url_is_configured(self):
+        from app.db.models import TariffPlan
+        from app.services.plans import plan_revision
+
+        plan = TariffPlan(
+            id=4, title="Безлимит", duration_days=30, traffic_gb=0,
+            device_limit=5, price_rub_minor=10000, price_stars=100, is_active=True,
+        )
+        revision = plan_revision(plan)
+        callback = SimpleNamespace(
+            data=f"plan:confirm:4:0:{revision}", answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()), from_user=SimpleNamespace(id=1),
+        )
+        methods = {"telegram_stars": True, "yookassa": True}
+        credentials = {"yookassa": {"shop_id": "shop", "secret_key": "test-key"}}
+        with patch.object(handlers, "get_plan", return_value=plan), \
+             patch.object(handlers, "get_terms_url", return_value=""), \
+             patch.object(handlers, "has_accepted_current_terms") as accepted, \
+             patch.object(handlers, "welcome_image_path", return_value=None), \
+             patch.object(handlers, "get_store_payment_settings", return_value=(methods, credentials)):
+            await handlers.fixed_plan_checkout_handler(callback)
+        accepted.assert_not_awaited()
+        callback.answer.assert_awaited_once_with()
+        keyboard = callback.message.edit_text.await_args.kwargs["reply_markup"].inline_keyboard
+        self.assertEqual([row[0].callback_data for row in keyboard], [
+            f"plan:pay:stars:4:0:{revision}", f"plan:pay:yookassa:4:0:{revision}", "plan:select:4:0",
+        ])
+
+    async def test_terms_are_enforced_when_published(self):
+        from app.services import payment_service
+
+        with patch.object(payment_service, "get_terms_url", return_value="https://store.test/terms"), \
+             patch.object(payment_service, "has_accepted_current_terms", return_value=False):
+            with self.assertRaises(payment_service.TermsAcceptanceRequired):
+                await payment_service.create_stars_payment_for_user(1, plan_id=4)
+            self.assertFalse(await payment_service.validate_stars_pre_checkout(1, 7, 10, "XTR", "remnaum:7"))
 
 
 if __name__=="__main__":

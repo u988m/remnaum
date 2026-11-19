@@ -13,7 +13,7 @@ from app.config import settings
 from app.db.models import Payment, Subscription, User
 from app.db.session import SessionLocal
 from app.services.payment_providers import get_provider
-from app.services.payment_service import settle_payment
+from app.services.payment_service import PaymentProviderUnavailable, TermsAcceptanceRequired, settle_payment
 from app.services.tariffs import format_traffic
 from app.services.subscriptions import provision_paid_payment
 from app.services.payment_notifications import notify_external_payment_success
@@ -37,8 +37,8 @@ class PaymentSettingsUpdate(BaseModel):
 
 async def _configured_provider(name: str):
     methods, credentials = await get_store_payment_settings()
-    if not methods.get(name):
-        raise HTTPException(status_code=404, detail="Payment provider is disabled")
+    if not public_payment_settings(methods, credentials)["configured"].get(name):
+        raise RuntimeError("Payment provider credentials are unavailable")
     return get_provider(name, credentials.get(name))
 
 
@@ -62,6 +62,7 @@ async def admin_payment_diagnostics(x_telegram_init_data: str | None = Header(de
         "cryptopay": "/webhooks/payments/cryptopay",
     }
     return {
+        "terms_url": await get_terms_url(),
         "providers": {
             name: {
                 "enabled": bool(methods.get(name)),
@@ -87,9 +88,7 @@ async def admin_update_payment_settings(
 
 @router.get("/api/v1/payment-methods")
 async def public_payment_methods():
-    methods, credentials = await get_store_payment_settings()
-    configured = public_payment_settings(methods, credentials)["configured"]
-    return {"methods": {key: enabled and configured.get(key, False) for key, enabled in methods.items()}}
+    return {"methods": await _get_public_checkout_methods(), "terms_url": await get_terms_url()}
 
 
 
@@ -159,9 +158,9 @@ async def yoomoney_payment_form(payment_id: int):
             raise HTTPException(status_code=404, detail="Payment not found or no longer pending")
         amount = f"{payment.amount / 100:.2f}"
     methods, credentials = await get_store_payment_settings()
-    if not methods.get("yoomoney"):
-        raise HTTPException(status_code=404, detail="Payment provider is disabled")
-    receiver_value = (credentials.get("yoomoney") or {}).get("receiver") or settings.yoomoney_receiver
+    if not public_payment_settings(methods, credentials)["configured"]["yoomoney"]:
+        raise HTTPException(status_code=503, detail="Реквизиты ЮMoney недоступны")
+    receiver_value = credentials["yoomoney"]["receiver"]
     receiver = escape(receiver_value, quote=True)
     label = escape(f"remnaum-{payment_id}", quote=True)
     html = f"""<!doctype html>
@@ -238,7 +237,7 @@ from aiogram.types import LabeledPrice
 
 from app.db.models import Subscription, SubscriptionDetails, TermsAcceptance, User
 from app.db.session import SessionLocal
-from app.services.payment_service import accept_current_terms, create_stars_payment_for_user, has_accepted_current_terms
+from app.services.payment_service import accept_current_terms, create_stars_payment_for_user
 from app.services.subscriptions import get_user_subscription
 from app.services.telegram_webapp import validate_telegram_init_data
 from app.config import settings
@@ -296,13 +295,14 @@ async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=Non
             "subscription_url": subscription["subscription_url"],
             "days_left": days_left,
         }
+    payment_methods = await _get_public_checkout_methods()
     return {
         "user": {"id": identity["id"], "first_name": identity.get("first_name", "")},
         "profile": await public_store_profile(),
         "is_admin": int(identity["id"]) in settings.admin_id_set,
         "pricing": pricing,
-        "stars_enabled": await is_payment_method_enabled("telegram_stars"),
-        "payment_methods": await _get_public_checkout_methods(),
+        "stars_enabled": payment_methods["telegram_stars"],
+        "payment_methods": payment_methods,
         "terms_url": await get_terms_url(),
         "limits": {
             "days_min": settings.tariff_min_days, "days_max": settings.tariff_max_days,
@@ -637,17 +637,17 @@ async def webapp_checkout_ready_plan(data: WebAppFixedPlanCheckout, x_telegram_i
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     identity = await _webapp_user(x_telegram_init_data)
     telegram_id = int(identity["id"])
-    if not await has_accepted_current_terms(telegram_id):
-        raise HTTPException(status_code=403, detail="Accept the current terms before checkout")
     if not await is_payment_method_enabled("telegram_stars"):
-        raise HTTPException(status_code=403, detail="Telegram Stars checkout is disabled")
+        raise HTTPException(status_code=403, detail="Оплата в Telegram Stars отключена.")
+    if bot is None:
+        raise HTTPException(status_code=503, detail="Оплата в Telegram Stars временно недоступна.")
     try:
         payment, stars = await create_stars_payment_for_user(telegram_id, **data.model_dump())
         tariff = json.loads(payment.payload)["tariff"]
+    except TermsAcceptanceRequired as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if bot is None:
-        raise HTTPException(status_code=503, detail="Telegram bot is not initialized")
     try:
         url = await bot.create_invoice_link(
             title=(await get_store_profile())["name"][:28] + " VPN",
@@ -657,7 +657,7 @@ async def webapp_checkout_ready_plan(data: WebAppFixedPlanCheckout, x_telegram_i
             prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
         )
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Could not create Stars invoice") from exc
+        raise HTTPException(status_code=502, detail="Не удалось открыть счёт Telegram Stars. Попробуйте ещё раз.") from exc
     return {"payment_id": payment.id, "stars": stars, "invoice_url": url}
 
 
@@ -987,7 +987,6 @@ async def webapp_redeem_promo(
 # The provider controls enabled state and encrypted credentials in PostgreSQL.
 from urllib.parse import urlsplit
 from app.services.payment_service import create_payment_for_user
-from app.services.store_settings import get_store_payment_settings, public_payment_settings
 
 
 class WebAppExternalCheckout(WebAppCheckout):
@@ -1006,6 +1005,10 @@ def _validate_external_provider(name: str) -> None:
 async def _external_checkout(telegram_id: int, provider: str, **plan_options):
     try:
         payment, link = await create_payment_for_user(telegram_id, provider, **plan_options)
+    except TermsAcceptanceRequired as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except PaymentProviderUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if urlsplit(link.url).scheme != "https":
@@ -1030,14 +1033,13 @@ async def webapp_external_plan_checkout(
     identity = await _webapp_user(x_telegram_init_data)
     _validate_external_provider(data.provider)
     telegram_id = int(identity["id"])
-    if not await has_accepted_current_terms(telegram_id):
-        raise HTTPException(status_code=403, detail="Accept the current terms before checkout")
     return await _external_checkout(telegram_id, data.provider, **data.model_dump(exclude={"provider"}))
 
 
 async def _get_public_checkout_methods():
     methods, credentials = await get_store_payment_settings()
     configured = public_payment_settings(methods, credentials)["configured"]
+    configured["telegram_stars"] = bot is not None
     return {key: bool(methods.get(key) and configured.get(key)) for key in (
         "telegram_stars", "yookassa", "yoomoney", "cryptopay"
     )}

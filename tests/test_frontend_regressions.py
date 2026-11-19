@@ -46,7 +46,7 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
                     "pay-yookassa", "pay-yoomoney", "pay-cryptopay"):
             self.assertIn('data-tab="' + tab + '"', admin)
         self.assertIn('async function savePaymentProvider(provider)', admin_js)
-        self.assertIn('methods:{[provider]:$("method-" + provider).checked}', admin_js)
+        self.assertIn('methods:{[provider]:toggle.checked}', admin_js)
         self.assertNotIn('id="payment-settings-save"', admin)
         self.assertNotIn('id="custom-plan"', mini)
         self.assertNotIn('id="buy"', mini)
@@ -72,6 +72,7 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         for html in (mini, admin):
             self.assertIn('href="/static/theme.css"', html)
             self.assertIn('data-theme="monochrome"', html)
+            self.assertIn('maximum-scale=1,user-scalable=no', html)
         self.assertNotIn('id="hero-image"', mini)
         self.assertNotIn('profile?.welcome_image_url', mini_js)
         self.assertIn('overflow:hidden; text-overflow:ellipsis;', (STATIC / "miniapp.css").read_text(encoding="utf-8"))

@@ -125,8 +125,11 @@ main {
     font-size: 1.2rem;
 }
 .stepper output { min-width: 1.7ch; text-align: center; font-variant-numeric: tabular-nums; }
-#order-payment { margin-top: 14px; }
-#order-provider-total { margin-top: 8px; }
+#order-payment { display: grid; gap: 14px; }
+#order-payment .checkout-summary, #order-payment .check, #order-payment .form-field { margin: 0; }
+#order-status { margin: 0; }
+#order-unit { text-align: right; font-variant-numeric: tabular-nums; }
+#order-title { overflow-wrap: anywhere; }
 .expiry-line { margin: 16px 0; font-size: .85rem; }
 .expiry-line span { color: var(--color-muted); }
 .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }

@@ -4,12 +4,19 @@ import json
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
+from sqlalchemy.dialects.postgresql import insert
+
 from app.config import settings
 from app.db.models import StorePaymentSettings
 from app.db.session import SessionLocal
 
-PROVIDERS = {"telegram_stars", "yookassa", "yoomoney", "cryptopay"}
 DEFAULT_METHODS = {"telegram_stars": True, "yookassa": False, "yoomoney": False, "cryptopay": False}
+REQUIRED_CREDENTIALS = {
+    "yookassa": ("shop_id", "secret_key"),
+    "yoomoney": ("receiver", "notification_secret"),
+    "cryptopay": ("api_token",),
+}
+PROVIDER_LABELS = {"yookassa": "ЮKassa", "yoomoney": "ЮMoney", "cryptopay": "Crypto Pay"}
 
 
 def _cipher() -> Fernet:
@@ -32,42 +39,54 @@ def decrypt_credentials(token: str) -> dict[str, Any]:
 
 
 async def get_store_payment_settings():
-    from sqlalchemy import select
     async with SessionLocal() as session:
         row = await session.get(StorePaymentSettings, 1)
         if row is None:
             return DEFAULT_METHODS.copy(), {}
-        methods = DEFAULT_METHODS | {k: bool(v) for k, v in (row.methods or {}).items() if k in PROVIDERS}
-        return methods, decrypt_credentials(row.encrypted_credentials)
+        methods = DEFAULT_METHODS | {k: bool(v) for k, v in (row.methods or {}).items() if k in DEFAULT_METHODS}
+        try:
+            return methods, decrypt_credentials(row.encrypted_credentials)
+        except RuntimeError:
+            return methods, {}
 
 
 async def is_payment_method_enabled(provider: str) -> bool:
-    methods, _ = await get_store_payment_settings()
-    return bool(methods.get(provider, False))
+    async with SessionLocal() as session:
+        row = await session.get(StorePaymentSettings, 1)
+        methods = (row.methods or {}) if row is not None else {}
+        return bool(methods.get(provider, DEFAULT_METHODS.get(provider, False)))
 
 
 async def update_store_payment_settings(methods: dict[str, bool], credentials: dict[str, dict[str, str]]):
-    from sqlalchemy import select
-    if set(methods) - PROVIDERS or set(credentials) - (PROVIDERS - {"telegram_stars"}):
-        raise ValueError("Unknown payment provider")
+    if methods.keys() - DEFAULT_METHODS.keys() or credentials.keys() - REQUIRED_CREDENTIALS.keys():
+        raise ValueError("Неизвестный способ оплаты")
+    affected = (methods.keys() | credentials.keys()) & REQUIRED_CREDENTIALS.keys()
     async with SessionLocal() as session:
-        row = await session.get(StorePaymentSettings, 1)
-        stored = decrypt_credentials(row.encrypted_credentials) if row else {}
+        await session.execute(insert(StorePaymentSettings).values(
+            id=1, methods=DEFAULT_METHODS, encrypted_credentials="",
+        ).on_conflict_do_nothing(index_elements=[StorePaymentSettings.id]))
+        row = await session.get(StorePaymentSettings, 1, with_for_update=True)
+        current = DEFAULT_METHODS | (row.methods or {}) | methods
+        try:
+            stored = decrypt_credentials(row.encrypted_credentials)
+        except RuntimeError as exc:
+            if credentials or any(current[name] for name in affected):
+                raise ValueError("Не удалось прочитать сохранённые реквизиты. Проверьте APP_SECRET_KEY на сервере.") from exc
+            stored = {}
         for provider, values in credentials.items():
-            if values:
-                stored[provider] = {**stored.get(provider, {}), **{str(k): str(v) for k, v in values.items() if v}}
-        current = (row.methods if row else DEFAULT_METHODS.copy()) | {k: bool(v) for k, v in methods.items()}
-        required = {"yookassa": ("shop_id", "secret_key"), "yoomoney": ("receiver", "notification_secret"), "cryptopay": ("api_token",)}
-        for provider, fields in required.items():
-            if current.get(provider) and not all(stored.get(provider, {}).get(field) for field in fields):
-                raise ValueError(f"Complete credentials are required before enabling {provider}")
-        if row is None:
-            row = StorePaymentSettings(id=1)
-            session.add(row)
+            changes = {field: values[field].strip() for field in REQUIRED_CREDENTIALS[provider]
+                       if values.get(field, "").strip()}
+            if changes:
+                stored[provider] = stored.get(provider, {}) | changes
+        result = public_payment_settings(current, stored)
+        for provider in affected:
+            if current[provider] and not result["configured"][provider]:
+                raise ValueError(f"Заполните реквизиты {PROVIDER_LABELS[provider]} перед включением.")
         row.methods = current
-        row.encrypted_credentials = encrypt_credentials(stored)
+        if credentials:
+            row.encrypted_credentials = encrypt_credentials(stored)
         await session.commit()
-    return public_payment_settings(current, stored)
+    return result
 
 
 def public_payment_settings(methods, credentials):
@@ -75,8 +94,7 @@ def public_payment_settings(methods, credentials):
         "methods": methods,
         "configured": {
             "telegram_stars": True,
-            "yookassa": all(credentials.get("yookassa", {}).get(k) for k in ("shop_id", "secret_key")),
-            "yoomoney": all(credentials.get("yoomoney", {}).get(k) for k in ("receiver", "notification_secret")),
-            "cryptopay": bool(credentials.get("cryptopay", {}).get("api_token")),
+            **{provider: all(credentials.get(provider, {}).get(field) for field in fields)
+               for provider, fields in REQUIRED_CREDENTIALS.items()},
         },
     }
