@@ -1,6 +1,8 @@
 <div align="center">
 
-![Remnaum — баннер](assets/remnaum-banner.svg)
+<p align="center">
+  <img src="assets/remnaum-banner.svg" alt="Remnaum — VPN storefront for Remnawave" width="100%">
+</p>
 
 # 🌊 Remnaum
 
