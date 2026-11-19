@@ -1,4 +1,7 @@
 """Installer unit tests: no Docker daemon or external connectivity required."""
+import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -189,6 +192,44 @@ class InstallerTests(unittest.TestCase):
             }), 0)
         self.assertEqual(runner.call_args_list[0].args[0], ["bash", "update.sh"])
         self.assertEqual(runner.call_args_list[1].args[0], ["docker", "compose", "ps"])
+
+    def test_update_checks_database_before_replacing_containers(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            shutil.copyfile(installer.ROOT / "update.sh", root / "update.sh")
+            (root / ".env").write_text("COMPOSE_FILE=compose.yaml\n")
+            (root / "backup.sh").write_text('echo backup >> "$TEST_UPDATE_LOG"\n')
+            (root / "git").write_text(
+                '#!/bin/bash\nif [[ "$*" == *"branch --show-current" ]]; then echo main; fi\n'
+            )
+            (root / "docker").write_text(
+                '#!/bin/bash\nprintf "%s\\n" "$*" >> "$TEST_UPDATE_LOG"\n'
+                'if [[ "$*" == "compose run "* ]]; then exit "$TEST_PROBE_RESULT"; fi\n'
+            )
+            (root / "git").chmod(0o700)
+            (root / "docker").chmod(0o700)
+            env = os.environ.copy()
+            env.pop("SUDO_USER", None)
+            env["PATH"] = f"{root}:{env['PATH']}"
+            env["TEST_UPDATE_LOG"] = str(root / "commands")
+            for result in (0, 1):
+                with self.subTest(probe_exit_code=result):
+                    (root / "commands").touch()
+                    (root / "commands").write_text("")
+                    check = subprocess.run(
+                        ["bash", str(root / "update.sh")],
+                        env=env | {"TEST_PROBE_RESULT": str(result)},
+                        capture_output=True, text=True, check=False,
+                    )
+                    self.assertEqual(check.returncode, result, check.stderr)
+                    expected = [
+                        "backup",
+                        "compose config --quiet",
+                        "compose build app",
+                        "compose run --rm --no-deps -T --entrypoint python app -m app.db.check_connection",
+                    ]
+                    self.assertEqual((root / "commands").read_text().splitlines(),
+                                     expected if result else expected + ["compose up -d"])
 
     def test_installer_health_retries_then_succeeds(self):
         from subprocess import CompletedProcess
