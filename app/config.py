@@ -66,6 +66,19 @@ class Settings(BaseSettings):
             raise ValueError("Tariff minimum values must not exceed maximum values")
         return self
 
+    @model_validator(mode="after")
+    def validate_production_secrets(self):
+        if self.app_env.lower() in {"production", "prod"}:
+            weak_secrets = {"development-only-change-me", "replace-with-a-long-random-secret"}
+            if len(self.app_secret_key) < 32 or self.app_secret_key in weak_secrets:
+                raise ValueError("APP_SECRET_KEY must be a strong unique secret in production")
+            if self.telegram_use_webhook:
+                if len(self.telegram_webhook_secret) < 24:
+                    raise ValueError("TELEGRAM_WEBHOOK_SECRET must be configured in production")
+                if not self.telegram_webhook_url.startswith("https://"):
+                    raise ValueError("TELEGRAM_WEBHOOK_URL must be HTTPS in production")
+        return self
+
     @property
     def remnawave_internal_squad_ids(self) -> list[str]:
         return [value.strip() for value in self.remnawave_active_internal_squads.split(",") if value.strip()]
