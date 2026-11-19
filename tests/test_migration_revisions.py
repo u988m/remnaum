@@ -10,7 +10,8 @@ class MigrationRevisionTests(unittest.TestCase):
     def test_alembic_has_single_head(self):
         config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
         script = ScriptDirectory.from_config(config)
-        self.assertEqual(script.get_heads(), ["0008_store_operations"])
+        self.assertEqual(script.get_heads(), ["0009_ticket_activity"])
+        self.assertEqual(script.get_revision("0009_ticket_activity").down_revision, "0008_store_operations")
         self.assertEqual(script.get_revision("0008_store_operations").down_revision, "0007_subscription_notifications")
         self.assertEqual(script.get_revision("0007_subscription_notifications").down_revision, "0006_store_documents")
         self.assertEqual(script.get_revision("0006_store_documents").down_revision, "0005_device_aliases")

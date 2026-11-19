@@ -6,6 +6,7 @@
 <title>Remnaum · VPN</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="stylesheet" href="/static/theme.css">
+<link rel="stylesheet" href="/store-theme.css" id="store-theme">
 <link rel="stylesheet" href="/static/miniapp.css">
 </head>
 <body>
@@ -82,37 +83,84 @@
         </ol>
       </section>
     </section>
-    <section class="page" id="page-support" data-page-panel="support" hidden>
-      <section class="panel" id="account-support">
-        <h1>Поддержка</h1>
-        <button class="secondary-btn full" data-go-page="tickets" type="button">Открыть тикеты</button>
+    <section class="page support-page" id="page-support" data-page-panel="support" hidden>
+      <h1>Поддержка</h1>
+      <button class="profile-action support-shortcut" data-go-page="tickets" type="button">
+        <svg aria-hidden="true"><use href="#i-ticket"/></svg>
+        <span><strong>Обращения</strong><small>Создать тикет или посмотреть ответы</small></span>
+        <span aria-hidden="true">›</span>
+      </button>
+      <section class="panel support-contact" id="account-support">
+        <h2>Написать напрямую</h2>
         <p class="muted" id="support-text">Контакт поддержки пока не указан.</p>
-        <a class="primary-btn full" id="support-link" target="_blank" rel="noopener" hidden>Связаться с поддержкой →</a>
+        <a class="secondary-btn full" id="support-link" target="_blank" rel="noopener noreferrer" hidden>Написать в Telegram</a>
       </section>
     </section>
-    <section class="page" id="page-tickets" data-page-panel="tickets" hidden>
-      <h1>Тикеты поддержки</h1>
-      <section class="panel ticket-workspace" id="user-tickets">
-        <form data-ticket-create>
-          <label>Тема <input name="subject" required maxlength="120"></label>
-          <label>Сообщение <textarea name="body" required maxlength="3000"></textarea></label>
-          <button class="primary-btn" type="submit">Создать тикет</button>
-        </form>
-    <div data-ticket-list></div>
-    <div><button type="button" class="secondary-btn" data-ticket-prev>Назад</button>
-      <button type="button" class="secondary-btn" data-ticket-next>Далее</button></div>
-    <section data-ticket-detail hidden>
-      <h2 data-ticket-heading></h2>
-      <div data-ticket-body></div>
-      <form data-ticket-reply>
-        <label>Ответ <textarea name="body" required maxlength="3000"></textarea></label>
-        <button class="primary-btn" type="submit">Отправить</button>
+    <section class="page ticket-workspace" id="page-tickets" data-page-panel="tickets" hidden>
+      <div class="ticket-bar">
+        <h1>Обращения</h1>
+        <button class="primary-btn" type="button" data-ticket-new aria-controls="new-ticket-form" aria-expanded="false">＋ Создать</button>
+      </div>
+      <form class="panel ticket-compose" id="new-ticket-form" data-ticket-create hidden>
+        <h2>Новое обращение</h2>
+        <label>Тема <input name="subject" required maxlength="120"></label>
+        <label>Сообщение <textarea name="body" required maxlength="3000" rows="4"></textarea></label>
+        <div class="ticket-actions">
+          <button class="primary-btn" type="submit">Отправить обращение</button>
+          <button class="secondary-btn" type="button" data-ticket-cancel>Отмена</button>
+        </div>
+        <p class="ticket-feedback" data-ticket-create-status role="status"></p>
       </form>
 
+  <div class="ticket-layout" data-ticket-layout>
+    <section class="ticket-history" data-ticket-history aria-labelledby="user-history-title">
+      <div class="ticket-bar">
+        <h2 id="user-history-title">История обращений</h2>
+        <button class="secondary-btn ticket-icon" type="button" data-ticket-refresh-list aria-label="Обновить историю" title="Обновить историю"><svg aria-hidden="true"><use href="#i-refresh"/></svg></button>
+      </div>
+      <div class="ticket-filters" role="group" aria-label="Статус обращений">
+        <button type="button" data-ticket-filter="all" aria-pressed="true">Все</button>
+        <button type="button" data-ticket-filter="open" aria-pressed="false">Открытые</button>
+        <button type="button" data-ticket-filter="closed" aria-pressed="false">Закрытые</button>
+      </div>
+      <form class="ticket-search" data-ticket-search role="search">
+        <input name="search" type="search" maxlength="120" placeholder="Номер или тема" aria-label="Поиск обращений">
+        <button class="secondary-btn" type="submit">Найти</button>
+      </form>
+      <div class="ticket-list" data-ticket-list aria-label="Обращения"></div>
+      <nav class="ticket-pagination" data-ticket-pages aria-label="Страницы истории" hidden>
+        <button type="button" class="secondary-btn" data-ticket-prev>Назад</button>
+        <span class="muted" data-ticket-page></span>
+        <button type="button" class="secondary-btn" data-ticket-next>Далее</button>
+      </nav>
+      <p class="ticket-feedback" data-ticket-list-status role="status"></p>
     </section>
-    <p data-ticket-status role="status"></p>
-
-      </section>
+    <section class="ticket-detail" data-ticket-detail hidden aria-labelledby="user-ticket-subject">
+      <div class="ticket-bar">
+        <button type="button" class="secondary-btn" data-ticket-back>← К истории</button>
+        <button type="button" class="secondary-btn" data-ticket-refresh>Обновить</button>
+      </div>
+      <p class="ticket-feedback" data-ticket-detail-status role="status"></p>
+      <div data-ticket-content hidden>
+        <div class="ticket-bar ticket-context">
+          <span class="muted" data-ticket-number></span>
+          <span class="ticket-badge" data-ticket-state></span>
+        </div>
+        <h2 id="user-ticket-subject" data-ticket-heading tabindex="-1"></h2>
+        <p class="ticket-info muted" data-ticket-meta></p>
+        <div class="ticket-thread" data-ticket-body tabindex="0" role="region" aria-label="Переписка"></div>
+        <form class="ticket-reply" data-ticket-reply>
+          <label>Ответ <textarea name="body" required maxlength="3000" rows="3" placeholder="Напишите сообщение"></textarea></label>
+          <button class="primary-btn" type="submit">Отправить ответ</button>
+        </form>
+        <p class="muted ticket-closed-note" data-ticket-closed-note hidden>Обращение закрыто. Переписка сохранена в истории.</p>
+        <div class="ticket-actions">
+          <button type="button" class="secondary-btn" data-ticket-close></button>
+        </div>
+      </div>
+    </section>
+    <p class="ticket-placeholder muted" data-ticket-placeholder>Выберите обращение из истории.</p>
+  </div>
     </section>
     <section class="page" id="page-bonuses" data-page-panel="bonuses" hidden>
       <h1>Бонусы</h1>
@@ -155,7 +203,6 @@
         <strong>Админ-панель</strong><span>Управление магазином</span>
       </button>
       <div class="profile-actions">
-        <button class="profile-action" type="button" data-go-page="theme"><strong>Тема</strong><span>Настроить цвета</span></button>
         <a class="profile-action" id="google-link" href="/auth/google?link=true" hidden>Привязать Google</a>
         <form id="browser-logout" action="/auth/logout" method="post" hidden>
           <button class="profile-action" type="submit">Выйти</button>
@@ -166,15 +213,6 @@
         <button class="profile-action" type="button" data-go-page="guide"><strong>Инструкция</strong><span>Как подключить VPN</span></button>
         <button class="profile-action" type="button" data-go-page="support"><strong><svg class="profile-icon" aria-hidden="true"><use href="#i-help"/></svg>Помощь</strong><span>Связаться с поддержкой</span></button>
       </div>
-    </section>
-    <section class="page" id="page-theme" data-page-panel="theme" hidden>
-      <h1>Цвета темы</h1>
-      <form class="panel" id="theme-form">
-        <div class="swatch-fields" id="theme-colors"></div>
-        <button class="primary-btn" type="submit">Сохранить</button>
-        <button class="secondary-btn" id="theme-reset" type="button">Сбросить</button>
-        <p id="theme-status" role="status"></p>
-      </form>
     </section>
     <section class="page" id="page-notifications" data-page-panel="notifications" hidden>
       <h1>Уведомления</h1>
