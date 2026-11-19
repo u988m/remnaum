@@ -254,3 +254,25 @@ main { max-width:620px; padding:14px clamp(14px,4vw,24px) calc(134px + env(safe-
  .bottom-nav button > span { font-size:.57rem; }
 }
 @media (min-width:700px) { #page-home .hero { min-height:320px; } }
+
+/* Fixed-plan only mobile storefront */
+#page-home .hero { min-height:230px; }
+#page-home .hero h1 { max-width:18ch; font-size:clamp(1.75rem,7vw,2.75rem); }
+#page-home .home-actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
+#page-home .quick-action { min-height:94px; }
+#page-home .quick-action strong { font-size:.82rem; line-height:1.28; }
+#page-shop .plan-list { gap:12px; }
+#page-shop .plan-card { padding:20px; border-radius:22px; }
+#page-shop .plan-card .plan-price { font-size:clamp(1.65rem,6vw,2.05rem); }
+#page-shop .plan-card .section-title { gap:10px; }
+#page-shop .plan-card .section-title h2 { min-width:0; overflow-wrap:anywhere; }
+#page-order .order-panel { display:grid; gap:12px; }
+#page-order .order-panel .primary-btn { min-height:52px; }
+#page-order .order-details { margin:0; }
+#page-vpn .subscription-card { border-color:var(--color-border-strong); }
+.bottom-nav { max-width:min(620px,calc(100vw - 22px)); }
+.bottom-nav button { touch-action:manipulation; }
+@media(max-width:370px) {
+ #page-home .quick-action { min-height:86px; }
+ #page-home .hero { min-height:205px; }
+}

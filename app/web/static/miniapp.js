@@ -111,7 +111,6 @@ async function loadAccountPanels(){
     }
   }else $("account-referral-info").textContent="Реферальная информация временно недоступна";
 }
-function fillOptions(id,min,max,step,selected,label){const el=$(id);el.replaceChildren();const chosen=Math.min(max,Math.max(min,selected));const values=[];for(let n=min;n<=max;n+=step)values.push(n);if(!values.includes(chosen))values.push(chosen);values.sort((a,b)=>a-b);values.forEach(n=>{const o=document.createElement("option");o.value=String(n);o.textContent=n+" "+label;el.appendChild(o)});el.value=String(chosen)}
 const providerLabels={telegram_stars:"Telegram Stars",yookassa:"ЮKassa",yoomoney:"ЮMoney",cryptopay:"Crypto Pay"};
 function paymentMode(){return $("checkout-method").value||"telegram_stars"}
 const rubles = new Intl.NumberFormat("ru-RU", {style: "currency", currency: "RUB", maximumFractionDigits: 2});
@@ -121,15 +120,6 @@ const subscriptionStatuses = {active: "Активна", disabled: "Отключ�
 function openCheckoutUrl(url){
   if(!url.startsWith("https://"))throw Error("Некорректный адрес провайдера");
   if(tg?.openLink)tg.openLink(url);else window.open(url,"_blank","noopener,noreferrer");
-}
-function fillPaymentOptions(){
-  const select=$("checkout-method");select.replaceChildren();
-  Object.entries(data.payment_methods||{}).forEach(([key,enabled])=>{
-    if(!enabled)return;
-    const option=document.createElement("option");option.value=key;option.textContent=providerLabels[key]||key;
-    select.append(option);
-  });
-  select.onchange=recalc;
 }
 let selectedPlan = null;
 let extraDevices = 0;
@@ -181,7 +171,7 @@ $("order-confirm").onclick = () => {
   select.replaceChildren();
   for (const [key, label] of Object.entries(providerLabels)) {
     if (!data.payment_methods?.[key]) continue;
-    if (key === "telegram_stars" ? stars == null : rub <= 0) continue;
+    if (key === "telegram_stars" ? stars == null || stars < 1 : rub <= 0) continue;
     select.add(new Option(label, key));
   }
   if (!select.options.length || !data.terms_url) {
@@ -219,7 +209,12 @@ $("order-payment").onsubmit = async event => {
       const invoice = await api("/api/v1/webapp/plans/checkout", payload);
       const status = await new Promise(resolve => tg.openInvoice(invoice.invoice_url, resolve));
       $("order-status").textContent = status === "paid" ? "Оплата подтверждена" : status === "cancelled" ? "Оплата отменена" : "Проверьте заказ в разделе «Покупки».";
-      if (status === "paid") location.reload();
+      if (status === "paid") {
+        $("order-status").textContent = "Telegram принял оплату. Подключаем VPN…";
+        await loadAccountPanels();
+        switchPage("purchases");
+        window.setTimeout(() => window.location.reload(), 2400);
+      }
     } else {
       const invoice = await api("/api/v1/webapp/plans/external/checkout", {...payload, provider});
       openCheckoutUrl(invoice.url);
@@ -275,40 +270,12 @@ async function loadReadyPlans() {
       list.append(item);
     }
     $("plans-status").hidden = Boolean(result.items.length);
-    $("plans-status").textContent = "Готовых тарифов пока нет. Можно собрать свой.";
+    $("plans-status").textContent = "Тарифы ещё не опубликованы. Администратор добавит варианты в панели управления.";
   } catch {
     $("plans-status").hidden = false;
     $("plans-status").textContent = "Не удалось загрузить тарифы. Попробуйте открыть магазин заново.";
   }
 }
-function limits(){return {days:+$("days").value,traffic:+$("traffic").value,devices:+$("devices").value}}
-function recalc(){
-  if(!data)return;const v=limits(),p=data.pricing,method=paymentMode();
-  const stars=v.days*p.stars_per_day+v.traffic*p.stars_per_gb+v.devices*p.stars_per_device;
-  const rub=v.days*p.rub_per_day_minor+v.traffic*p.rub_per_gb_minor+v.devices*p.rub_per_device_minor;
-  const external=method!=="telegram_stars";const amount=external?rub:stars;
-  $("price-label").textContent=external?"Стоимость через "+(providerLabels[method]||method):"Стоимость в Telegram";
-  $("stars-price").textContent=external?(rub/100).toFixed(2)+" "+(p.currency||"RUB"):stars+" ⭐";
-  $("buy").textContent=external?"💳 Перейти к оплате":"⭐ Оплатить "+stars+" Stars";
-  $("buy").disabled=!$("terms").checked||!data.terms_url||amount<1||!(data.payment_methods||{})[method];
-}
-["days","traffic","devices"].forEach(k=>$(k).addEventListener("change",recalc));$("terms").addEventListener("change",recalc);
-$("buy").onclick=async()=>{try{
-  $("buy").disabled=true;$("status").textContent="Создаём счёт…";
-  await api("/api/v1/webapp/terms/accept",{accepted:true});
-  if(paymentMode()!=="telegram_stars"){
-    const result=await api("/api/v1/webapp/external/checkout",{...limits(),provider:paymentMode()});
-    openCheckoutUrl(result.url);$("status").textContent="Счёт №"+result.payment_id+" создан. Подписка появится после подтверждения оплаты.";
-    recalc();return;
-  }
-  const result=await api("/api/v1/webapp/checkout",limits());
-  if(!tg?.openInvoice)throw Error("Откройте магазин из Telegram");
-  tg.openInvoice(result.invoice_url,status=>{
-    $("status").textContent=status==="paid"?"Оплата подтверждена":status==="cancelled"?"Отменено":"Статус: "+status;
-    if(status==="paid")setTimeout(()=>location.reload(),1800);else recalc();
-  });
-}catch(e){$("status").textContent=e.message;recalc()}};
-
 function renderProfile(profile, user) {
   const name = profile?.name || "Remnaum";
   $("store-name").textContent = name;
@@ -340,7 +307,13 @@ function renderProfile(profile, user) {
 }
 
 function renderSubscription(subscription) {
-  if (!subscription) return;
+  if (!subscription) {
+    $("hero-eyebrow").textContent = "VPN · ВАШ ПЕРВЫЙ ТАРИФ";
+    $("home-subscription-status").textContent = "Нет активного доступа";
+    return;
+  }
+  $("hero-eyebrow").textContent = subscription.status === "active" ? "VPN · ВАШ ДОСТУП АКТИВЕН" : "VPN · ВАЖНО ПРОДЛИТЬ";
+  if (subscription.status === "active") $("hero-action").firstChild.textContent = "Продлить подписку ";
   $("no-subscription").hidden = true;
   $("subscription").hidden = false;
   const status = subscriptionStatuses[subscription.status] || subscription.status;
@@ -369,11 +342,6 @@ async function start() {
       if (data.terms_url) $(id).href = data.terms_url;
       else $(id).textContent = "условия не опубликованы";
     }
-    fillOptions("days", data.limits.days_min, data.limits.days_max, 1, data.limits.days_default, "дней");
-    fillOptions("traffic", data.limits.traffic_min, data.limits.traffic_max, 1, data.limits.traffic_default, "ГБ");
-    fillOptions("devices", data.limits.devices_min, data.limits.devices_max, 1, data.limits.devices_default, "устройств");
-    fillPaymentOptions();
-    recalc();
     $("loading").hidden = true;
     $("app").hidden = false;
     $("bottom-nav").hidden = false;

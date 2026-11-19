@@ -25,7 +25,7 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mini.count('<button type="button" data-page='), 5)
         for symbol in ("i-home", "i-shop", "i-shield", "i-gift", "i-user"):
             self.assertIn('href="#' + symbol + '"', mini)
-        for page in ("devices", "guide", "bonuses", "support"):
+        for page in ("devices", "guide"):
             self.assertIn('class="quick-action" type="button" data-go-page="' + page + '"', mini)
         self.assertIn('id="admin-sidebar"', admin)
         self.assertIn('id="admin-menu-backdrop"', admin)
@@ -43,7 +43,11 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('async function savePaymentProvider(provider)', admin_js)
         self.assertIn('methods:{[provider]:$("method-" + provider).checked}', admin_js)
         self.assertNotIn('id="payment-settings-save"', admin)
-        self.assertIn('fillPaymentOptions()', mini_js)
+        self.assertNotIn('id="custom-plan"', mini)
+        self.assertNotIn('id="buy"', mini)
+        self.assertNotIn('function recalc()', mini_js)
+        self.assertIn('id="hero-action"', mini)
+        self.assertIn('id="hero-eyebrow"', mini)
         self.assertNotIn('async function adminApi(', mini_js)
         self.assertNotIn('id="referral-form"', mini)
         self.assertIn('async function adminApi(', admin_js)
