@@ -267,7 +267,6 @@ async def plans_handler(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "menu:builder")
 async def builder_handler(callback: CallbackQuery) -> None:
-    await callback.answer()
     await callback.answer("Тарифы задаёт администратор. Выберите готовый вариант.", show_alert=True)
 
 
