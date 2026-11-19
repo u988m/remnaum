@@ -28,11 +28,12 @@ main { max-width: 1120px; margin: auto; padding: max(16px, env(safe-area-inset-t
 .card { display: grid; align-content: space-between; min-height: 118px; }
 .card span { font-size: .88rem; color: var(--color-muted); }
 .card b { font-size: clamp(1.6rem, 6vw, 2.4rem); letter-spacing: -.06em; }
-.dashboard-actions { margin-top: 17px; }
 .section { margin-top: 12px; overflow-wrap: anywhere; }
 .section-heading { justify-content: space-between; margin-bottom: 12px; }
 .section h2 + p, .section h3 + .grid, .section .grid + button, .section .table-wrap + .toolbar { margin-top: 10px; }
 .section h3 { margin-top: 18px; }
+.image-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.image-buttons button { min-width: 0; padding-inline: 6px; }
 .toolbar { justify-content: flex-start; }
 .toolbar.section-heading { justify-content: space-between; }
 .table-wrap { overflow-x: auto; margin: 8px 0; }
@@ -143,7 +144,6 @@ main { max-width:1480px;padding:16px clamp(14px,3vw,36px) 44px; }
 .card,.section { border-radius:24px; }
 .card { min-height:150px;background:linear-gradient(130deg,var(--color-surface-raised),var(--color-surface)); }
 .card b { margin-top:18px; }
-.dashboard-actions { margin-top:18px; }
 .admin-mobile-bar,#admin-menu-close { display:none; }
 .admin-menu-backdrop { display:none; }
 @media (max-width:850px) {
@@ -288,9 +288,9 @@ main { max-width:1480px;padding:16px clamp(14px,3vw,36px) 44px; }
 .overview-metrics .card { min-height:106px; background:var(--color-surface); }
 
 .overview-recent { margin-top:24px; }
-.overview-recent .toolbar { justify-content:space-between; gap:12px; align-items:center; margin-bottom:13px; }
+.overview-recent h2 { margin-bottom: 12px; }
 .overview-payment-list { display:grid; gap:8px; }
 .overview-payment { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:15px; border:1px solid var(--color-border); background:var(--color-surface); border-radius:16px; }
 .overview-payment span { font-size:.86rem; color:var(--color-muted); }
 @media (max-width:1090px){ .overview-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-@media (max-width:420px){ .overview-metrics .card { min-height:116px; padding:14px; } .overview-metrics .card b { font-size:clamp(1.35rem,6vw,1.9rem);overflow-wrap:anywhere; } .overview-recent .toolbar { align-items:start; flex-direction:column; } }
+@media (max-width:420px){ .overview-metrics .card { min-height:116px; padding:14px; } .overview-metrics .card b { font-size:clamp(1.35rem,6vw,1.9rem);overflow-wrap:anywhere; } }

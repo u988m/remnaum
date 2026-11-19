@@ -16,7 +16,7 @@
 <div class="sidebar-heading"><span>Разделы</span><button type="button" id="admin-menu-close" aria-label="Закрыть меню">✕</button></div>
 <nav class="admin-tabs" aria-label="Разделы управления">
   <button aria-current="page" data-tab="overview" type="button">Обзор</button>
-    <button data-tab="plans" type="button">Тарифы</button>
+  <button data-tab="plans" type="button">Тарифы</button>
   <button data-tab="users" type="button">Клиенты</button>
   <button data-tab="payments" type="button">Платежи</button>
   <p class="sidebar-category">Продвижение</p>
@@ -47,14 +47,8 @@
     <div class="card"><span>Выданные заказы</span><b id="paid-count">—</b></div>
     <div class="card"><span>Ожидают оплаты</span><b id="pending-count">—</b></div>
   </div>
-  <div class="toolbar dashboard-actions">
-    <button class="action primary" type="button" data-open-tab="plans">Управлять тарифами →</button>
-    <button class="action" type="button" data-open-tab="settings">Способы оплаты</button>
-    <button class="action" type="button" data-open-tab="users">Клиенты</button>
-    <button class="action" type="button" data-open-tab="brand">Оформление</button>
-  </div>
   <section class="overview-recent">
-    <div class="toolbar"><h2>Последние платежи</h2><button class="action" type="button" data-open-tab="payments">Все платежи →</button></div>
+    <h2>Последние платежи</h2>
     <div id="dashboard-payments" class="overview-payment-list" role="status">Загружаем историю…</div>
   </section>
 </section>
@@ -182,7 +176,6 @@
   <div id="method-list" class="provider-grid" aria-label="Платёжные провайдеры"></div>
   <div class="payment-terms">
     <div><h2>Условия продажи</h2><p class="muted" id="payment-terms-state"></p></div>
-    <button class="action" type="button" data-open-tab="brand">Настроить</button>
   </div>
   <div class="toolbar payment-diagnostics">
     <button class="action" id="payment-diagnostics-refresh" type="button">Обновить</button>
