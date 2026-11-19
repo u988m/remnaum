@@ -71,13 +71,21 @@ sudo remnaum
 
 <p align="center"><strong>Выберите, куда написать — мы собираем вопросы, ошибки и идеи для Remnaum.</strong></p>
 
-<table align="center">
-  <tr>
-    <td align="center"><a href="https://t.me/remnaum/6"><img src="assets/community-help.svg" alt="Помощь" width="200"></a><br><strong><a href="https://t.me/remnaum/6">❓ Получить помощь</a></strong><br><sub>Вопросы по установке и работе</sub></td>
-    <td align="center"><a href="https://t.me/remnaum/3"><img src="assets/community-bugs.svg" alt="Сообщить об ошибке" width="200"></a><br><strong><a href="https://t.me/remnaum/3">🐛 Сообщить об ошибке</a></strong><br><sub>Проблемы и неполадки</sub></td>
-    <td align="center"><a href="https://t.me/remnaum/5"><img src="assets/community-ideas.svg" alt="Предложить идею" width="200"></a><br><strong><a href="https://t.me/remnaum/5">💡 Предложить идею</a></strong><br><sub>Пожелания и новые функции</sub></td>
-  </tr>
-</table>
+<p align="center">
+  <a href="https://t.me/remnaum/6"><img src="assets/community-help.svg" alt="Получить помощь" width="220"></a>
+</p>
+<p align="center">
+  <a href="https://t.me/remnaum/3"><img src="assets/community-bugs.svg" alt="Сообщить об ошибке" width="220"></a>
+</p>
+<p align="center">
+  <a href="https://t.me/remnaum/5"><img src="assets/community-ideas.svg" alt="Предложить идею" width="220"></a>
+</p>
+
+<p align="center">
+  <a href="https://t.me/remnaum/6">❓ Помощь</a> ·
+  <a href="https://t.me/remnaum/3">🐛 Сообщить об ошибке</a> ·
+  <a href="https://t.me/remnaum/5">💡 Предложить идею</a>
+</p>
 
 <div align="center">
 
