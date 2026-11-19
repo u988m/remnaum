@@ -19,6 +19,7 @@ import os
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -42,17 +43,14 @@ MAX_TELEGRAM_BYTES = 45 * 1024 * 1024
 
 def _secure_write(path: Path, value: bytes) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "wb") as stream:
+    with tempfile.TemporaryDirectory(prefix="remnaum-write-", dir=path.parent) as tmp:
+        temporary = Path(tmp) / "data"
+        with temporary.open("xb") as stream:
+            os.fchmod(stream.fileno(), 0o600)
             stream.write(value)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
-        os.chmod(path, 0o600)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def load_settings() -> dict:
@@ -123,21 +121,18 @@ def pack_encrypted(plaintext: Path, destination: Path, password: bytes) -> None:
             "-pass", "stdin", "-in", str(plaintext), "-out", str(encrypted),
         ], input=password + b"\n", check=True, capture_output=True)
         digest = hmac.new(_crypt_key(password), digestmod=hashlib.sha256)
-        with encrypted.open("rb") as src:
+        target = Path(tmp) / "archive.rmb"
+        with target.open("xb") as out, encrypted.open("rb") as src:
+            os.fchmod(out.fileno(), 0o600)
+            out.write(MAGIC + bytes(digest.digest_size))
             for chunk in iter(lambda: src.read(1024 * 1024), b""):
                 digest.update(chunk)
-        target = destination.with_name("." + destination.name + ".tmp")
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            with os.fdopen(fd, "wb") as out, encrypted.open("rb") as src:
-                out.write(MAGIC + digest.digest())
-                shutil.copyfileobj(src, out, length=1024 * 1024)
-                out.flush()
-                os.fsync(out.fileno())
-            os.replace(target, destination)
-            os.chmod(destination, 0o600)
-        finally:
-            target.unlink(missing_ok=True)
+                out.write(chunk)
+            out.seek(len(MAGIC))
+            out.write(digest.digest())
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(target, destination)
 
 
 def unpack_encrypted(archive: Path, plaintext: Path, password: bytes) -> None:
@@ -145,7 +140,7 @@ def unpack_encrypted(archive: Path, plaintext: Path, password: bytes) -> None:
         raise ValueError("Архив не найден или является ссылкой")
     if not shutil.which("openssl"):
         raise RuntimeError("Для восстановления требуется OpenSSL")
-    with tempfile.TemporaryDirectory(prefix="remnaum-decrypt-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="remnaum-decrypt-", dir=plaintext.parent) as tmp:
         payload = Path(tmp) / "payload.enc"
         digest = hmac.new(_crypt_key(password), digestmod=hashlib.sha256)
         with archive.open("rb") as handle:
@@ -160,11 +155,14 @@ def unpack_encrypted(archive: Path, plaintext: Path, password: bytes) -> None:
             raise ValueError("Повреждённый архив Remnaum")
         if not hmac.compare_digest(mac, digest.digest()):
             raise ValueError("Неверный ключ восстановления или архив повреждён")
+        decoded = Path(tmp) / "decoded"
         subprocess.run([
             "openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2",
             "-iter", "280000", "-md", "sha256",
-            "-pass", "stdin", "-in", str(payload), "-out", str(plaintext),
+            "-pass", "stdin", "-in", str(payload), "-out", str(decoded),
         ], input=password + b"\n", check=True, capture_output=True)
+        decoded.chmod(0o600)
+        os.replace(decoded, plaintext)
 
 
 def _docker(*args: str, cwd: Path = ROOT, stdin=None, stdout=None, timeout=240) -> None:
@@ -307,25 +305,119 @@ def send_to_telegram(archive: Path, chat_id: str) -> None:
     print("✓ Зашифрованный архив отправлен в Telegram")
 
 
-def _safe_extract(archive: tarfile.TarFile, target: Path) -> None:
-    for member in archive.getmembers():
+def _restore_limit(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    if not re.fullmatch(r"[1-9][0-9]{0,17}", value):
+        raise ValueError(f"{name} должен быть положительным целым числом")
+    return int(value)
+
+
+class RestoreTarInfo(tarfile.TarInfo):
+    """Bound metadata that tarfile reads before returning a member."""
+
+    def _proc_member(self, archive):
+        if self.type in (tarfile.GNUTYPE_SPARSE, tarfile.XGLTYPE):
+            raise ValueError("Неподдерживаемый заголовок резервного архива")
+        if self.type not in (tarfile.XHDTYPE, tarfile.SOLARIS_XHDTYPE,
+                             tarfile.GNUTYPE_LONGNAME, tarfile.GNUTYPE_LONGLINK):
+            return super()._proc_member(archive)
+        depth = getattr(archive, "_restore_header_depth", 0)
+        if not 0 < self.size <= 64 * 1024 or depth >= 8:
+            raise ValueError("Превышен лимит расширенных заголовков архива")
+        archive._restore_header_depth = depth + 1
+        try:
+            return super()._proc_member(archive)
+        finally:
+            archive._restore_header_depth = depth
+
+    def _proc_gnusparse_10(self, *args):
+        raise ValueError("Разреженные файлы не поддерживаются в резервных копиях")
+
+
+def _scan_backup(archive: tarfile.TarFile) -> tuple[dict[Path, tarfile.TarInfo | None], int]:
+    max_file = _restore_limit("REMNAUM_RESTORE_MAX_FILE_BYTES", 16 * 1024 ** 3)
+    max_bytes = _restore_limit("REMNAUM_RESTORE_MAX_TOTAL_BYTES", 64 * 1024 ** 3)
+    max_paths = _restore_limit("REMNAUM_RESTORE_MAX_PATHS", 250_000)
+    paths: dict[Path, tarfile.TarInfo | None] = {}
+    total = 0
+    # Iterating allows us to stop at the first rejected member without loading the tar index.
+    for member in archive:
         name = Path(member.name)
-        if (name.is_absolute() or not name.parts or ".." in name.parts
-                or not (member.isfile() or member.isdir())
-                or member.size > 2 * 1024 ** 3):
+        if (name.is_absolute() or not name.parts or len(name.parts) > 128 or ".." in name.parts
+                or "\x00" in member.name or len(os.fsencode(str(name))) >= 4096
+                or member.type not in (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE)
+                or member.issparse() or member.size < 0
+                or (member.isdir() and member.size)):
             raise ValueError("Небезопасное содержимое резервного архива")
-        if name.parts[0] not in {"install", "metadata.json", "database.dump", "redis.rdb"}:
+        if name.parts[0] == "install":
+            if len(name.parts) == 1 and not member.isdir():
+                raise ValueError("Компонент install должен быть каталогом")
+        elif len(name.parts) != 1 or name.name not in {"metadata.json", "database.dump", "redis.rdb"} or not member.isfile():
             raise ValueError("Неизвестный компонент архива")
-    # Never follow an archive-supplied symlink/hardlink.
-    for member in archive.getmembers():
-        path = target / member.name
+
+        if paths.get(name) is not None:
+            raise ValueError("Дублирующийся путь в резервном архиве")
+        if name in paths and not member.isdir():
+            raise ValueError("Конфликт файла и каталога в резервном архиве")
+        paths[name] = member
+        for parent in name.parents:
+            if parent == Path("."):
+                break
+            existing = paths.setdefault(parent, None)
+            if existing is not None and not existing.isdir():
+                raise ValueError("Конфликт файла и каталога в резервном архиве")
+            if len(paths) > max_paths:
+                raise ValueError("Превышен лимит файлов и каталогов резервной копии")
+        if len(paths) > max_paths:
+            raise ValueError("Превышен лимит файлов и каталогов резервной копии")
+        if member.size > max_file:
+            raise ValueError("Превышен лимит размера файла резервной копии")
+        total += member.size
+        if total > max_bytes:
+            raise ValueError("Превышен лимит общего объёма резервной копии")
+        # TarInfo already contains the resolved values. Release the per-entry metadata.
+        member.pax_headers = {}
+    return paths, total
+
+
+def _safe_extract(archive: tarfile.TarFile, target: Path, *, layout=None) -> None:
+    paths, total = _scan_backup(archive) if layout is None else layout
+    if total > shutil.disk_usage(target.parent).free:
+        raise ValueError("Недостаточно места для распаковки резервной копии")
+    target.mkdir(mode=0o700)
+    for name, member in paths.items():
+        if member is None:
+            continue
+        path = target / name
         if member.isdir():
             path.mkdir(parents=True, exist_ok=True)
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
-        with archive.extractfile(member) as src, path.open("wb") as dst:
+        with archive.extractfile(member) as src, path.open("xb") as dst:
             shutil.copyfileobj(src, dst)
         os.chmod(path, 0o600 if path.name == ".env" else 0o644)
+
+
+def _read_backup_manifest(archive: tarfile.TarFile, paths: dict) -> dict:
+    for name in ("database.dump", "redis.rdb", "install/.env", "install/compose.yaml"):
+        member = paths.get(Path(name))
+        if member is None:
+            raise ValueError(f"В архиве отсутствует {name}")
+        if not member.isfile() or not member.size:
+            raise ValueError(f"Некорректный компонент архива: {name}")
+    member = paths.get(Path("metadata.json"))
+    if member is None:
+        raise ValueError("Нет метаданных архива")
+    if not member.isfile() or member.size > 8192:
+        raise ValueError("Некорректные метаданные архива")
+    with archive.extractfile(member) as metadata:
+        info = json.load(metadata)
+    if (not isinstance(info, dict) or info.get("product") != "remnaum"
+            or type(info.get("format")) is not int or info["format"] != 1):
+        raise ValueError("Архив не принадлежит Remnaum")
+    return info
 
 
 def inspect_backup(archive: Path, *, supplied_key: str | None = None) -> dict:
@@ -333,16 +425,53 @@ def inspect_backup(archive: Path, *, supplied_key: str | None = None) -> dict:
     with tempfile.TemporaryDirectory(prefix="remnaum-inspect-") as tmp:
         plain = Path(tmp) / "archive.tar.gz"
         unpack_encrypted(archive, plain, password)
-        with tarfile.open(plain, "r:gz") as tar:
-            metadata = tar.extractfile("metadata.json")
-            if metadata is None:
-                raise ValueError("Нет метаданных архива")
-            info = json.loads(metadata.read(8192))
-            if info.get("product") != "remnaum" or info.get("format") != 1:
-                raise ValueError("Архив не принадлежит Remnaum")
-            if not tar.getmember("database.dump").size:
-                raise ValueError("Архив не содержит PostgreSQL")
-            return info
+        with tarfile.open(plain, "r:gz", tarinfo=RestoreTarInfo) as tar:
+            paths, _ = _scan_backup(tar)
+            return _read_backup_manifest(tar, paths)
+
+
+def _check_restore_destination(target: Path, paths: dict) -> None:
+    for name in sorted(paths, key=lambda path: len(path.parts)):
+        member = paths[name]
+        if name.parts[0] != "install" or len(name.parts) < 2 or name.parts[1] == "backups":
+            continue
+        try:
+            status = (target / Path(*name.parts[1:])).lstat()
+        except FileNotFoundError:
+            continue
+        is_dir = member is None or member.isdir()
+        if is_dir and stat.S_ISDIR(status.st_mode):
+            continue
+        if not is_dir and stat.S_ISREG(status.st_mode) and status.st_nlink == 1:
+            continue
+        raise ValueError(f"Небезопасный путь в каталоге назначения: {name}")
+
+
+# Redis 7 loads the AOF manifest when appendonly is enabled. Seed its base
+# file from the validated RDB, and keep dump.rdb for RDB-only configurations.
+_RESTORE_REDIS = """
+set -eu
+stage=$(mktemp -d /data/.remnaum-restore.XXXXXX)
+trap 'rm -rf "$stage"' EXIT
+cp /restore/redis.rdb "$stage/dump.rdb"
+redis-check-rdb "$stage/dump.rdb"
+mkdir "$stage/appendonlydir"
+ln "$stage/dump.rdb" "$stage/appendonlydir/appendonly.aof.1.base.rdb"
+printf '%s\n' 'file appendonly.aof.1.base.rdb seq 1 type b' > "$stage/appendonlydir/appendonly.aof.manifest"
+if [ -e /data/appendonlydir ]; then
+    mv /data/appendonlydir "$stage/previous"
+fi
+if mv "$stage/appendonlydir" /data/appendonlydir; then
+    if mv -f "$stage/dump.rdb" /data/dump.rdb; then
+        exit 0
+    fi
+    mv /data/appendonlydir "$stage/appendonlydir" || { trap - EXIT; exit 1; }
+fi
+if [ -d "$stage/previous" ]; then
+    mv "$stage/previous" /data/appendonlydir || { trap - EXIT; exit 1; }
+fi
+exit 1
+"""
 
 
 def restore_backup(archive: Path, *, supplied_key: str | None = None, target_root: Path | None = None) -> None:
@@ -359,76 +488,87 @@ def restore_backup(archive: Path, *, supplied_key: str | None = None, target_roo
         raise ValueError("Нельзя восстанавливать в системный каталог")
     if target != ROOT.resolve() and target.exists() and any(target.iterdir()):
         raise ValueError("Внешняя папка восстановления уже содержит данные")
-    target.mkdir(parents=True, exist_ok=True)
     with _lock():
         with tempfile.TemporaryDirectory(prefix="remnaum-restore-") as tmp:
             folder = Path(tmp)
             plain = folder / "archive.tar.gz"
             unpack_encrypted(archive, plain, password)
             extracted = folder / "extracted"
-            with tarfile.open(plain, "r:gz") as tar:
-                _safe_extract(tar, extracted)
-            metadata = json.loads((extracted / "metadata.json").read_text())
-            if metadata.get("product") != "remnaum" or metadata.get("format") != 1:
-                raise ValueError("Это не резервная копия Remnaum")
+            with tarfile.open(plain, "r:gz", tarinfo=RestoreTarInfo) as tar:
+                layout = _scan_backup(tar)
+                metadata = _read_backup_manifest(tar, layout[0])
+                _check_restore_destination(target, layout[0])
+                _safe_extract(tar, extracted, layout=layout)
             install_dir = extracted / "install"
-            if not (install_dir / ".env").is_file() or not (install_dir / "compose.yaml").exists():
-                raise ValueError("В архиве нет .env или Docker Compose")
+
+            for name, magic in (("database.dump", b"PGDMP"), ("redis.rdb", b"REDIS")):
+                with (extracted / name).open("rb") as snapshot:
+                    if snapshot.read(len(magic)) != magic:
+                        raise ValueError(f"Некорректный формат снимка: {name}")
+
+            target.mkdir(parents=True, exist_ok=True)
             print("Восстанавливаем данные и настройки в", target)
-            subprocess.run(["docker", "compose", "stop", "app"], cwd=target,
-                           check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            for entry in sorted(install_dir.iterdir()):
-                if entry.name in {"backups"}:
-                    continue
-                destination = target / entry.name
-                if entry.is_dir():
-                    shutil.copytree(entry, destination, dirs_exist_ok=True)
-                else:
-                    shutil.copy2(entry, destination)
-            os.chmod(target / ".env", 0o600)
-            subprocess.run(
-                ["docker", "compose", "up", "-d", "postgres", "redis"],
-                cwd=target, check=True, capture_output=True, timeout=180,
-            )
-            for _ in range(30):
-                health = subprocess.run(
-                    ["docker", "compose", "exec", "-T", "postgres", "pg_isready", "-U", "remnaum", "-d", "remnaum"],
-                    cwd=target, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            if (target / ".env").is_file():
+                _docker("stop", "app", cwd=target, timeout=60)
+            try:
+                for entry in sorted(install_dir.iterdir()):
+                    if entry.name in {"backups"}:
+                        continue
+                    destination = target / entry.name
+                    if entry.is_dir():
+                        shutil.copytree(entry, destination, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(entry, destination)
+                os.chmod(target / ".env", 0o600)
+                subprocess.run(
+                    ["docker", "compose", "up", "-d", "postgres", "redis"],
+                    cwd=target, check=True, capture_output=True, timeout=180,
                 )
-                if health.returncode == 0:
-                    break
-                import time
-                time.sleep(2)
-            else:
-                raise RuntimeError("PostgreSQL не запустился после восстановления конфигурации")
-            with (extracted / "database.dump").open("rb") as dump:
+                for _ in range(30):
+                    health = subprocess.run(
+                        ["docker", "compose", "exec", "-T", "postgres", "pg_isready", "-U", "remnaum", "-d", "remnaum"],
+                        cwd=target, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                    if health.returncode == 0:
+                        break
+                    import time
+                    time.sleep(2)
+                else:
+                    raise RuntimeError("PostgreSQL не запустился после восстановления конфигурации")
+                with (extracted / "database.dump").open("rb") as dump:
+                    subprocess.run([
+                        "docker", "compose", "exec", "-T", "postgres",
+                        "pg_restore", "-U", "remnaum", "-d", "remnaum",
+                        "--no-owner", "--no-acl", "--clean", "--if-exists",
+                        "--single-transaction",
+                    ], cwd=target, stdin=dump, check=True, timeout=360)
+                subprocess.run(["docker", "compose", "stop", "redis"], cwd=target, check=True,
+                               stdout=subprocess.DEVNULL, timeout=60)
                 subprocess.run([
-                    "docker", "compose", "exec", "-T", "postgres",
-                    "pg_restore", "-U", "remnaum", "-d", "remnaum",
-                    "--no-owner", "--no-acl", "--clean", "--if-exists",
-                    "--single-transaction",
-                ], cwd=target, stdin=dump, check=True, timeout=360)
-            subprocess.run(["docker", "compose", "stop", "redis"], cwd=target, check=True,
-                           stdout=subprocess.DEVNULL, timeout=60)
-            subprocess.run([
-                "docker", "compose", "run", "--rm", "-T", "--no-deps",
-                "-v", str(extracted) + ":/restore:ro",
-                "--entrypoint", "sh", "redis", "-c",
-                "rm -rf /data/appendonlydir && cp /restore/redis.rdb /data/dump.rdb",
-            ], cwd=target, check=True, capture_output=True, timeout=120)
-            subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=target,
-                           check=True, timeout=360)
-            import time
-            for _ in range(40):
-                health = subprocess.run([
-                    "docker", "compose", "exec", "-T", "app", "python", "-c",
-                    "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=4).status==200",
-                ], cwd=target, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if health.returncode == 0:
-                    break
-                time.sleep(2)
-            else:
-                raise RuntimeError("Данные восстановлены, но приложение не отвечает. Проверьте логи: docker compose logs app")
+                    "docker", "compose", "run", "--rm", "-T", "--no-deps",
+                    "-v", str(extracted) + ":/restore:ro",
+                    "--entrypoint", "sh", "redis", "-c",
+                    _RESTORE_REDIS,
+                ], cwd=target, check=True, capture_output=True, timeout=120)
+                subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=target,
+                               check=True, timeout=360)
+                import time
+                for _ in range(40):
+                    health = subprocess.run([
+                        "docker", "compose", "exec", "-T", "app", "python", "-c",
+                        "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=4).status==200",
+                    ], cwd=target, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    if health.returncode == 0:
+                        break
+                    time.sleep(2)
+                else:
+                    raise RuntimeError("Данные восстановлены, но приложение не отвечает. Проверьте логи: docker compose logs app")
+            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                raise RuntimeError(
+                    f"Восстановление прервано: {exc}. Файлы, PostgreSQL и Redis могли быть обновлены частично. "
+                    "Оставьте приложение остановленным до проверки данных. "
+                    "Устраните причину сбоя и повторите восстановление или восстановите аварийную копию."
+                ) from exc
             print("✓ Данные, настройки и контейнеры Remnaum восстановлены")
             print("Исходный путь архива:", metadata.get("original_path"))
             print("Текущий путь:", target)
