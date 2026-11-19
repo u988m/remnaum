@@ -215,7 +215,7 @@ jobs:
           sed -i 's|^DATABASE_URL=.*|DATABASE_URL=postgresql+asyncpg://remnaum:fresh-reinstall-password-123@postgres:5432/remnaum|' .env
           # A removed source directory does not remove Docker volumes.
           # The recovery must require explicit consent and keep old records.
-          printf 'да\\n' | sudo env PYTHONPATH=scripts python3 -c '
+          printf 'да\n' | sudo env PYTHONPATH=scripts python3 -c '
           from install import read_env, ensure_install_postgres_connection
           ensure_install_postgres_connection(read_env())
           '
