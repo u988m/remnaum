@@ -10,32 +10,24 @@
 </header>
 <div id="loading" class="section access-loading" role="status">Проверяем права владельца…</div>
 <div id="dashboard" hidden>
-<div class="admin-mobile-bar"><button id="admin-menu-open" type="button" class="action" aria-expanded="false" aria-controls="admin-sidebar">☰ Меню</button><strong id="admin-mobile-title">Дашборд</strong></div>
+<div class="admin-mobile-bar"><button id="admin-menu-open" type="button" class="action" aria-expanded="false" aria-controls="admin-sidebar">☰ Меню</button></div>
 <button type="button" class="admin-menu-backdrop" id="admin-menu-backdrop" aria-label="Закрыть меню" hidden></button>
 <aside class="admin-sidebar" id="admin-sidebar" aria-label="Навигация админки">
-<div class="sidebar-heading"><span class="eyebrow">REMNAUM / CONTROL</span><button type="button" id="admin-menu-close" aria-label="Закрыть меню">✕</button></div>
-<p class="sidebar-category">ОБЗОР</p>
+<div class="sidebar-heading"><span>Разделы</span><button type="button" id="admin-menu-close" aria-label="Закрыть меню">✕</button></div>
 <nav class="admin-tabs" aria-label="Разделы управления">
-  <button aria-current="page" data-tab="overview" type="button">Дашборд</button>
-  <p class="sidebar-category">УПРАВЛЕНИЕ</p>
-  <button data-tab="plans" type="button">Тарифы</button>
-  <button data-tab="users" type="button">Пользователи</button>
-  <button data-tab="payments" type="button">История платежей</button>
-  <p class="sidebar-category">МАРКЕТИНГ</p>
+  <button aria-current="page" data-tab="overview" type="button">Обзор</button>
+    <button data-tab="plans" type="button">Тарифы</button>
+  <button data-tab="users" type="button">Клиенты</button>
+  <button data-tab="payments" type="button">Платежи</button>
+  <p class="sidebar-category">Продвижение</p>
   <button data-tab="bonuses" type="button">Промокоды</button>
   <button data-tab="referrals" type="button">Реферальная программа</button>
-  <p class="sidebar-category">МАГАЗИН</p>
+  <p class="sidebar-category">Магазин</p>
   <button data-tab="brand" type="button">Внешний вид</button>
   <details id="settings-accordion" class="settings-accordion">
     <summary><svg class="admin-sidebar-icon" aria-hidden="true"><use href="#ai-wallet"/></svg> Настройки</summary>
     <div class="settings-nav-items">
-      <p class="sidebar-category">ПЛАТЁЖНЫЕ СИСТЕМЫ</p>
-      <button data-tab="settings" type="button">Все способы оплаты</button>
-      <button data-tab="pay-stars" type="button">Telegram Stars</button>
-      <button data-tab="pay-yookassa" type="button">YooKassa</button>
-      <button data-tab="pay-yoomoney" type="button">YooMoney</button>
-      <button data-tab="pay-cryptopay" type="button">Crypto Pay</button>
-      <p class="sidebar-category">ДРУГИЕ НАСТРОЙКИ</p>
+      <button data-tab="settings" type="button">Способы оплаты</button>
       <button data-tab="trial" type="button">Пробный доступ</button>
       <button data-tab="pricing" type="button">Служебная формула цен</button>
     </div>
@@ -45,15 +37,15 @@
 </aside>
 <div class="admin-workspace">
 <section id="overview-view">
-  <h1>Дашборд</h1>
+  <h1>Обзор</h1>
   <p class="muted" id="welcome"></p>
   <div class="cards overview-metrics">
-    <div class="card"><span>Пользователи</span><b id="users-count">—</b><small>Всего зарегистрировано</small></div>
-    <div class="card"><span>Активные подписки</span><b id="active-count">—</b><small>Работает сейчас</small></div>
-    <div class="card"><span>Поступления в рублях</span><b id="revenue-count">—</b><small>Подтверждённые оплаты</small></div>
-    <div class="card"><span>Получено Stars</span><b id="stars-count">—</b><small>Оплаченные XTR</small></div>
-    <div class="card"><span>Выданные заказы</span><b id="paid-count">—</b><small>Успешно завершены</small></div>
-    <div class="card"><span>Ожидают оплаты</span><b id="pending-count">—</b><small>Ещё не оплачены</small></div>
+    <div class="card"><span>Пользователи</span><b id="users-count">—</b></div>
+    <div class="card"><span>Активные подписки</span><b id="active-count">—</b></div>
+    <div class="card"><span>Поступления в рублях</span><b id="revenue-count">—</b></div>
+    <div class="card"><span>Получено Stars</span><b id="stars-count">—</b></div>
+    <div class="card"><span>Выданные заказы</span><b id="paid-count">—</b></div>
+    <div class="card"><span>Ожидают оплаты</span><b id="pending-count">—</b></div>
   </div>
   <div class="toolbar dashboard-actions">
     <button class="action primary" type="button" data-open-tab="plans">Управлять тарифами →</button>
@@ -193,59 +185,127 @@
     <button class="action" type="button" data-open-tab="brand">Настроить</button>
   </div>
   <div class="toolbar payment-diagnostics">
-    <button class="action" id="payment-diagnostics-refresh" type="button">Проверить настройки</button>
+    <button class="action" id="payment-diagnostics-refresh" type="button">Обновить</button>
     <p class="muted" id="payment-diagnostics-status" role="status"></p>
   </div>
 </section>
 <section class="section payment-provider-view" id="payment-telegram_stars-view" hidden>
-  <button class="action provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
+  <button class="provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
   <h1>Telegram Stars</h1>
-  <p class="muted">Оплата внутри Telegram. Дополнительные реквизиты не требуются.</p>
-  <p class="provider-state" id="provider-telegram_stars-state" role="status">Проверяем настройки…</p>
-  <label class="provider-toggle"><input type="checkbox" id="method-telegram_stars"> Принимать Telegram Stars</label>
-  <button class="action primary provider-save" type="button" data-save-provider="telegram_stars">Сохранить Stars</button>
-  <p class="provider-feedback muted" id="provider-telegram_stars-feedback" role="status"></p>
+  <p class="muted">Для оплаты нужен подключённый Telegram-бот.</p>
+  <form data-provider-form="telegram_stars">
+    <label class="provider-toggle">
+      <span><strong>Принимать платежи</strong><small id="provider-telegram_stars-state" role="status">Загружаем настройки…</small></span>
+      <input type="checkbox" role="switch" id="method-telegram_stars" disabled>
+    </label>
+    <div class="provider-actions">
+      <button class="action primary provider-save" type="submit" data-save-provider="telegram_stars" disabled>Сохранить</button>
+      <p class="provider-feedback muted" id="provider-telegram_stars-feedback" role="status"></p>
+    </div>
+  </form>
 </section>
 <section class="section payment-provider-view" id="payment-yookassa-view" hidden>
-  <button class="action provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
-  <h1>YooKassa</h1>
-  <p class="muted">Подключите магазин YooKassa для оплаты в рублях.</p>
-  <p class="provider-state" id="provider-yookassa-state" role="status">Проверяем настройки…</p>
-  <div class="provider-webhook"><label>Webhook URL<input id="provider-yookassa-webhook" type="text" readonly placeholder="Требуется HTTPS-адрес сервера"></label><button type="button" class="action provider-copy-webhook" data-copy-webhook="yookassa">Скопировать URL</button></div>
-  <label class="provider-toggle"><input type="checkbox" id="method-yookassa"> Включить YooKassa</label>
-  <div class="provider-fields">
-    <label>ID магазина<input id="pay-yookassa-id" autocomplete="off" placeholder="Shop ID"></label>
-    <label>Секретный ключ<input id="pay-yookassa-secret" type="password" autocomplete="new-password" placeholder="Оставьте пустым, чтобы сохранить старый"></label>
+  <button class="provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
+  <h1>ЮKassa</h1>
+  <form data-provider-form="yookassa">
+    <label class="provider-toggle">
+      <span><strong>Принимать платежи</strong><small id="provider-yookassa-state" role="status">Загружаем настройки…</small></span>
+      <input type="checkbox" role="switch" id="method-yookassa" disabled>
+    </label>
+    <div class="provider-fields">
+      <label>ID магазина<input id="pay-yookassa-id" type="text" autocomplete="off" spellcheck="false"></label>
+      <label>Секретный ключ<input id="pay-yookassa-secret" type="password" autocomplete="new-password" spellcheck="false"><small>Оставьте поле пустым, чтобы сохранить текущий ключ.</small></label>
+    </div>
+    <div class="provider-actions">
+      <button class="action primary provider-save" type="submit" data-save-provider="yookassa" disabled>Сохранить</button>
+      <p class="provider-feedback muted" id="provider-yookassa-feedback" role="status"></p>
+    </div>
+  </form>
+  <div class="provider-hook">
+    <label for="provider-yookassa-webhook">URL уведомлений</label>
+    <div class="provider-webhook">
+      <input id="provider-yookassa-webhook" type="text" readonly placeholder="Требуется публичный HTTPS-адрес">
+      <button type="button" class="action" data-copy-webhook="yookassa" disabled>Копировать</button>
+    </div>
+    <small class="muted">Добавьте URL в разделе «HTTP-уведомления» и выберите событие payment.succeeded.</small>
   </div>
-  <button class="action primary provider-save" type="button" data-save-provider="yookassa">Сохранить YooKassa</button>
-  <p class="provider-feedback muted" id="provider-yookassa-feedback" role="status"></p>
 </section>
 <section class="section payment-provider-view" id="payment-yoomoney-view" hidden>
-  <button class="action provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
-  <h1>YooMoney</h1>
-  <p class="muted">Настройте получателя и секрет уведомлений.</p>
-  <p class="provider-state" id="provider-yoomoney-state" role="status">Проверяем настройки…</p>
-  <div class="provider-webhook"><label>Webhook URL<input id="provider-yoomoney-webhook" type="text" readonly placeholder="Требуется HTTPS-адрес сервера"></label><button type="button" class="action provider-copy-webhook" data-copy-webhook="yoomoney">Скопировать URL</button></div>
-  <label class="provider-toggle"><input type="checkbox" id="method-yoomoney"> Включить YooMoney</label>
-  <div class="provider-fields">
-    <label>Номер кошелька<input id="pay-yoomoney-receiver" autocomplete="off" placeholder="Номер кошелька"></label>
-    <label>Секрет уведомлений<input id="pay-yoomoney-secret" type="password" autocomplete="new-password" placeholder="Оставьте пустым, чтобы сохранить старый"></label>
+  <button class="provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
+  <h1>ЮMoney</h1>
+  <form data-provider-form="yoomoney">
+    <label class="provider-toggle">
+      <span><strong>Принимать платежи</strong><small id="provider-yoomoney-state" role="status">Загружаем настройки…</small></span>
+      <input type="checkbox" role="switch" id="method-yoomoney" disabled>
+    </label>
+    <div class="provider-fields">
+      <label>Номер кошелька<input id="pay-yoomoney-receiver" type="text" autocomplete="off" spellcheck="false"></label>
+      <label>Секрет уведомлений<input id="pay-yoomoney-secret" type="password" autocomplete="new-password" spellcheck="false"><small>Оставьте поле пустым, чтобы сохранить текущий ключ.</small></label>
+    </div>
+    <div class="provider-actions">
+      <button class="action primary provider-save" type="submit" data-save-provider="yoomoney" disabled>Сохранить</button>
+      <p class="provider-feedback muted" id="provider-yoomoney-feedback" role="status"></p>
+    </div>
+  </form>
+  <div class="provider-hook">
+    <label for="provider-yoomoney-webhook">URL уведомлений</label>
+    <div class="provider-webhook">
+      <input id="provider-yoomoney-webhook" type="text" readonly placeholder="Требуется публичный HTTPS-адрес">
+      <button type="button" class="action" data-copy-webhook="yoomoney" disabled>Копировать</button>
+    </div>
+    <small class="muted">Укажите URL и включите HTTP-уведомления в настройках кошелька.</small>
   </div>
-  <button class="action primary provider-save" type="button" data-save-provider="yoomoney">Сохранить YooMoney</button>
-  <p class="provider-feedback muted" id="provider-yoomoney-feedback" role="status"></p>
 </section>
 <section class="section payment-provider-view" id="payment-cryptopay-view" hidden>
-  <button class="action provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
+  <button class="provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
   <h1>Crypto Pay</h1>
-  <p class="muted">Введите API-токен приложения Crypto Pay.</p>
-  <p class="provider-state" id="provider-cryptopay-state" role="status">Проверяем настройки…</p>
-  <div class="provider-webhook"><label>Webhook URL<input id="provider-cryptopay-webhook" type="text" readonly placeholder="Требуется HTTPS-адрес сервера"></label><button type="button" class="action provider-copy-webhook" data-copy-webhook="cryptopay">Скопировать URL</button></div>
-  <label class="provider-toggle"><input type="checkbox" id="method-cryptopay"> Включить Crypto Pay</label>
-  <div class="provider-fields">
-    <label>API-токен<input id="pay-crypto-token" type="password" autocomplete="new-password" placeholder="Оставьте пустым, чтобы сохранить старый"></label>
+  <form data-provider-form="cryptopay">
+    <label class="provider-toggle">
+      <span><strong>Принимать платежи</strong><small id="provider-cryptopay-state" role="status">Загружаем настройки…</small></span>
+      <input type="checkbox" role="switch" id="method-cryptopay" disabled>
+    </label>
+    <div class="provider-fields">
+      <label>API-токен приложения<input id="pay-crypto-token" type="password" autocomplete="new-password" spellcheck="false"><small>Оставьте поле пустым, чтобы сохранить текущий ключ.</small></label>
+    </div>
+    <div class="provider-actions">
+      <button class="action primary provider-save" type="submit" data-save-provider="cryptopay" disabled>Сохранить</button>
+      <p class="provider-feedback muted" id="provider-cryptopay-feedback" role="status"></p>
+    </div>
+  </form>
+  <div class="provider-hook">
+    <label for="provider-cryptopay-webhook">URL уведомлений</label>
+    <div class="provider-webhook">
+      <input id="provider-cryptopay-webhook" type="text" readonly placeholder="Требуется публичный HTTPS-адрес">
+      <button type="button" class="action" data-copy-webhook="cryptopay" disabled>Копировать</button>
+    </div>
+    <small class="muted">В @CryptoBot откройте приложение Crypto Pay и укажите URL во вкладке Webhooks.</small>
   </div>
-  <button class="action primary provider-save" type="button" data-save-provider="cryptopay">Сохранить Crypto Pay</button>
-  <p class="provider-feedback muted" id="provider-cryptopay-feedback" role="status"></p>
+</section>
+<section class="section payment-provider-view" id="payment-platega-view" hidden>
+  <button class="provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
+  <h1>Platega</h1>
+  <form data-provider-form="platega">
+    <label class="provider-toggle">
+      <span><strong>Принимать платежи</strong><small id="provider-platega-state" role="status">Загружаем настройки…</small></span>
+      <input type="checkbox" role="switch" id="method-platega" disabled>
+    </label>
+    <div class="provider-fields">
+      <label>Merchant ID<input id="pay-platega-id" type="text" autocomplete="off" spellcheck="false"></label>
+      <label>Секретный ключ<input id="pay-platega-secret" type="password" autocomplete="new-password" spellcheck="false"><small>Оставьте поле пустым, чтобы сохранить текущий ключ.</small></label>
+    </div>
+    <div class="provider-actions">
+      <button class="action primary provider-save" type="submit" data-save-provider="platega" disabled>Сохранить</button>
+      <p class="provider-feedback muted" id="provider-platega-feedback" role="status"></p>
+    </div>
+  </form>
+  <div class="provider-hook">
+    <label for="provider-platega-webhook">URL уведомлений</label>
+    <div class="provider-webhook">
+      <input id="provider-platega-webhook" type="text" readonly placeholder="Требуется публичный HTTPS-адрес">
+      <button type="button" class="action" data-copy-webhook="platega" disabled>Копировать</button>
+    </div>
+    <small class="muted">Укажите адрес в личном кабинете Platega в разделе «Настройки → Callback URLs».</small>
+  </div>
 </section>
 <section class="section" id="pricing-view" hidden>
 <h2>Служебная формула цен</h2>

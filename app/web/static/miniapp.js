@@ -112,14 +112,17 @@ async function loadAccountPanels(){
     }
   }else $("account-referral-info").textContent="Реферальная информация временно недоступна";
 }
-const providerLabels={telegram_stars:"Telegram Stars",yookassa:"ЮKassa",yoomoney:"ЮMoney",cryptopay:"Crypto Pay"};
+const providerLabels={telegram_stars:"Telegram Stars",yookassa:"ЮKassa",yoomoney:"ЮMoney",cryptopay:"Crypto Pay",platega:"Platega"};
 const rubles = new Intl.NumberFormat("ru-RU", {style: "currency", currency: "RUB", maximumFractionDigits: 2});
 const money = minor => rubles.format(minor / 100);
 const trafficLabel = value => value == null ? "—" : value === 0 ? "Безлимит" : value + " ГБ";
 const subscriptionStatuses = {active: "Активна", disabled: "Отключена", expired: "Истекла", deleted: "Удалена"};
 function openCheckoutUrl(url){
-  if(!url.startsWith("https://"))throw Error("Некорректный адрес провайдера");
-  if(tg?.openLink)tg.openLink(url);else window.open(url,"_blank","noopener,noreferrer");
+  const address = new URL(url);
+  if (address.protocol !== "https:") throw Error("Некорректный адрес провайдера");
+  if (address.hostname === "t.me" && tg?.openTelegramLink) tg.openTelegramLink(url);
+  else if (tg?.openLink) tg.openLink(url);
+  else window.open(url,"_blank","noopener,noreferrer");
 }
 let selectedPlan = null;
 let extraDevices = 0;
@@ -236,6 +239,11 @@ $("order-payment").onsubmit = async event => {
       if (!invoice.url.startsWith("https://")) throw Error("Некорректный адрес провайдера");
       const link = $("order-open-invoice");
       link.href = invoice.url;
+      link.onclick = event => {
+        if (!tg?.openLink) return;
+        event.preventDefault();
+        openCheckoutUrl(invoice.url);
+      };
       link.hidden = false;
       $("order-payment").hidden = true;
       $("order-show-purchases").hidden = false;
