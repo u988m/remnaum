@@ -14,7 +14,7 @@ from app.config import settings
 from app.db.base import Base
 from app.db.models import Payment, User
 from app.db.session import initialize_schema
-from app.services import payment_service, plans, squads, subscriptions, tariffs
+from app.services import payment_service, plans, squads, subscriptions, tariffs, trials
 
 A, B = str(uuid4()), str(uuid4())
 PLAN = dict(title="Basic", duration_days=30, traffic_gb=100, device_limit=1,
@@ -38,7 +38,7 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.engine = engine
         self.sessions = async_sessionmaker(engine, expire_on_commit=False)
         with ExitStack() as stack:
-            for module in (payment_service, plans, squads, subscriptions, tariffs):
+            for module in (payment_service, plans, squads, subscriptions, tariffs, trials):
                 stack.enter_context(patch.object(module, "SessionLocal", self.sessions))
             stack.enter_context(patch.object(settings, "remnawave_base_url", "https://panel.test"))
             stack.enter_context(patch.object(settings, "remnawave_api_token", "test"))
@@ -116,6 +116,32 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved[premium["id"]]["internal_squads"], [A, B])
         with self.assertRaises(ValueError):
             await plans.save_plan(PLAN | {"internal_squads": [B]})
+
+    async def test_trial_to_flexible_paid_access(self):
+        async with self.engine.begin() as conn:
+            await initialize_schema(conn)
+        await self.sync((A, "Trial"), (B, "Flexible"))
+        async with self.sessions.begin() as session:
+            session.add(User(telegram_id=20))
+            (await session.get(squads.SquadPolicy, "trial")).squads = [A]
+            (await session.get(squads.SquadPolicy, "flexible")).squads = [B]
+        await trials.update_trial_settings(trials.DEFAULT_TRIAL | {"enabled": True})
+        panel = AsyncMock()
+        panel.get_user_by_username.return_value = {}
+        panel.create_user.return_value = panel.get_user.return_value = {"response": {"id": 9}}
+        with patch.object(trials, "RemnawaveClient", return_value=panel):
+            await trials.claim_trial(20)
+        self.assertEqual(panel.create_user.await_args.kwargs["active_internal_squads"], [A])
+        with patch.object(payment_service, "get_terms_url", return_value="terms"), \
+             patch.object(payment_service, "has_accepted_current_terms", return_value=True):
+            order, _ = await payment_service.create_stars_payment_for_user(20)
+        async with self.sessions.begin() as session:
+            payment = await session.get(Payment, order.id)
+            payment.status = "paid"
+        panel.get_user_by_username.return_value = panel.get_user.return_value
+        with patch.object(subscriptions, "RemnawaveClient", return_value=panel):
+            await subscriptions.provision_paid_payment(order.id)
+        self.assertEqual(panel.update_user.await_args.kwargs["active_internal_squads"], [B])
 
     async def test_pagination_outage_and_mode_defaults(self):
         async with self.engine.begin() as conn:

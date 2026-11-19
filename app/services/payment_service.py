@@ -278,7 +278,6 @@ async def retry_paid_payments_for_user(telegram_id: int) -> None:
             .join(User, Payment.user_id == User.id)
             .where(
                 User.telegram_id == telegram_id,
-                Payment.provider == "telegram_stars",
                 Payment.status == "paid",
             )
             .order_by(Payment.id)
