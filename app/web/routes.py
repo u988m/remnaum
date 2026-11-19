@@ -326,7 +326,10 @@ async def webapp_create_checkout(data: WebAppCheckout, x_telegram_init_data: str
     if not settings.tariff_min_devices <= data.devices <= settings.tariff_max_devices:
         raise HTTPException(status_code=422, detail="Device count is outside configured limits")
     await set_tariff_draft(int(identity["id"]), identity.get("username"), data.days, data.traffic, data.devices)
-    payment, stars = await create_stars_payment_for_user(int(identity["id"]))
+    try:
+        payment, stars = await create_stars_payment_for_user(int(identity["id"]))
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if bot is None:
         raise HTTPException(status_code=503, detail="Telegram bot is not initialized")
     try:

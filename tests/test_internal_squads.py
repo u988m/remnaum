@@ -3,20 +3,22 @@ import json
 import os
 import unittest
 from contextlib import ExitStack
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import httpx
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
 from app.db.base import Base
-from app.db.models import Payment, User
+from app.db.models import Payment, Subscription, TariffPlan, TermsAcceptance, User
 from app.db.session import initialize_schema
 from app.services import payment_service, plans, squads, subscriptions, tariffs, trials
 
 A, B = str(uuid4()), str(uuid4())
+ACTIVE_EXPIRY = datetime.now(timezone.utc) + timedelta(days=10)
 PLAN = dict(title="Basic", duration_days=30, traffic_gb=100, device_limit=1,
             price_rub_minor=900, price_stars=10)
 
@@ -44,6 +46,9 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
             stack.enter_context(patch.object(settings, "remnawave_api_token", "test"))
             stack.enter_context(patch.object(settings, "remnawave_active_internal_squads", ""))
             self.fetch = stack.enter_context(patch.object(squads.RemnawaveClient, "request"))
+            self.panel = AsyncMock()
+            self.panel.get_user_by_username.return_value = {}
+            stack.enter_context(patch.object(payment_service, "RemnawaveClient", return_value=self.panel))
             self.addCleanup(stack.pop_all().close)
 
     async def sync(self, *ids):
@@ -73,22 +78,37 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
         order = await checkout()
         self.assertEqual(json.loads(order.payload)["tariff"]["internal_squads"], [A])
         await plans.save_plan(PLAN | {"internal_squads": [B]}, basic["id"])
-        panel = AsyncMock()
+        panel = self.panel
         panel.get_user_by_username.return_value = {}
         panel.create_user.return_value = {"response": {"id": 7}}
-        panel.get_user.return_value = {"response": {"id": 7}}
+        panel.get_user.return_value = {"response": {
+            "id": 7, "status": "ACTIVE", "expireAt": ACTIVE_EXPIRY.isoformat(), "activeInternalSquads": [A],
+        }}
         with patch.object(subscriptions, "RemnawaveClient", return_value=panel):
             await subscriptions.provision_paid_payment(order.id)
             self.assertEqual(panel.create_user.await_args.kwargs["active_internal_squads"], [A])
-            panel.get_user_by_username.return_value = {"response": {"id": 7}}
+            panel.get_user_by_username.return_value = panel.get_user.return_value
+            async with self.sessions.begin() as session:
+                (await session.get(TariffPlan, basic["id"])).internal_squads = []
             renewal = await checkout()
-            await subscriptions.provision_paid_payment(renewal.id)
+            self.assertTrue(json.loads(renewal.payload)["tariff"]["preserve_squads"])
+            panel.get_user.side_effect = httpx.ConnectError("read failed after PATCH")
+            with self.assertRaises(httpx.ConnectError):
+                await subscriptions.provision_paid_payment(renewal.id)
             self.assertIsNone(panel.update_user.await_args.kwargs.get("active_internal_squads"))
-            panel.get_user_by_username.return_value = {}
+            self.assertEqual(panel.update_user.await_args.kwargs["expire_at"], ACTIVE_EXPIRY + timedelta(days=30))
+            panel.get_user.return_value["response"]["description"] = f"remnaum-payment:{renewal.id}"
+            panel.get_user.side_effect = None
+            await subscriptions.provision_paid_payment(renewal.id)
+            panel.update_user.assert_awaited_once()
+            self.assertFalse(await subscriptions.provision_paid_payment(renewal.id))
+            panel.get_user.return_value["response"].pop("description")
+            async with self.sessions.begin() as session:
+                (await session.get(TariffPlan, basic["id"])).internal_squads = [B]
             for target, expected in [(premium, [A, B]), (basic, [B])]:
                 await plans.choose_plan(12, target["id"])
                 switched = await checkout()
-                panel.get_user_by_username.return_value = {"response": {"id": 7}}
+                panel.get_user_by_username.return_value = panel.get_user.return_value
                 self.fetch.side_effect = httpx.ConnectError("offline")
                 with self.assertRaises(httpx.ConnectError):
                     await subscriptions.provision_paid_payment(switched.id)
@@ -98,11 +118,18 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 await subscriptions.provision_paid_payment(switched.id)
                 self.assertEqual(panel.update_user.await_args.kwargs["active_internal_squads"], expected)
                 self.assertFalse(await subscriptions.provision_paid_payment(switched.id))
-            panel.get_user_by_username.return_value = {}
             missing_account = await checkout()
+            panel.get_user_by_username.return_value = {}
+            with self.assertRaisesRegex(ValueError, "отсутствует"):
+                await checkout()
             with self.assertRaisesRegex(RuntimeError, "Panel account missing"):
                 await subscriptions.provision_paid_payment(missing_account.id)
+            async with self.sessions() as session:
+                self.assertEqual((await session.get(Payment, missing_account.id)).status, "paid")
+                self.assertEqual(await session.scalar(select(func.count()).select_from(Subscription)), 1)
             panel.create_user.assert_awaited_once()
+            panel.get_user_by_username.return_value = panel.get_user.return_value
+            self.assertTrue(await subscriptions.provision_paid_payment(missing_account.id))
 
         last = await self.sync((A, "Renamed"))
         self.fetch.side_effect = httpx.ConnectError("offline")
@@ -126,12 +153,13 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
             (await session.get(squads.SquadPolicy, "trial")).squads = [A]
             (await session.get(squads.SquadPolicy, "flexible")).squads = [B]
         await trials.update_trial_settings(trials.DEFAULT_TRIAL | {"enabled": True})
-        panel = AsyncMock()
+        panel = self.panel
         panel.get_user_by_username.return_value = {}
         panel.create_user.return_value = panel.get_user.return_value = {"response": {"id": 9}}
         with patch.object(trials, "RemnawaveClient", return_value=panel):
             await trials.claim_trial(20)
         self.assertEqual(panel.create_user.await_args.kwargs["active_internal_squads"], [A])
+        panel.get_user_by_username.return_value = panel.get_user.return_value
         with patch.object(payment_service, "get_terms_url", return_value="terms"), \
              patch.object(payment_service, "has_accepted_current_terms", return_value=True):
             order, _ = await payment_service.create_stars_payment_for_user(20)
@@ -142,6 +170,60 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(subscriptions, "RemnawaveClient", return_value=panel):
             await subscriptions.provision_paid_payment(order.id)
         self.assertEqual(panel.update_user.await_args.kwargs["active_internal_squads"], [B])
+
+    async def test_checkout_rejects_unproven_access_and_rechecks_stars_invoice(self):
+        async with self.engine.begin() as conn:
+            await initialize_schema(conn)
+        await self.sync((A, "Basic"))
+        plan = await plans.save_plan(PLAN | {"internal_squads": [A]})
+        async with self.sessions.begin() as session:
+            user = User(telegram_id=42)
+            session.add(user)
+            await session.flush()
+            user_id = user.id
+            session.add(TermsAcceptance(user_id=user_id, terms_version=settings.telegram_terms_version))
+        await plans.choose_plan(42, plan["id"])
+
+        async def checkout():
+            with patch.object(payment_service, "get_terms_url", return_value="terms"):
+                return await payment_service.create_stars_payment_for_user(42)
+
+        async with self.sessions.begin() as session:
+            (await session.get(TariffPlan, plan["id"])).internal_squads = []
+        with self.assertRaisesRegex(ValueError, "Сквады"):
+            await checkout()
+        async with self.sessions.begin() as session:
+            (await session.get(TariffPlan, plan["id"])).internal_squads = [B]
+        with self.assertRaisesRegex(ValueError, "Сквады"):
+            await checkout()
+        async with self.sessions.begin() as session:
+            (await session.get(TariffPlan, plan["id"])).internal_squads = [A]
+        order, amount = await checkout()
+        async with self.sessions.begin() as session:
+            subscription = Subscription(user_id=user_id, panel_user_id="9", status="active",
+                                        expires_at=ACTIVE_EXPIRY)
+            session.add(subscription)
+            session.add(Payment(user_id=user_id, amount=10, currency="XTR",
+                                provider="telegram_stars", status="succeeded", payload="{}"))
+            (await session.get(TariffPlan, plan["id"])).internal_squads = []
+
+        async def approve_invoice():
+            return await payment_service.validate_stars_pre_checkout(42, order.id, amount, "XTR", f"remnaum:{order.id}")
+
+        self.assertFalse(await approve_invoice())
+        self.panel.get_user_by_username.return_value = {"response": {
+            "id": 9, "status": "ACTIVE", "expireAt": ACTIVE_EXPIRY.isoformat(), "activeInternalSquads": [A],
+        }}
+        self.assertTrue(await approve_invoice())
+        with self.assertRaisesRegex(ValueError, "Сквады"):
+            await checkout()
+        async with self.sessions.begin() as session:
+            subscription = await session.scalar(select(Subscription).where(Subscription.user_id == user_id))
+            subscription.paid_tariff = str(plan["id"])
+            subscription.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+        with self.assertRaisesRegex(ValueError, "Сквады"):
+            await checkout()
+        self.assertEqual(self.panel.create_user.await_count, 0)
 
     async def test_pagination_outage_and_mode_defaults(self):
         async with self.engine.begin() as conn:
