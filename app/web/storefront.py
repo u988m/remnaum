@@ -27,6 +27,8 @@ from app.services.store_profile import get_store_profile, get_terms_url
 from app.services.users import BLOCKED_MESSAGE, BlockedCustomer, customer_is_blocked, upsert_active_customer
 from app.services.store_settings import PROVIDER_LABELS, get_payment_presentation, get_store_payment_settings, public_payment_settings
 
+from app.web.browser_auth import app_origin, on_app_host, on_miniapp_host
+
 router = APIRouter()
 COOKIE_NAME = "__Host-remnaum-session"
 
@@ -47,6 +49,8 @@ def _store_user(request: Request) -> int:
 
 @router.get("/store", response_class=HTMLResponse)
 async def store_page(request: Request):
+    if settings.browser_webapp_url and on_miniapp_host(request) and not on_app_host(request):
+        return RedirectResponse(app_origin() + "/store")
     _require_store_host(request)
     username = settings.telegram_bot_username.lstrip("@")
     auth_url = settings.public_base_url.rstrip("/") + "/store/auth"

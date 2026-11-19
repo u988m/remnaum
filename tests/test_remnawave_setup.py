@@ -54,6 +54,7 @@ class RemnawaveSetupTests(unittest.TestCase):
         existing = {
             "PUBLIC_DOMAIN": "hook.myvpn.site",
             "WEBAPP_DOMAIN": "miniapp.myvpn.site",
+            "BROWSER_DOMAIN": "web.myvpn.site",
             "TELEGRAM_BOT_USERNAME": "test_bot",
             "TELEGRAM_BOT_TOKEN": "123:ABC",
             "ADMIN_IDS": "123456789",
@@ -88,6 +89,7 @@ class RemnawaveSetupTests(unittest.TestCase):
         existing = {
             "PUBLIC_DOMAIN": "hook.myvpn.site",
             "WEBAPP_DOMAIN": "miniapp.myvpn.site",
+            "BROWSER_DOMAIN": "web.myvpn.site",
             "TELEGRAM_BOT_USERNAME": "test_bot",
             "TELEGRAM_BOT_TOKEN": "123:ABC",
             "ADMIN_IDS": "123456789",
@@ -108,6 +110,7 @@ class RemnawaveSetupTests(unittest.TestCase):
         existing = {
             "PUBLIC_DOMAIN": "hook.myvpn.site",
             "WEBAPP_DOMAIN": "miniapp.myvpn.site",
+            "BROWSER_DOMAIN": "web.myvpn.site",
             "TELEGRAM_BOT_USERNAME": "test_bot",
             "TELEGRAM_BOT_TOKEN": "123:ABC",
             "ADMIN_IDS": "123456789",

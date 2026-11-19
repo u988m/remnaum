@@ -31,8 +31,12 @@ LoginTicket = Annotated[int | None, Query(gt=0, le=2_147_483_647)]
 
 
 def app_origin():
-    url = urlsplit(settings.webapp_url or settings.public_base_url)
+    url = urlsplit(settings.browser_webapp_url or settings.webapp_url or settings.public_base_url)
     return f"{url.scheme}://{url.netloc}"
+
+
+def on_miniapp_host(request):
+    return request.url.netloc == urlsplit(settings.webapp_url or settings.public_base_url).netloc
 
 
 def on_app_host(request):
@@ -109,6 +113,13 @@ async def take_flow(request, provider, state):
 
 @router.get("/auth", response_class=HTMLResponse)
 async def login_page(request: Request, admin: bool = False, ticket: LoginTicket = None):
+    if not on_app_host(request) and on_miniapp_host(request) and app_origin().startswith("https://"):
+        params = {}
+        if admin:
+            params["admin"] = "true"
+        if ticket:
+            params["ticket"] = ticket
+        return RedirectResponse(app_origin() + "/auth" + ("?" + urlencode(params) if params else ""))
     require_app_host(request)
     policy = await get_operations()
     destination = ticket_path(ticket, admin=admin) if ticket else "/admin" if admin else "/"

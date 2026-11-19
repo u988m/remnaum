@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     tariff_stars_price_per_device: int = Field(default=10, ge=0)
     public_base_url: str = "http://localhost:8080"
     webapp_url: str = ""
+    browser_webapp_url: str = ""
     support_contact: str = ""
     tariff_min_days: int = Field(default=7, ge=1)
     tariff_max_days: int = Field(default=365, ge=1)

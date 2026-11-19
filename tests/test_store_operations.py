@@ -21,7 +21,7 @@ from app.db.models import TariffPlan, User
 from app.db.session import initialize_schema
 from app.services import store_operations, store_profile, support, users
 from app.services.plans import quote_plan
-from app.web import browser_auth, routes
+from app.web import browser_auth, routes, storefront
 
 
 class PlanAddonTests(unittest.TestCase):
@@ -59,6 +59,7 @@ class BrowserStoreOperationsTests(unittest.IsolatedAsyncioTestCase):
         app = FastAPI()
         app.include_router(routes.router)
         app.include_router(browser_auth.router)
+        app.include_router(storefront.router)
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=self.site)
         self.addAsyncCleanup(self.client.aclose)
         with ExitStack() as stack:
@@ -130,6 +131,40 @@ class BrowserStoreOperationsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get("/api/v1/webapp/theme")).json(), theme)
         self.assertEqual((await self.client.get("/admin/api/operations")).status_code, 403)
         self.assertEqual((await self.client.put("/admin/api/theme", json=theme, headers=origin)).status_code, 403)
+
+    async def test_browser_domain_separates_login_from_miniapp(self):
+        browser = "https://web.example.test"
+        with patch.object(routes.settings, "browser_webapp_url", browser), \
+             patch.object(routes.settings, "public_base_url", browser):
+            self.assertEqual((await self.client.get("/")).status_code, 200)
+            response = await self.client.get("/auth?ticket=11")
+            self.assertEqual(response.headers["location"], browser + "/auth?ticket=11")
+            self.assertEqual((await self.client.get("/auth/google?ticket=11")).status_code, 404)
+            self.assertEqual((await self.client.get(browser + "/")).status_code, 200)
+            self.assertEqual((await self.client.get("/store")).headers["location"], browser + "/store")
+            self.assertEqual((await self.client.get(browser + "/store")).status_code, 200)
+            login = await self.client.get(browser + "/auth")
+            self.assertEqual(login.status_code, 200)
+            self.assertIn(f'data-auth-url="{browser}/auth/telegram/', login.text)
+            admin = {"X-Telegram-Init-Data": "42"}
+            config = (await self.client.get("/admin/api/operations", headers=admin)).json()
+            self.assertEqual(config["browser_origin"], browser)
+            self.assertEqual(config["google_callback_url"], browser + "/auth/google/callback")
+
+    async def test_login_settings_are_independent_of_other_integrations(self):
+        admin = {"X-Telegram-Init-Data": "42"}
+        google = {"enabled": True, "client_id": "test-client", "client_secret": "test-secret"}
+        self.assertEqual((await self.client.put("/admin/api/login/google", json=google)).status_code, 401)
+        self.assertEqual((await self.client.put("/admin/api/login/google", headers=admin, json=google)).status_code, 200)
+        self.assertEqual((await self.client.put("/admin/api/login/telegram", headers=admin, json={"enabled": False})).status_code, 200)
+        operations = {"required_channel": "", "channel_url": "", "extra_devices_max": 30, "panel_url": ""}
+        self.assertEqual((await self.client.put("/admin/api/operations", headers=admin, json=operations)).status_code, 200)
+        result = await store_operations.get_operations(credentials=True)
+        self.assertFalse(result["telegram_login"])
+        self.assertTrue(result["google_login"])
+        self.assertEqual(result["google_client_id"], "test-client")
+        self.assertEqual(result["google_client_secret"], "test-secret")
+        self.assertEqual(result["extra_devices_max"], 30)
 
     async def test_palette_is_global_and_has_separate_support_settings(self):
         guest = {"X-Telegram-Init-Data": "110"}

@@ -21,6 +21,51 @@ class InstallerTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertFalse(installer.valid_domain(value))
 
+    def test_installer_assigns_separate_browser_host_in_both_modes(self):
+        answers = {
+            "Свой пароль": "",
+            "Домен вебхуков": "WEBHOOK.myvpn.site",
+            "Email": "admin@myvpn.site",
+            "Токен Telegram-бота": "1234567:" + "a" * 30,
+            "Telegram ID": "123456789",
+            "Адрес панели": "https://panel.myvpn.site",
+            "API-токен Remnawave": "test-token",
+        }
+
+        def ask(label, *, default="", **options):
+            return next((value for prefix, value in answers.items() if label.startswith(prefix)), default)
+
+        for mode in ("standalone", "panel"):
+            with self.subTest(mode=mode), patch.object(installer, "prompt", side_effect=ask) as prompt, \
+                 patch.object(installer, "identify_telegram_bot", return_value=("test_bot", "Test")), \
+                 patch.object(installer, "discover_local_panel", return_value=None), \
+                 patch.object(installer, "local_panel_for_url", return_value=None):
+                config = installer.config_for_install({}, mode, "none", 18080)
+            self.assertTrue(any(call.kwargs.get("default") == "web.myvpn.site" for call in prompt.call_args_list))
+            self.assertEqual(config["WEBAPP_URL"], "https://miniapp.myvpn.site")
+            self.assertEqual(config["BROWSER_WEBAPP_URL"], "https://web.myvpn.site")
+            self.assertEqual(config["PUBLIC_BASE_URL"], config["BROWSER_WEBAPP_URL"])
+            self.assertEqual(config["TELEGRAM_WEBHOOK_URL"], "https://webhook.myvpn.site/telegram/webhook")
+            self.assertIn("https://web.myvpn.site", installer.caddy_site_block(config))
+
+    def test_adding_browser_domain_preserves_existing_mini_app(self):
+        existing = {
+            "PUBLIC_DOMAIN": "webhook.myvpn.site",
+            "WEBAPP_DOMAIN": "web.myvpn.site",
+            "WEBAPP_URL": "https://web.myvpn.site/app",
+            "TELEGRAM_BOT_USERNAME": "test_bot",
+            "TELEGRAM_BOT_TOKEN": "test",
+            "ADMIN_IDS": "123",
+            "REMNAWAVE_BASE_URL": "https://panel.myvpn.site",
+            "REMNAWAVE_API_TOKEN": "secret",
+        }
+        with patch.object(installer, "prompt", side_effect=lambda label, default: default) as prompt, \
+             patch.object(installer, "local_panel_for_url", return_value=None):
+            config = installer.config_for_install(existing, "panel", "none", 18080)
+        prompt.assert_called_once_with("Поддомен браузерной версии (без https://)", default="browser.myvpn.site")
+        self.assertEqual(config["WEBAPP_URL"], "https://web.myvpn.site")
+        self.assertEqual(config["BROWSER_WEBAPP_URL"], "https://browser.myvpn.site")
+
     def test_mode_files_never_load_caddy_on_panel(self):
         self.assertEqual(
             installer.mode_files("standalone"),
@@ -68,6 +113,7 @@ class InstallerTests(unittest.TestCase):
         existing = {
             "PUBLIC_DOMAIN": "hook.myvpn.site",
             "WEBAPP_DOMAIN": "app.myvpn.site",
+            "BROWSER_DOMAIN": "web.myvpn.site",
             "TELEGRAM_BOT_USERNAME": "test_bot",
             "TELEGRAM_BOT_TOKEN": "1234567:ABC",
             "ADMIN_IDS": "123456789",
@@ -92,6 +138,7 @@ class InstallerTests(unittest.TestCase):
         old = {
             "PUBLIC_DOMAIN": "hook.myvpn.site",
             "WEBAPP_DOMAIN": "app.myvpn.site",
+            "BROWSER_DOMAIN": "web.myvpn.site",
             "TELEGRAM_BOT_USERNAME": "",
             "TELEGRAM_BOT_TOKEN": "1234567:ABC",
             "ADMIN_IDS": "123456789",
@@ -115,6 +162,7 @@ class InstallerTests(unittest.TestCase):
         previous = {
             "PUBLIC_DOMAIN": "hook.myvpn.site",
             "WEBAPP_DOMAIN": "miniapp.myvpn.site",
+            "BROWSER_DOMAIN": "web.myvpn.site",
             "TELEGRAM_BOT_USERNAME": "",
             "TELEGRAM_BOT_TOKEN": "123456789:MOCK_TOKEN",
             "ADMIN_IDS": "123456789",
@@ -384,9 +432,11 @@ class InstallerTests(unittest.TestCase):
         block = installer.caddy_site_block({
             "PUBLIC_DOMAIN": "webhook.myvpn.site",
             "WEBAPP_DOMAIN": "miniapp.myvpn.site",
+            "BROWSER_DOMAIN": "web.myvpn.site",
         })
         self.assertIn("https://webhook.myvpn.site", block)
         self.assertIn("https://miniapp.myvpn.site", block)
+        self.assertIn("https://web.myvpn.site", block)
         self.assertIn("remnaum-api:8080", block)
         with self.assertRaises(ValueError):
             installer.caddy_site_block({
@@ -402,6 +452,7 @@ class InstallerTests(unittest.TestCase):
         existing = {
             "PUBLIC_DOMAIN": "panel.myvpn.site",
             "WEBAPP_DOMAIN": "app.myvpn.site",
+            "BROWSER_DOMAIN": "web.myvpn.site",
             "TELEGRAM_BOT_USERNAME": "test_bot",
             "TELEGRAM_BOT_TOKEN": "test",
             "ADMIN_IDS": "123",
