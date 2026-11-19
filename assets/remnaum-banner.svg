@@ -13,16 +13,9 @@
     </linearGradient>
   </defs>
   <rect width="1600" height="660" fill="#08090a"/>
-  <!-- Quiet technical construction lines -->
+  <!-- Subtle background arcs, without construction frame or corner markers -->
   <g stroke="#d4d4d4" stroke-opacity=".13" stroke-width="1" fill="none">
-    <path d="M70 0V660 M1530 0V660 M0 90H1600 M0 582H1600"/>
     <path d="M1160 -360 A600 600 0 0 0 1760 240 M-198 505 A268 268 0 0 1 270 720"/>
-    <path d="M70 80v20 M60 90h20 M1530 80v20 M1520 90h20 M70 572v20 M60 582h20"/>
-    <circle cx="1530" cy="90" r="7"/>
-  </g>
-  <g fill="#eaeaea">
-    <circle cx="70" cy="90" r="3.2"/>
-    <circle cx="70" cy="582" r="3.2"/>
   </g>
 
   <!-- Balanced centered brand lockup; its original intrinsic dimensions are preserved. -->
