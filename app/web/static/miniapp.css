@@ -81,6 +81,9 @@ main {
 .full { width: 100%; margin-top: 12px; }
 .check { display: flex; align-items: start; gap: 8px; color: var(--color-muted); }
 .check input { width: 17px; height: 17px; flex: none; }
+.notification-preferences fieldset { margin: 14px 0; min-width: 0; }
+.notification-preferences legend { padding: 0 5px; font-weight: 600; }
+.notification-preferences label + label { margin-top: 12px; }
 .status { color: var(--color-muted); overflow-wrap: anywhere; }
 .status:empty { display: none; }
 .panel .status:not(:empty) { margin-top: 8px; }

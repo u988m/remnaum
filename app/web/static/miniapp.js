@@ -41,6 +41,7 @@ function renderScreen(next) {
   } else if (orderDialog.open) {
     orderDialog.close();
   }
+  if (next.page === "notifications") loadNotificationPreferences();
   if (!order && previous.page !== next.page) {
     window.scrollTo(0, scrollPositions.get(next.id) || 0);
     if (previous.origin !== next.page) {
@@ -108,6 +109,44 @@ async function api(path, body, method = body ? "POST" : "GET") {
   if (!response.ok) throw Error(typeof data.detail === "string" ? data.detail : "Ошибка запроса");
   return data;
 }
+
+const notificationPreferencesForm = $("notification-preferences");
+const notificationPreferencesStatus = $("notification-preferences-status");
+const notificationSwitches = [...notificationPreferencesForm.querySelectorAll('input[type="checkbox"]')];
+let notificationPreferencesRequest;
+
+function loadNotificationPreferences() {
+  if (notificationPreferencesRequest) return;
+  notificationPreferencesStatus.textContent = "Загружаем настройки…";
+  notificationPreferencesRequest = api("/api/v1/webapp/notifications").then(preferences => {
+    for (const toggle of notificationSwitches) toggle.checked = preferences[toggle.name];
+    notificationPreferencesForm.hidden = false;
+    notificationPreferencesStatus.textContent = "";
+  }).catch(error => {
+    notificationPreferencesStatus.textContent = error.message;
+    notificationPreferencesRequest = undefined;
+  });
+}
+
+notificationPreferencesForm.onsubmit = async event => {
+  event.preventDefault();
+  const submit = notificationPreferencesForm.querySelector("button");
+  if (submit.disabled) return;
+  const preferences = Object.fromEntries(notificationSwitches.map(toggle => [toggle.name, toggle.checked]));
+  submit.disabled = true;
+  for (const toggle of notificationSwitches) toggle.disabled = true;
+  notificationPreferencesStatus.textContent = "Сохраняем…";
+  try {
+    await api("/api/v1/webapp/notifications", preferences, "PUT");
+    notificationPreferencesStatus.textContent = "Настройки уведомлений сохранены.";
+  } catch (error) {
+    notificationPreferencesStatus.textContent = error.message;
+  } finally {
+    submit.disabled = false;
+    for (const toggle of notificationSwitches) toggle.disabled = false;
+  }
+};
+
 async function loadOffers(){
   try{
     const d=await api("/api/v1/webapp/offers");

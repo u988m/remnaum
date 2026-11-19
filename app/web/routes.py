@@ -27,6 +27,10 @@ from app.services.subscriptions import provision_paid_payment
 from app.services.payment_notifications import notify_external_payment_success
 from app.services.telegram_webapp import telegram_photo_url, validate_telegram_init_data
 from app.services.store_documents import DOCUMENT_MAX_LENGTH, DocumentKind, list_documents, save_document
+from app.services.notification_settings import (
+    NotificationPreferences, NotificationSettings, get_notification_preferences, get_notification_settings,
+    save_notification_preferences, save_notification_settings,
+)
 from app.services import customer_admin
 from app.services.devices import DeviceNotFound, DevicesUnavailable, change_customer_device, get_customer_devices
 from app.services.subscriptions import PanelAccountConflict
@@ -340,6 +344,22 @@ class WebAppTermsAcceptance(BaseModel):
     accepted: bool
 
 
+@router.get("/api/v1/webapp/notifications")
+async def webapp_get_notifications(x_telegram_init_data: str | None = Header(default=None)):
+    identity = await _webapp_user(x_telegram_init_data)
+    return await get_notification_preferences(int(identity["id"]))
+
+
+@router.put("/api/v1/webapp/notifications")
+async def webapp_save_notifications(data: NotificationPreferences, x_telegram_init_data: str | None = Header(default=None)):
+    identity = _require_telegram_identity(x_telegram_init_data)
+    try:
+        await save_notification_preferences(int(identity["id"]), data)
+    except BlockedCustomer as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return data
+
+
 class WebAppCheckout(BaseModel):
     days: int
     traffic: int
@@ -372,6 +392,19 @@ async def _require_telegram_admin(init_data: str | None) -> dict:
     if telegram_id not in settings.admin_id_set:
         raise HTTPException(status_code=403, detail="Administrator access denied")
     return identity
+
+
+@router.get("/admin/api/notifications")
+async def admin_get_notifications(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    return await get_notification_settings()
+
+
+@router.put("/admin/api/notifications")
+async def admin_save_notifications(data: NotificationSettings, x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    await save_notification_settings(data)
+    return data
 
 
 @router.get("/admin", response_class=HTMLResponse)

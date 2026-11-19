@@ -127,9 +127,33 @@
       <div class="profile-actions">
         <button class="profile-action" type="button" data-go-page="shop"><strong>Все тарифы</strong><span>Выбрать подписку</span></button>
         <button class="profile-action" type="button" data-go-page="purchases"><strong>Покупки</strong><span>История и статусы оплаты</span></button>
+        <button class="profile-action" type="button" data-go-page="notifications"><strong>Уведомления</strong><span>Напоминания и сообщения об окончании</span></button>
         <button class="profile-action" type="button" data-go-page="guide"><strong>Инструкция</strong><span>Как подключить VPN</span></button>
         <button class="profile-action" type="button" data-go-page="support"><strong><svg class="profile-icon" aria-hidden="true"><use href="#i-help"/></svg>Помощь</strong><span>Связаться с поддержкой</span></button>
       </div>
+    </section>
+    <section class="page" id="page-notifications" data-page-panel="notifications" hidden>
+      <h1>Уведомления</h1>
+      <p class="muted">Выберите, какие сообщения получать от бота в Telegram.</p>
+      <form id="notification-preferences" class="notification-preferences" hidden>
+        <fieldset class="panel">
+          <legend>Срок подписки</legend>
+          <label class="check"><input name="subscription_reminder" type="checkbox" role="switch"> Напомнить заранее</label>
+          <label class="check"><input name="subscription_expired" type="checkbox" role="switch"> Сообщить об окончании</label>
+        </fieldset>
+        <fieldset class="panel">
+          <legend>Пробный доступ</legend>
+          <label class="check"><input name="trial_reminder" type="checkbox" role="switch"> Напомнить заранее</label>
+          <label class="check"><input name="trial_expired" type="checkbox" role="switch"> Сообщить об окончании</label>
+        </fieldset>
+        <fieldset class="panel">
+          <legend>Трафик</legend>
+          <label class="check"><input name="traffic_reminder" type="checkbox" role="switch"> Предупредить, когда трафика мало</label>
+          <label class="check"><input name="traffic_expired" type="checkbox" role="switch"> Сообщить об исчерпании</label>
+        </fieldset>
+        <button class="primary-btn full" type="submit">Сохранить</button>
+      </form>
+      <p class="status" id="notification-preferences-status" role="status"></p>
     </section>
   </div>
 </main>

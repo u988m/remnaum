@@ -77,6 +77,9 @@ class RemnawaveClient:
     async def get_user(self, user_id: int | str) -> Any:
         return await self.request("GET", f"/api/users/{user_id}")
 
+    async def list_users_page(self, *, start: int, size: int) -> Any:
+        return await self.request("GET", "/api/users", params={"start": start, "size": size})
+
     async def get_user_by_username(self, username: str) -> Any:
         return await self.request("GET", f"/api/users/by-username/{username}")
 
