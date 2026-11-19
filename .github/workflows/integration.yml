@@ -13,7 +13,7 @@ jobs:
       matrix:
         mode: [standalone, panel, panel-network]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Prepare isolated topology
         run: |
           cp .env.example .env
