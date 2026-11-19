@@ -57,6 +57,7 @@
           <div class="metric"><b id="sub-days">—</b><span>дней осталось</span></div>
         </div>
         <a class="link-button" id="sub-link" href="#" target="_blank" rel="noopener" style="display:none">↗ Открыть ссылку подключения</a>
+        <button class="secondary-btn" type="button" data-go-page="shop">Продлить или изменить тариф</button>
       </section>
       <section class="panel empty-state" id="no-subscription"><span class="empty-glyph">◇</span><h2>Подписка ещё не активирована</h2><p class="muted">Выберите тариф в магазине, чтобы получить подключение.</p><button class="secondary-btn" type="button" data-go-page="shop">Посмотреть тарифы</button></section>
       <section class="panel" id="account-devices"><div class="section-title"><h2>Мои устройства</h2><span>📱</span></div><div class="muted" id="account-device-info">Загружаем…</div></section>
@@ -71,7 +72,10 @@
         <div class="section-title"><h2>Пригласить друга</h2><span>✦</span></div>
         <div class="muted" id="account-referral-info">Загружаем…</div>
         <a id="account-referral-link" class="ref-link" href="#" style="display:none"></a>
-        <button class="secondary-btn" id="copy-referral" type="button" hidden>Скопировать ссылку</button>
+        <div class="referral-actions">
+          <button class="secondary-btn" id="copy-referral" type="button" hidden>Скопировать ссылку</button>
+          <a class="secondary-btn" id="share-referral" href="#" hidden>Поделиться</a>
+        </div>
       </section>
       <section class="panel" id="trial-offer" style="display:none">
         <div class="section-title"><h2>Пробный доступ</h2><span>✧</span></div>

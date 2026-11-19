@@ -76,3 +76,21 @@ a{color:#80b7ff}
 @media(min-width:650px){.bottom-nav{width:610px;left:50%;transform:translateX(-50%);border:1px solid #314965;border-bottom:0;border-radius:18px 18px 0 0}.page-title{padding-top:15px}}
 @media(max-width:390px){main{padding-inline:12px}.panel{padding:15px}.field-grid{gap:11px 8px}.metric b{font-size:16px}.brand-meta strong{font-size:17px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* Clean detail cards, symmetric controls and comfortable touch areas. */
+.referral-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}
+.referral-actions .secondary-btn{margin:0;min-width:0;display:flex;align-items:center;justify-content:center;min-height:45px}
+.record-list{display:grid;grid-template-columns:minmax(0,1fr);gap:9px;margin-top:11px}
+.record-card{display:flex;flex-direction:column;gap:6px;background:#0c1a2a;border:1px solid #29415c;border-radius:13px;padding:13px 14px;min-width:0}
+.record-card strong{font-size:13px;font-weight:740;color:#edf6ff;overflow-wrap:anywhere}
+.record-meta{font-size:12px;line-height:1.45;color:#9db2ca;overflow-wrap:anywhere}
+.record-heading{display:flex;justify-content:space-between;align-items:center;gap:9px}
+.record-badge{font-size:10px;font-weight:750;white-space:nowrap;border-radius:99px;padding:5px 9px;color:#a6bee0;background:#203753;border:1px solid #335472}
+.record-badge[data-status="succeeded"]{color:#78e5b6;background:#113b35;border-color:#245d4c}
+.record-badge[data-status="failed"],.record-badge[data-status="cancelled"]{color:#f3a9b5;background:#482832;border-color:#75404d}
+.record-badge[data-status="pending"]{color:#efd29c;background:#463b26;border-color:#725d38}
+.panel{overflow-wrap:anywhere}
+.page .primary-btn,.page .secondary-btn,.page .link-button{min-height:45px}
+.page .field-grid{align-items:start}
+.page input[type="checkbox"]{width:18px;height:18px;flex:none}
+@media(max-width:360px){.referral-actions{grid-template-columns:1fr}.bottom-nav small{font-size:9px}.bottom-nav{gap:2px}.page-title h1{font-size:24px}}

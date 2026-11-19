@@ -45,18 +45,18 @@ def _admin_webapp_url() -> str:
 def main_menu(*, is_admin: bool = False) -> InlineKeyboardMarkup:
     """Short, balanced two-column navigation instead of a wall of buttons."""
     rows = [
-        [InlineKeyboardButton(text="🛍 Тарифы", callback_data="menu:plans"),
-         InlineKeyboardButton(text="🔐 Мой VPN", callback_data="menu:subscription")],
+        [InlineKeyboardButton(text="◈ Купить VPN", callback_data="menu:plans"),
+         InlineKeyboardButton(text="🔐 Подписка", callback_data="menu:subscription")],
         [InlineKeyboardButton(text="📱 Устройства", callback_data="menu:devices"),
          InlineKeyboardButton(text="🧾 Покупки", callback_data="menu:purchases")],
         [InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile"),
          InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses")],
-        [InlineKeyboardButton(text="📖 Подключение", callback_data="menu:connect"),
+        [InlineKeyboardButton(text="📖 Подключиться", callback_data="menu:connect"),
          InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support")],
     ]
     if settings.webapp_url.startswith("https://"):
         rows.append([InlineKeyboardButton(
-            text="✨ Открыть магазин", web_app=WebAppInfo(url=settings.webapp_url),
+            text="✦ Открыть Mini App", web_app=WebAppInfo(url=settings.webapp_url),
         )])
     if is_admin and settings.webapp_url.startswith("https://"):
         rows.append([InlineKeyboardButton(
@@ -322,7 +322,7 @@ async def payment_terms_accept_handler(callback: CallbackQuery) -> None:
         await callback.answer(str(exc), show_alert=True)
         return
     await callback.answer("Условия приняты")
-    await show_stars_checkout(callback)
+    await show_payment_options(callback)
 
 
 @router.callback_query(F.data.in_({"payment:create:yookassa", "payment:create:yoomoney", "payment:create:cryptopay"}))
@@ -607,9 +607,24 @@ async def support_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     from app.services.store_profile import get_store_profile
     profile = await get_store_profile()
-    support = escape(profile["support_contact"]) if profile["support_contact"] else "Контакт поддержки ещё не настроен."
+    contact = str(profile.get("support_contact") or "").strip()
+    support = escape(contact) if contact else "Связь с поддержкой пока не настроена."
+    button_url = None
+    if contact.startswith("@") and len(contact) > 1 and contact[1:].replace("_", "").isalnum():
+        button_url = "https://t.me/" + contact[1:]
+    elif contact.startswith("https://"):
+        parsed = urlsplit(contact)
+        if parsed.hostname and not parsed.username and not parsed.password and parsed.hostname.lower() in ("t.me", "telegram.me"):
+            button_url = contact
+    rows = []
+    if button_url:
+        rows.append([InlineKeyboardButton(text="💬 Написать в поддержку", url=button_url)])
+    rows.append([InlineKeyboardButton(text="← Главное меню", callback_data="menu:home")])
     if callback.message:
-        await callback.message.edit_text(f"🆘 <b>Поддержка</b>\n\n{support}", reply_markup=back_menu())
+        await callback.message.edit_text(
+            f"💬 <b>Помощь и поддержка</b>\n\n{support}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
 
 
 @router.callback_query(F.data == "menu:devices")
