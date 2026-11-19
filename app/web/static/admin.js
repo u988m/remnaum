@@ -63,6 +63,34 @@ $("squads-refresh").onclick = () => loadSquads(true);
 let cachedPlans=[];
 async function loadPlans(){
   await loadSquads();
+  const policies = await adminApi("GET", "/admin/api/squad-policies");
+  const container = $("mode-policies");
+  container.replaceChildren();
+  for (const [mode, title] of [["flexible", "Гибкий конструктор"], ["trial", "Пробный доступ"]]) {
+    const label = document.createElement("label");
+    label.textContent = title;
+    const select = document.createElement("select");
+    select.multiple = true;
+    const keys = new Set([...policies[mode], ...squadItems.map(item => item.uuid)]);
+    for (const key of keys) {
+      const item = squadItems.find(row => row.uuid === key);
+      const option = new Option((item?.name || "") + " · " + key + (item?.available ? "" : " ⚠ Недоступен"), key);
+      option.selected = policies[mode].includes(key);
+      option.disabled = !item?.available && !option.selected;
+      select.add(option);
+    }
+    label.appendChild(select);
+    const save = document.createElement("button");
+    save.className = "action";
+    save.textContent = "Сохранить · " + title;
+    save.onclick = async () => {
+      try {
+        await adminApi("PUT", "/admin/api/squad-policies/" + mode, Array.from(select.selectedOptions, o => o.value));
+        $("status").textContent = "Настройки сохранены";
+      } catch (error) { $("status").textContent = error.message; }
+    };
+    container.append(label, save);
+  }
   const d=await adminApi("GET","/admin/api/plans");cachedPlans=d.items;$("plans-table").replaceChildren();
   d.items.forEach(p=>{
     row("plans-table",[p.title,p.duration_days+" д / "+p.traffic_gb+" ГБ / "+p.device_limit+" уст.",(p.price_rub_minor/100).toFixed(2),p.price_stars,p.is_active?"Активен":"Скрыт"]);

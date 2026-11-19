@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 from sqlalchemy import select
 
+from app.services.squads import fetch_catalog, require_available
 from app.config import settings
 from app.db.models import Payment, Subscription, SubscriptionDetails, TrialClaim, User
 from app.db.session import SessionLocal
@@ -43,7 +44,9 @@ async def provision_paid_payment(payment_id: int) -> bool:
         user = await session.get(User, payment.user_id, with_for_update=True)
         if user is None:
             raise RuntimeError("Payment owner not found")
-        snapshot = json.loads(payment.payload or "{}").get("tariff") or {}
+        order = json.loads(payment.payload or "{}")
+        tariff_key = str(order["plan_id"] or "flexible") if "plan_id" in order else None
+        snapshot = order.get("tariff") or {}
         days = int(snapshot.get("duration_days", 0))
         traffic_gb = int(snapshot.get("traffic_gb", 0))
         device_limit = int(snapshot.get("device_limit", 0))
@@ -87,6 +90,18 @@ async def provision_paid_payment(payment_id: int) -> bool:
                         Payment.user_id == user.id, Payment.status == "succeeded"
                     ).limit(1))
                     first_purchase = previous_payment is None
+                previous = await session.scalar(select(Payment).where(
+                    Payment.user_id == user.id, Payment.status == "succeeded"
+                ).order_by(Payment.id.desc()).limit(1))
+                previous_order = json.loads(previous.payload or "{}") if previous else {}
+                plan_changed = ("plan_id" in previous_order and "plan_id" in order
+                                and previous_order["plan_id"] != order["plan_id"])
+                if subscription and subscription.paid_tariff and tariff_key:
+                    plan_changed = subscription.paid_tariff != tariff_key
+                selected = None
+                if first_purchase or plan_changed:
+                    selected = snapshot.get("internal_squads", settings.remnawave_internal_squad_ids)
+                    require_available(selected, await fetch_catalog())
                 expire_value = panel_user.get("expireAt")
                 if isinstance(expire_value, str):
                     current_expiry = datetime.fromisoformat(expire_value.replace("Z", "+00:00"))
@@ -102,14 +117,7 @@ async def provision_paid_payment(payment_id: int) -> bool:
                     hwid_device_limit=device_limit,
                     expire_at=new_expiry,
                     description=new_description,
-                    active_internal_squads=snapshot.get("internal_squads") if first_purchase else None,
-                )
-            else:
-                await panel.update_user(
-                    panel_user_id,
-                    traffic_limit_bytes=traffic_bytes,
-                    hwid_device_limit=device_limit,
-                    description=description,
+                    active_internal_squads=selected,
                 )
             panel_user = _unwrap(await panel.get_user(panel_user_id))
         else:
@@ -119,6 +127,7 @@ async def provision_paid_payment(payment_id: int) -> bool:
             squads = snapshot.get("internal_squads", settings.remnawave_internal_squad_ids)
             if not squads:
                 raise RuntimeError("No Internal Squads configured for VPN issuance")
+            require_available(squads, await fetch_catalog())
             created = await panel.create_user(
                 username,
                 expire_at,
@@ -156,6 +165,9 @@ async def provision_paid_payment(payment_id: int) -> bool:
             subscription.panel_user_id = str(panel_user_id)
             subscription.status = "active"
             subscription.expires_at = expires_at
+
+        if tariff_key:
+            subscription.paid_tariff = tariff_key
 
         details = await session.scalar(
             select(SubscriptionDetails).where(

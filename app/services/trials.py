@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from sqlalchemy import select
 
+from app.services.squads import mode_squads, require_available, fetch_catalog
 from app.config import settings
 from app.db.models import Payment, Subscription, SubscriptionDetails, TrialClaim, TrialSettings, User
 from app.db.session import SessionLocal
@@ -72,9 +73,6 @@ async def trial_eligible(telegram_id: int) -> bool:
 async def claim_trial(telegram_id: int) -> dict:
     if not settings.remnawave_base_url or not settings.remnawave_api_token:
         raise RuntimeError("Remnawave API is not configured")
-    if not settings.remnawave_internal_squad_ids:
-        raise RuntimeError("Remnawave internal squads are not configured")
-
     async with SessionLocal() as session:
         user = await session.scalar(
             select(User).where(User.telegram_id == telegram_id).with_for_update()
@@ -110,13 +108,15 @@ async def claim_trial(telegram_id: int) -> dict:
             panel_user = _unwrap(await panel.get_user(panel_user_id))
         else:
             expire_at = datetime.now(timezone.utc) + timedelta(days=config.days)
+            selected = await mode_squads(session, "trial")
+            require_available(selected, await fetch_catalog())
             created = _unwrap(await panel.create_user(
                 username,
                 expire_at,
                 telegram_id=telegram_id,
                 traffic_limit_bytes=config.traffic_gb * 1024 ** 3,
                 hwid_device_limit=config.device_limit,
-                active_internal_squads=settings.remnawave_internal_squad_ids,
+                active_internal_squads=selected,
                 description=marker,
             ))
             if created.get("id") is None and not created.get("uuid"):

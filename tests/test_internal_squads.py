@@ -85,6 +85,20 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await subscriptions.provision_paid_payment(renewal.id)
             self.assertIsNone(panel.update_user.await_args.kwargs.get("active_internal_squads"))
             panel.get_user_by_username.return_value = {}
+            for target, expected in [(premium, [A, B]), (basic, [B])]:
+                await plans.choose_plan(12, target["id"])
+                switched = await checkout()
+                panel.get_user_by_username.return_value = {"response": {"id": 7}}
+                self.fetch.side_effect = httpx.ConnectError("offline")
+                with self.assertRaises(httpx.ConnectError):
+                    await subscriptions.provision_paid_payment(switched.id)
+                async with self.sessions() as session:
+                    self.assertEqual((await session.get(Payment, switched.id)).status, "paid")
+                self.fetch.side_effect = None
+                await subscriptions.provision_paid_payment(switched.id)
+                self.assertEqual(panel.update_user.await_args.kwargs["active_internal_squads"], expected)
+                self.assertFalse(await subscriptions.provision_paid_payment(switched.id))
+            panel.get_user_by_username.return_value = {}
             missing_account = await checkout()
             with self.assertRaisesRegex(RuntimeError, "Panel account missing"):
                 await subscriptions.provision_paid_payment(missing_account.id)
@@ -102,6 +116,27 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved[premium["id"]]["internal_squads"], [A, B])
         with self.assertRaises(ValueError):
             await plans.save_plan(PLAN | {"internal_squads": [B]})
+
+    async def test_pagination_outage_and_mode_defaults(self):
+        async with self.engine.begin() as conn:
+            await initialize_schema(conn)
+        self.fetch.side_effect = httpx.ConnectError("startup outage")
+        self.assertTrue((await squads.refresh_catalog())["failed"])
+        self.fetch.side_effect = [
+            {"response": {"total": 2, "internalSquads": [{"uuid": A, "name": "First"}]}},
+            {"response": {"total": 2, "internalSquads": [{"uuid": B, "name": "Second", "isActive": False}]}},
+        ]
+        items = await squads.fetch_catalog()
+        self.assertEqual(self.fetch.await_args.kwargs["params"], {"start": 1, "size": 1})
+        with self.assertRaises(ValueError):
+            squads.require_available([B], items)
+        async with self.sessions.begin() as session:
+            self.assertEqual(await squads.mode_squads(session, "trial"), [])
+            self.assertEqual(await squads.mode_squads(session, "flexible"), [])
+            (await session.get(squads.SquadPolicy, "trial")).squads = [A]
+        async with self.sessions() as session:
+            self.assertEqual(await squads.mode_squads(session, "trial"), [A])
+            self.assertEqual(await squads.mode_squads(session, "flexible"), [])
 
     async def test_upgrade_preserves_old_plan_and_is_repeatable(self):
         async with self.engine.begin() as conn:

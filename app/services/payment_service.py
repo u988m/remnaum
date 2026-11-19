@@ -3,28 +3,37 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.db.models import InternalSquadCatalog, Payment, TariffDraft, TermsAcceptance, User
+from app.db.models import InternalSquadCatalog, Subscription, Payment, TariffDraft, TermsAcceptance, User
 from app.db.session import SessionLocal
 from app.config import settings
 from app.services.payment_providers import VerifiedPayment, get_provider
 from app.services.tariffs import calculate_store_stars_price, ensure_tariff_draft
 from app.services.store_settings import get_store_payment_settings
 from app.services.plans import selected_plan_for_user
+from app.services.squads import mode_squads
 from app.services.store_profile import get_terms_url
 
 
 async def checkout_squads(session, user_id, plan):
-    selected = settings.remnawave_internal_squad_ids if plan is None else (plan.internal_squads or [])
+    selected = await mode_squads(session, "flexible") if plan is None else (plan.internal_squads or [])
     catalog = await session.get(InternalSquadCatalog, 1)
-    missing = catalog and catalog.last_success and any(
+    missing = not catalog or not catalog.last_success or any(
         not catalog.items.get(key, {}).get("available") for key in selected
     )
     if not selected or missing:
         # Existing paid subscriptions keep the assignments already on the panel.
-        paid = await session.scalar(select(Payment.id).where(
+        tariff_key = str(plan.id) if plan else "flexible"
+        current = await session.scalar(select(Subscription).where(
+            Subscription.user_id == user_id
+        ).order_by(Subscription.created_at.desc()).limit(1))
+        previous = await session.scalar(select(Payment).where(
             Payment.user_id == user_id, Payment.status == "succeeded"
-        ).limit(1))
-        if not paid:
+        ).order_by(Payment.id.desc()).limit(1))
+        previous_order = json.loads(previous.payload or "{}") if previous else {}
+        old_key = current.paid_tariff if current else None
+        if old_key is None and "plan_id" in previous_order:
+            old_key = str(previous_order["plan_id"] or "flexible")
+        if not current or not previous or (old_key and old_key != tariff_key):
             raise ValueError("Сквады тарифа не настроены или недоступны")
     return selected
 

@@ -5,7 +5,7 @@ from uuid import UUID
 import httpx
 from sqlalchemy.dialects.postgresql import insert
 
-from app.db.models import InternalSquadCatalog
+from app.db.models import InternalSquadCatalog, SquadPolicy
 from app.db.session import SessionLocal
 from app.services.remnawave import RemnawaveClient
 
@@ -15,8 +15,6 @@ def parse_catalog(payload):
         payload = payload.get("response", payload)
     if isinstance(payload, dict):
         rows = payload.get("internalSquads")
-        if isinstance(rows, list) and payload.get("total", len(rows)) != len(rows):
-            raise ValueError("Incomplete squad list")
     else:
         rows = payload
     if not isinstance(rows, list):
@@ -26,8 +24,37 @@ def parse_catalog(payload):
         if not isinstance(row, dict) or not isinstance(row.get("name"), str):
             raise ValueError("Invalid squad")
         identifier = str(UUID(str(row.get("uuid"))))
-        items[identifier] = {"uuid": identifier, "name": row["name"], "available": True}
+        items[identifier] = {"uuid": identifier, "name": row["name"], "available": row.get("isActive", True) is True and row.get("isEnabled", True) is True and not row.get("isDeleted", False) and row.get("status", "ACTIVE") == "ACTIVE"}
     return items
+
+
+async def fetch_catalog():
+    client = RemnawaveClient()
+    items = {}
+    params = {}
+    while True:
+        payload = await client.request("GET", "/api/internal-squads", params=params)
+        page = parse_catalog(payload)
+        body = payload.get("response", payload) if isinstance(payload, dict) else payload
+        total = body.get("total", len(page)) if isinstance(body, dict) else len(page)
+        if not isinstance(total, int) or items.keys() & page.keys():
+            raise ValueError("Invalid squad pagination")
+        items.update(page)
+        if len(items) == total:
+            return items
+        if not page or len(items) > total:
+            raise ValueError("Incomplete squad list")
+        params = {"start": len(items), "size": len(page)}
+
+
+def require_available(selected, items):
+    if not selected or any(not items.get(key, {}).get("available") for key in selected):
+        raise ValueError("Сквады доступа не настроены или недоступны")
+
+
+async def mode_squads(session, mode):
+    policy = await session.get(SquadPolicy, mode)
+    return policy.squads if policy else []
 
 
 def catalog_view(row):
@@ -48,7 +75,7 @@ async def refresh_catalog():
         await session.execute(insert(InternalSquadCatalog).values(id=1).on_conflict_do_nothing())
         row = await session.get(InternalSquadCatalog, 1, with_for_update=True)
         try:
-            items = parse_catalog(await RemnawaveClient().request("GET", "/api/internal-squads"))
+            items = await fetch_catalog()
         except (httpx.HTTPError, RuntimeError, ValueError):
             row.failed = True
         else:

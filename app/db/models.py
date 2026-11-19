@@ -16,6 +16,7 @@ class User(Base):
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
+    paid_tariff: Mapped[str | None] = mapped_column(String(48))
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     panel_user_id: Mapped[str | None] = mapped_column(String(128), index=True)
@@ -207,3 +208,9 @@ class InternalSquadCatalog(Base):
     items: Mapped[dict] = mapped_column(JSON, default=dict)
     last_success: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     failed: Mapped[bool] = mapped_column(default=False)
+
+
+class SquadPolicy(Base):
+    __tablename__ = "squad_policies"
+    mode: Mapped[str] = mapped_column(String(16), primary_key=True)
+    squads: Mapped[list[str]] = mapped_column(JSON)

@@ -505,8 +505,31 @@ async def remnawave_webhook(request: Request, x_remnawave_signature: str | None 
 
 
 # Fixed plans share the existing Telegram-authenticated admin dashboard.
-from app.services.squads import get_catalog, refresh_catalog
+from app.services.squads import get_catalog, refresh_catalog, mode_squads
+from app.db.models import SquadPolicy, InternalSquadCatalog
 from app.services.plans import list_plans, save_plan, choose_plan
+
+
+@router.get("/admin/api/squad-policies")
+async def admin_squad_policies(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    async with SessionLocal() as session:
+        return {mode: await mode_squads(session, mode) for mode in ("trial", "flexible")}
+
+
+@router.put("/admin/api/squad-policies/{mode}")
+async def save_squad_policy(mode: str, selected: list[str], x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    if mode not in ("trial", "flexible"):
+        raise HTTPException(404)
+    async with SessionLocal.begin() as session:
+        policy = await session.get(SquadPolicy, mode, with_for_update=True)
+        catalog = await session.get(InternalSquadCatalog, 1)
+        for key in set(selected) - set(policy.squads):
+            if not catalog or not catalog.items.get(key, {}).get("available"):
+                raise HTTPException(422, "Сквад недоступен")
+        policy.squads = list(dict.fromkeys(selected))
+        return policy.squads
 
 
 @router.get("/admin/api/internal-squads")
