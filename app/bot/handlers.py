@@ -8,7 +8,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message, PreCheckoutQuery, WebAppInfo, FSInputFile
 
-from app.bot.menu import MenuMiddleware, menu_session, remember_menu, remove_command
+from app.bot.menu import MenuMiddleware, current_menu, menu_session, remember_menu, remove_command
 from app.config import settings
 from app.services.tariffs import format_traffic
 from app.services.payment_service import (
@@ -22,8 +22,9 @@ from app.services.payment_service import (
 )
 from app.services.payment_providers import VerifiedPayment
 from app.services.payment_service import settle_payment
-from app.services.subscriptions import get_user_subscription, provision_paid_payment
-from app.services.users import get_or_create_user
+from app.services.subscriptions import PanelAccountConflict, get_user_subscription, provision_paid_payment
+from app.services.users import BlockedCustomer, get_or_create_user
+from app.services.devices import DeviceNotFound, DevicesUnavailable, change_customer_device, get_customer_devices
 from app.services.store_settings import (
     PROVIDER_LABELS, get_payment_presentation, get_store_payment_settings, is_payment_method_enabled, public_payment_settings,
 )
@@ -661,41 +662,143 @@ async def support_handler(callback: CallbackQuery) -> None:
         await edit_menu_message(callback.message, text, reply_markup=keyboard)
 
 
-@router.callback_query(F.data == "menu:devices")
-async def devices_handler(callback: CallbackQuery) -> None:
-    from app.services.remnawave import RemnawaveClient
-    await callback.answer()
-    subscription = await get_user_subscription(callback.from_user.id)
-    if not subscription:
-        message = "📱 <b>Мои устройства</b>\\n\\nСначала оформите подписку."
+DEVICE_PAGE_SIZE = 6
+DEVICE_ACTION = re.compile(r"^device:(view|name|nameback|remove|confirm):([0-9a-f]{32}):([0-9]{1,5})$")
+DEVICE_ERRORS = (DeviceNotFound, DevicesUnavailable, PanelAccountConflict, BlockedCustomer)
+
+
+def _device_list_callback(page: int) -> str:
+    return f"menu:devices:{page}" if page else "menu:devices"
+
+
+async def _device_menu(telegram_id: int, page: int, notice: str = ""):
+    lines = ["📱 <b>Мои устройства</b>"]
+    if notice:
+        lines.append(escape(notice))
+    rows = []
+    try:
+        devices = await get_customer_devices(telegram_id)
+    except DEVICE_ERRORS as exc:
+        lines.append(escape(str(exc)))
+        rows.append([InlineKeyboardButton(text="Обновить", callback_data=_device_list_callback(page))])
     else:
-        limit = subscription.get("device_limit")
-        lines = ["📱 <b>Мои устройства</b>", "", f"Ваш лимит: <b>{limit if limit is not None else '—'}</b>"]
-        panel_id = subscription.get("panel_user_id")
-        if panel_id and settings.remnawave_base_url and settings.remnawave_api_token:
-            try:
-                result = await RemnawaveClient().get_hwid_devices(panel_id)
-                data = result.get("response", result) if isinstance(result, dict) else result
-                if isinstance(data, dict):
-                    devices = data.get("devices", data.get("items", []))
-                elif isinstance(data, list):
-                    devices = data
-                else:
-                    devices = []
-                lines.append(f"Подключено устройств: <b>{len(devices)}</b>")
-                for index, device in enumerate(devices[:10], 1):
-                    if isinstance(device, dict):
-                        label = device.get("deviceModel") or device.get("platform") or device.get("userAgent") or "Устройство"
-                    else:
-                        label = "Устройство"
-                    lines.append(f"{index}. {escape(str(label)[:70])}")
-            except Exception:
-                lines.append("Список устройств временно недоступен.")
+        items = devices["items"]
+        if not devices["has_subscription"]:
+            lines.append("Сначала оформите подписку.")
         else:
-            lines.append("Подключите VPN, чтобы увидеть зарегистрированные устройства.")
-        message = chr(10).join(lines)
+            limit = f" из {devices['limit']}" if devices["limit"] else ""
+            lines.append(f"Подключено: <b>{devices['total']}{limit}</b>")
+            if not items:
+                lines.append("Зарегистрированных устройств пока нет.")
+            page = min(page, max(0, (len(items) - 1) // DEVICE_PAGE_SIZE))
+            start = page * DEVICE_PAGE_SIZE
+            for device in items[start:start + DEVICE_PAGE_SIZE]:
+                name = device["name"][:36]
+                label = f"{name} · {device['client']}" if device["client"] else name
+                rows.append([InlineKeyboardButton(
+                    text=label, callback_data=f"device:view:{device['id']}:{page}",
+                )])
+            navigation = []
+            if page:
+                navigation.append(InlineKeyboardButton(text="‹ Предыдущие", callback_data=_device_list_callback(page - 1)))
+            if start + DEVICE_PAGE_SIZE < len(items):
+                navigation.append(InlineKeyboardButton(text="Следующие ›", callback_data=_device_list_callback(page + 1)))
+            if navigation:
+                rows.append(navigation)
+    rows.append(back_menu("menu:subscription").inline_keyboard[0])
+    return "\n\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _device_details(device: dict, page: int, notice: str = ""):
+    key = device["id"]
+    lines = [f"📱 <b>{escape(device['name'])}</b>"]
+    if notice:
+        lines.append(escape(notice))
+    if device["alias"] and device["model"] != device["name"]:
+        lines.append(f"Модель: {escape(device['model'])}")
+    if platform := " ".join(filter(None, (device["platform"], device["os_version"]))):
+        lines.append(escape(platform))
+    lines.append("Клиент: " + escape(device["client"] or "Не определён"))
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Переименовать", callback_data=f"device:name:{key}:{page}"),
+         InlineKeyboardButton(text="🗑 Удалить", callback_data=f"device:remove:{key}:{page}")],
+        [InlineKeyboardButton(text="← К устройствам", callback_data=_device_list_callback(page))],
+    ])
+
+
+@router.callback_query(F.data.regexp(r"^menu:devices(?::[0-9]{1,5})?$"))
+async def devices_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
     if callback.message:
-        await edit_menu_message(callback.message, message.replace(chr(92) + "n", chr(10)), reply_markup=back_menu("menu:subscription"))
+        page = int(callback.data.split(":")[2]) if callback.data.count(":") == 2 else 0
+        text, keyboard = await _device_menu(callback.from_user.id, page)
+        await edit_menu_message(callback.message, text, reply_markup=keyboard)
+
+
+@router.callback_query(F.data.regexp(DEVICE_ACTION))
+async def device_action_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.message or callback.message.chat.type != "private":
+        return
+    action, device_id, page_number = DEVICE_ACTION.fullmatch(callback.data).groups()
+    page = int(page_number)
+    telegram_id = callback.from_user.id
+    try:
+        if action == "confirm":
+            await change_customer_device(telegram_id, device_id, name=None)
+            text, keyboard = await _device_menu(telegram_id, page, "Устройство удалено.")
+        else:
+            devices = await get_customer_devices(telegram_id)
+            device = next((item for item in devices["items"] if item["id"] == device_id), None)
+            if device is None:
+                raise DeviceNotFound()
+            if action == "name":
+                text = f"Введите новое имя для <b>{escape(device['name'])}</b> (до 48 символов)."
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="Отмена", callback_data=f"device:nameback:{device_id}:{page}"),
+                ]])
+            elif action == "remove":
+                text = f"Удалить <b>{escape(device['name'])}</b>? Место освободится."
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="Удалить устройство", callback_data=f"device:confirm:{device_id}:{page}")],
+                    [InlineKeyboardButton(text="Отмена", callback_data=f"device:view:{device_id}:{page}")],
+                ])
+            else:
+                text, keyboard = _device_details(device, page)
+    except DEVICE_ERRORS as exc:
+        text = escape(str(exc))
+        keyboard = back_menu(_device_list_callback(page))
+    await edit_menu_message(callback.message, text, reply_markup=keyboard)
+
+
+@router.message(F.chat.type == "private", F.text, ~F.text.startswith("/"))
+async def device_name_handler(message: Message) -> None:
+    menu = current_menu.get()
+    if not menu or not message.from_user:
+        return
+    pending = next((value for value in menu.callbacks if value.startswith("device:nameback:")), None)
+    if not pending:
+        return
+    _, _, device_id, page_number = pending.split(":")
+    name = " ".join(message.text.split())
+    if not name or len(name) > 48:
+        text = "Введите имя от 1 до 48 символов."
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="Отмена", callback_data=pending),
+        ]])
+    else:
+        try:
+            device = await change_customer_device(message.from_user.id, device_id, name=name)
+            text, keyboard = _device_details(device, int(page_number), "Имя сохранено.")
+        except DEVICE_ERRORS as exc:
+            text = escape(str(exc))
+            keyboard = back_menu(_device_list_callback(int(page_number)))
+        except ValueError as exc:
+            text = escape(str(exc))
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="Отмена", callback_data=pending),
+            ]])
+    await show_command_section(message, text, keyboard)
 
 
 @router.callback_query(F.data == "menu:purchases")

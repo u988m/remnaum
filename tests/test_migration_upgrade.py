@@ -60,7 +60,7 @@ class LegacyMigrationTests(unittest.IsolatedAsyncioTestCase):
                         lambda c: {x["name"] for x in inspect(c).get_columns("tariff_plans")}
                     )
                     self.assertEqual(user, "legacy")
-                    self.assertEqual(revision, "0004_shop_presentation")
+                    self.assertEqual(revision, "0005_device_aliases")
                     legacy_plan = (await conn.execute(text(
                         "SELECT title, price_rub_minor, extra_device_price_rub_minor, badge, is_featured FROM tariff_plans"
                     ))).one()

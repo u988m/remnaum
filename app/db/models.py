@@ -17,6 +17,13 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class DeviceAlias(Base):
+    __tablename__ = "device_aliases"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    device_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(48))
+
+
 class Subscription(Base):
     __tablename__ = "subscriptions"
     paid_tariff: Mapped[str | None] = mapped_column(String(48))

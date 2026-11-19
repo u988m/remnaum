@@ -9,15 +9,16 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import httpx
+from fastapi import FastAPI
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
 from app.db.base import Base
-from app.db.models import Payment, Referral, ReferralReward, Subscription, TariffPlan, TermsAcceptance, User
+from app.db.models import DeviceAlias, Payment, Referral, ReferralReward, Subscription, SubscriptionDetails, TariffPlan, TermsAcceptance, User
 from app.db.session import initialize_schema
 from app.services.payment_providers import PaymentLink, VerifiedPayment
-from app.services import customer_admin, payment_service, plans, squads, subscriptions, tariffs, trials, users
+from app.services import customer_admin, devices, payment_service, plans, squads, subscriptions, tariffs, trials, users
 from app.web import routes
 
 A, B = str(uuid4()), str(uuid4())
@@ -43,7 +44,7 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.engine = engine
         self.sessions = async_sessionmaker(engine, expire_on_commit=False)
         with ExitStack() as stack:
-            for module in (customer_admin, payment_service, plans, squads, subscriptions, tariffs, trials, users):
+            for module in (customer_admin, devices, payment_service, plans, squads, subscriptions, tariffs, trials, users):
                 stack.enter_context(patch.object(module, "SessionLocal", self.sessions))
             stack.enter_context(patch.object(settings, "remnawave_base_url", "https://panel.test"))
             stack.enter_context(patch.object(settings, "remnawave_api_token", "test"))
@@ -61,6 +62,70 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
             {"uuid": key, "name": name} for key, name in ids
         ]}}
         return await squads.refresh_catalog()
+
+    async def test_webapp_devices_share_names_and_enforce_customer_ownership(self):
+        async with self.engine.begin() as conn:
+            await initialize_schema(conn)
+        async with self.sessions.begin() as session:
+            for telegram_id in (42, 43):
+                user = User(telegram_id=telegram_id)
+                session.add(user)
+                await session.flush()
+                subscription = Subscription(user_id=user.id, panel_user_id=str(telegram_id * 10), status="active")
+                session.add(subscription)
+                await session.flush()
+                session.add(SubscriptionDetails(subscription_id=subscription.id, device_limit=2, traffic_gb=0))
+
+        hardware = "shared-private-hwid"
+        inventory = {
+            420: [{"hwid": hardware, "deviceModel": "iPhone", "platform": "iOS", "osVersion": "18",
+                   "userAgent": "Happ/3.1 CFNetwork"}],
+            430: [{"hwid": hardware, "deviceModel": "Pixel", "userAgent": "Incy/1.4 Android"}],
+        }
+        async def named(username):
+            telegram_id = int(username.removeprefix("tg_"))
+            return {"response": {"id": telegram_id * 10, "telegramId": telegram_id}}
+        async def detach(panel_id, hwid):
+            self.assertEqual((panel_id, hwid), (420, hardware))
+            inventory[panel_id].clear()
+            return {"response": {"devices": []}}
+        self.panel.get_user_by_username.side_effect = named
+        self.panel.get_hwid_devices.side_effect = lambda panel_id: {"response": {"devices": inventory[panel_id]}}
+        self.panel.delete_hwid_device.side_effect = detach
+
+        app = FastAPI()
+        app.include_router(routes.router)
+        path = "/api/v1/webapp/devices"
+        owner = {"X-Telegram-Init-Data": "42"}
+        stranger = {"X-Telegram-Init-Data": "43"}
+        with patch.object(routes, "SessionLocal", self.sessions), \
+             patch.object(routes, "validate_telegram_init_data", side_effect=lambda data: {"id": int(data)}), \
+             patch.object(devices, "RemnawaveClient", return_value=self.panel):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                listed = (await client.get(path, headers=owner)).json()
+                device = listed["items"][0]
+                self.assertEqual((listed["total"], listed["limit"], device["client"]), (1, 2, "Happ"))
+                self.assertNotIn(hardware, json.dumps(listed))
+                target = path + "/" + device["id"]
+                self.assertEqual((await client.delete(target)).status_code, 401)
+                self.assertEqual((await client.delete(target, headers=stranger)).status_code, 404)
+                self.panel.delete_hwid_device.assert_not_awaited()
+                other_device = (await client.get(path, headers=stranger)).json()["items"][0]
+                self.assertEqual(other_device["client"], "Incy")
+                self.assertNotEqual(other_device["id"], device["id"])
+
+                result = await client.patch(target, headers=owner, json={"name": "  Личный телефон  "})
+                self.assertEqual(result.status_code, 200)
+                self.assertEqual((await devices.get_customer_devices(42))["items"][0]["name"], "Личный телефон")
+                self.assertEqual((await client.patch(target, headers=owner, json={"name":""})).json()["name"], "iPhone")
+                await client.patch(target, headers=owner, json={"name":"Снова телефон"})
+                self.assertEqual((await client.delete(target, headers=owner)).status_code, 200)
+                self.assertEqual((await client.get(path, headers=owner)).json()["total"], 0)
+                self.assertEqual((await client.get(path, headers=stranger)).json()["total"], 1)
+                self.assertEqual((await client.delete(target, headers=owner)).status_code, 404)
+                self.panel.delete_hwid_device.assert_awaited_once_with(420, hardware)
+                async with self.sessions() as session:
+                    self.assertEqual(await session.scalar(select(func.count()).select_from(DeviceAlias)), 0)
 
     async def test_admin_manages_customer_and_retains_detached_payment_ledger(self):
         async with self.engine.begin() as conn:
