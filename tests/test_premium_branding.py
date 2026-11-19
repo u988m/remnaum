@@ -95,6 +95,31 @@ class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
         markup = message.answer.call_args.kwargs["reply_markup"]
         self.assertEqual(len(markup.inline_keyboard[0]), 2)
 
+    async def test_start_keeps_menu_when_photo_missing_or_telegram_rejects_upload(self):
+        from app.bot.handlers import start_handler
+        profile = {"name": "Личный VPN", "tagline": "Подключение", "description": "Описание"}
+        for image in (None, Path("/tmp/missing-welcome.jpg")):
+            with self.subTest(image=image):
+                message = SimpleNamespace(
+                    from_user=SimpleNamespace(id=12345), text="/start",
+                    answer_photo=AsyncMock(side_effect=RuntimeError("Telegram rejected photo")),
+                    answer=AsyncMock(),
+                )
+                with patch("app.bot.handlers.get_or_create_user", AsyncMock(return_value=False)), \
+                     patch("app.bot.handlers.get_store_profile", AsyncMock(return_value=profile)), \
+                     patch("app.bot.handlers.welcome_image_path", return_value=image):
+                    if image:
+                        with self.assertLogs("app.bot.handlers", level="WARNING"):
+                            await start_handler(message)
+                        message.answer_photo.assert_awaited_once()
+                    else:
+                        await start_handler(message)
+                        message.answer_photo.assert_not_awaited()
+                message.answer.assert_awaited_once()
+                self.assertIn("Описание", message.answer.call_args.args[0])
+                self.assertIsNotNone(message.answer.call_args.kwargs["reply_markup"])
+
+
 class WelcomeImageApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_upload_requires_admin_auth_before_saving(self):
         with self.assertRaises(HTTPException) as error:
