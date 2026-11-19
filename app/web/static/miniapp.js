@@ -112,7 +112,6 @@ async function loadAccountPanels(){
   }else $("account-referral-info").textContent="Реферальная информация временно недоступна";
 }
 const providerLabels={telegram_stars:"Telegram Stars",yookassa:"ЮKassa",yoomoney:"ЮMoney",cryptopay:"Crypto Pay"};
-function paymentMode(){return $("checkout-method").value||"telegram_stars"}
 const rubles = new Intl.NumberFormat("ru-RU", {style: "currency", currency: "RUB", maximumFractionDigits: 2});
 const money = minor => rubles.format(minor / 100);
 const trafficLabel = value => value == null ? "—" : value === 0 ? "Безлимит" : value + " ГБ";
@@ -338,7 +337,7 @@ async function start() {
     renderSubscription(data.subscription);
     $("admin-entry").hidden = !data.is_admin;
     if (data.is_admin) $("admin-entry").onclick = () => window.location.assign("/admin" + window.location.hash);
-    for (const id of ["terms-link", "order-terms-link"]) {
+    for (const id of ["order-terms-link"]) {
       if (data.terms_url) $(id).href = data.terms_url;
       else $(id).textContent = "условия не опубликованы";
     }

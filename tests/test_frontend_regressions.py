@@ -79,6 +79,16 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('id="' + icon + '"', mini)
         self.assertIn('id="copy-referral"', mini)
 
+    async def test_miniapp_javascript_has_no_missing_static_dom_ids(self):
+        mini = (await mini_app_page()).body.decode()
+        js = (STATIC / "miniapp.js").read_text(encoding="utf-8")
+        html_ids = set(re.findall(r'id="([^"]+)"', mini))
+        js_ids = set(re.findall(r'\\$\\("([^"]+)"\\)', js))
+        self.assertEqual(js_ids - html_ids, set(), "Mini App JS points to missing elements")
+        self.assertNotIn('"terms-link"', js)
+        self.assertNotIn('"checkout-method"', js)
+        self.assertIn('id="order-terms-link"', mini)
+
     async def test_storefront_and_miniapp_have_valid_javascript(self):
         if not shutil.which("node"):
             self.skipTest("node is not available")
