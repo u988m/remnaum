@@ -176,13 +176,16 @@ jobs:
           sudo mkdir -p backups
           printf '%s\\n' 'ci-test-only-recovery-key-not-for-production-12345' | sudo tee backups/.recovery-key >/dev/null
           sudo chmod 600 backups/.recovery-key
+          docker compose exec -T redis redis-cli SET remnaum:restore-smoke before-backup
           sudo python3 scripts/backup_manager.py create
           ARCHIVE="$(sudo find backups -maxdepth 1 -name 'remnaum-full-*.rmb' | sort | tail -1)"
           sudo test -s "$ARCHIVE"
           sudo python3 scripts/backup_manager.py inspect "$ARCHIVE" | grep -q '"product": "remnaum"'
           docker compose exec -T postgres psql -U remnaum -d remnaum -c 'DELETE FROM promo_redemptions;'
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM promo_redemptions;')" = "0"
+          docker compose exec -T redis redis-cli SET remnaum:restore-smoke after-backup
           sudo python3 scripts/backup_manager.py restore "$ARCHIVE"
+          test "$(sudo docker compose exec -T redis redis-cli --raw GET remnaum:restore-smoke)" = "before-backup"
           test "$(sudo docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM promo_redemptions;')" = "1"
           for i in $(seq 1 35); do
             if sudo docker compose exec -T app python -c "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=3).status==200" >/dev/null 2>&1; then break; fi

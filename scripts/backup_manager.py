@@ -447,6 +447,33 @@ def _check_restore_destination(target: Path, paths: dict) -> None:
         raise ValueError(f"Небезопасный путь в каталоге назначения: {name}")
 
 
+# Redis 7 loads the AOF manifest when appendonly is enabled. Seed its base
+# file from the validated RDB, and keep dump.rdb for RDB-only configurations.
+_RESTORE_REDIS = """
+set -eu
+stage=$(mktemp -d /data/.remnaum-restore.XXXXXX)
+trap 'rm -rf "$stage"' EXIT
+cp /restore/redis.rdb "$stage/dump.rdb"
+redis-check-rdb "$stage/dump.rdb"
+mkdir "$stage/appendonlydir"
+ln "$stage/dump.rdb" "$stage/appendonlydir/appendonly.aof.1.base.rdb"
+printf '%s\n' 'file appendonly.aof.1.base.rdb seq 1 type b' > "$stage/appendonlydir/appendonly.aof.manifest"
+if [ -e /data/appendonlydir ]; then
+    mv /data/appendonlydir "$stage/previous"
+fi
+if mv "$stage/appendonlydir" /data/appendonlydir; then
+    if mv -f "$stage/dump.rdb" /data/dump.rdb; then
+        exit 0
+    fi
+    mv /data/appendonlydir "$stage/appendonlydir" || { trap - EXIT; exit 1; }
+fi
+if [ -d "$stage/previous" ]; then
+    mv "$stage/previous" /data/appendonlydir || { trap - EXIT; exit 1; }
+fi
+exit 1
+"""
+
+
 def restore_backup(archive: Path, *, supplied_key: str | None = None, target_root: Path | None = None) -> None:
     """Restore in the current install location, selected by bootstrap/installer.
 
@@ -474,62 +501,74 @@ def restore_backup(archive: Path, *, supplied_key: str | None = None, target_roo
                 _safe_extract(tar, extracted, layout=layout)
             install_dir = extracted / "install"
 
+            for name, magic in (("database.dump", b"PGDMP"), ("redis.rdb", b"REDIS")):
+                with (extracted / name).open("rb") as snapshot:
+                    if snapshot.read(len(magic)) != magic:
+                        raise ValueError(f"Некорректный формат снимка: {name}")
+
             target.mkdir(parents=True, exist_ok=True)
             print("Восстанавливаем данные и настройки в", target)
-            subprocess.run(["docker", "compose", "stop", "app"], cwd=target,
-                           check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            for entry in sorted(install_dir.iterdir()):
-                if entry.name in {"backups"}:
-                    continue
-                destination = target / entry.name
-                if entry.is_dir():
-                    shutil.copytree(entry, destination, dirs_exist_ok=True)
-                else:
-                    shutil.copy2(entry, destination)
-            os.chmod(target / ".env", 0o600)
-            subprocess.run(
-                ["docker", "compose", "up", "-d", "postgres", "redis"],
-                cwd=target, check=True, capture_output=True, timeout=180,
-            )
-            for _ in range(30):
-                health = subprocess.run(
-                    ["docker", "compose", "exec", "-T", "postgres", "pg_isready", "-U", "remnaum", "-d", "remnaum"],
-                    cwd=target, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            if (target / ".env").is_file():
+                _docker("stop", "app", cwd=target, timeout=60)
+            try:
+                for entry in sorted(install_dir.iterdir()):
+                    if entry.name in {"backups"}:
+                        continue
+                    destination = target / entry.name
+                    if entry.is_dir():
+                        shutil.copytree(entry, destination, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(entry, destination)
+                os.chmod(target / ".env", 0o600)
+                subprocess.run(
+                    ["docker", "compose", "up", "-d", "postgres", "redis"],
+                    cwd=target, check=True, capture_output=True, timeout=180,
                 )
-                if health.returncode == 0:
-                    break
-                import time
-                time.sleep(2)
-            else:
-                raise RuntimeError("PostgreSQL не запустился после восстановления конфигурации")
-            with (extracted / "database.dump").open("rb") as dump:
+                for _ in range(30):
+                    health = subprocess.run(
+                        ["docker", "compose", "exec", "-T", "postgres", "pg_isready", "-U", "remnaum", "-d", "remnaum"],
+                        cwd=target, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                    if health.returncode == 0:
+                        break
+                    import time
+                    time.sleep(2)
+                else:
+                    raise RuntimeError("PostgreSQL не запустился после восстановления конфигурации")
+                with (extracted / "database.dump").open("rb") as dump:
+                    subprocess.run([
+                        "docker", "compose", "exec", "-T", "postgres",
+                        "pg_restore", "-U", "remnaum", "-d", "remnaum",
+                        "--no-owner", "--no-acl", "--clean", "--if-exists",
+                        "--single-transaction",
+                    ], cwd=target, stdin=dump, check=True, timeout=360)
+                subprocess.run(["docker", "compose", "stop", "redis"], cwd=target, check=True,
+                               stdout=subprocess.DEVNULL, timeout=60)
                 subprocess.run([
-                    "docker", "compose", "exec", "-T", "postgres",
-                    "pg_restore", "-U", "remnaum", "-d", "remnaum",
-                    "--no-owner", "--no-acl", "--clean", "--if-exists",
-                    "--single-transaction",
-                ], cwd=target, stdin=dump, check=True, timeout=360)
-            subprocess.run(["docker", "compose", "stop", "redis"], cwd=target, check=True,
-                           stdout=subprocess.DEVNULL, timeout=60)
-            subprocess.run([
-                "docker", "compose", "run", "--rm", "-T", "--no-deps",
-                "-v", str(extracted) + ":/restore:ro",
-                "--entrypoint", "sh", "redis", "-c",
-                "rm -rf /data/appendonlydir && cp /restore/redis.rdb /data/dump.rdb",
-            ], cwd=target, check=True, capture_output=True, timeout=120)
-            subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=target,
-                           check=True, timeout=360)
-            import time
-            for _ in range(40):
-                health = subprocess.run([
-                    "docker", "compose", "exec", "-T", "app", "python", "-c",
-                    "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=4).status==200",
-                ], cwd=target, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if health.returncode == 0:
-                    break
-                time.sleep(2)
-            else:
-                raise RuntimeError("Данные восстановлены, но приложение не отвечает. Проверьте логи: docker compose logs app")
+                    "docker", "compose", "run", "--rm", "-T", "--no-deps",
+                    "-v", str(extracted) + ":/restore:ro",
+                    "--entrypoint", "sh", "redis", "-c",
+                    _RESTORE_REDIS,
+                ], cwd=target, check=True, capture_output=True, timeout=120)
+                subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=target,
+                               check=True, timeout=360)
+                import time
+                for _ in range(40):
+                    health = subprocess.run([
+                        "docker", "compose", "exec", "-T", "app", "python", "-c",
+                        "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=4).status==200",
+                    ], cwd=target, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    if health.returncode == 0:
+                        break
+                    time.sleep(2)
+                else:
+                    raise RuntimeError("Данные восстановлены, но приложение не отвечает. Проверьте логи: docker compose logs app")
+            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                raise RuntimeError(
+                    f"Восстановление прервано: {exc}. Файлы, PostgreSQL и Redis могли быть обновлены частично. "
+                    "Оставьте приложение остановленным до проверки данных. "
+                    "Устраните причину сбоя и повторите восстановление или восстановите аварийную копию."
+                ) from exc
             print("✓ Данные, настройки и контейнеры Remnaum восстановлены")
             print("Исходный путь архива:", metadata.get("original_path"))
             print("Текущий путь:", target)

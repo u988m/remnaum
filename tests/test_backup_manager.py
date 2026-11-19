@@ -154,6 +154,55 @@ class BackupTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, message):
                         backup._read_backup_manifest(tar, paths)
 
+    def test_restore_stops_on_failed_app_stop_postgres_or_redis(self):
+        components = {
+            "metadata.json": b'{"product":"remnaum","format":1}',
+            "install/.env": b"COMPOSE_FILE=compose.yaml",
+            "install/compose.yaml": b"services: {}",
+            "database.dump": b"PGDMP",
+            "redis.rdb": b"REDIS",
+        }
+        for failure in ("stop-app", "postgres", "redis"):
+            with self.subTest(stage=failure), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                target = root / "store"
+                target.mkdir()
+                (target / ".env").write_text("OLD_CONFIG=keep")
+                source = root / "archive.tar.gz"
+                with tarfile.open(source, "w:gz") as tar:
+                    for name, data in components.items():
+                        member = tarfile.TarInfo(name)
+                        member.size = len(data)
+                        tar.addfile(member, io.BytesIO(data))
+                calls, staged_paths = [], []
+
+                def run_command(command, **kwargs):
+                    calls.append(command)
+                    if ((failure == "stop-app" and command[-2:] == ["stop", "app"])
+                            or (failure == "postgres" and "pg_restore" in command)
+                            or (failure == "redis" and backup._RESTORE_REDIS in command)):
+                        self.assertTrue(kwargs["check"])
+                        raise subprocess.CalledProcessError(1, command)
+                    return subprocess.CompletedProcess(command, 0)
+
+                def stage_archive(_archive, destination, _key):
+                    staged_paths.append(destination.parent)
+                    shutil.copyfile(source, destination)
+
+                with patch.object(backup, "ROOT", target), patch.object(backup, "DATA", target / "data"), \
+                     patch.object(backup, "unpack_encrypted", side_effect=stage_archive), \
+                     patch.object(backup.subprocess, "run", side_effect=run_command):
+                    if failure == "stop-app":
+                        with self.assertRaises(subprocess.CalledProcessError):
+                            backup.restore_backup(source, supplied_key=KEY)
+                        self.assertEqual((target / ".env").read_text(), "OLD_CONFIG=keep")
+                        self.assertEqual(len(calls), 1)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "восстановите аварийную копию"):
+                            backup.restore_backup(source, supplied_key=KEY)
+                        self.assertFalse(any("--build" in command for command in calls))
+                    self.assertFalse(staged_paths[0].exists())
+
     def test_new_key_is_not_included_in_archive(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -202,6 +251,12 @@ class BackupTests(unittest.TestCase):
         self.assert_rejected_before_extract([
             ("install/folder/file", tarfile.REGTYPE, b"one"),
             ("install//folder/./file", tarfile.REGTYPE, b"two"),
+        ], "Дублирующийся путь")
+
+    def test_reject_duplicate_explicit_directories(self):
+        self.assert_rejected_before_extract([
+            ("install/data", tarfile.DIRTYPE, b""),
+            ("install/data/", tarfile.DIRTYPE, b""),
         ], "Дублирующийся путь")
 
     def test_reject_directory_file_conflict_in_either_order(self):
