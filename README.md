@@ -67,24 +67,12 @@ sudo remnaum
 
 [Инструкция](docs/INSTALL.md) · [История изменений](CHANGELOG.md) · [Лицензия MIT](LICENSE) · [GitHub Releases](https://github.com/u988m/remnaum/releases)
 
-## 💬 Нужна помощь или есть предложение?
-
-<p align="center"><strong>Выберите, куда написать — мы собираем вопросы, ошибки и идеи для Remnaum.</strong></p>
+## 💬 Связь с нами
 
 <p align="center">
-  <a href="https://t.me/remnaum/6"><img src="assets/community-help.svg" alt="Получить помощь" width="220"></a>
-</p>
-<p align="center">
-  <a href="https://t.me/remnaum/3"><img src="assets/community-bugs.svg" alt="Сообщить об ошибке" width="220"></a>
-</p>
-<p align="center">
-  <a href="https://t.me/remnaum/5"><img src="assets/community-ideas.svg" alt="Предложить идею" width="220"></a>
-</p>
-
-<p align="center">
-  <a href="https://t.me/remnaum/6">❓ Помощь</a> ·
-  <a href="https://t.me/remnaum/3">🐛 Сообщить об ошибке</a> ·
-  <a href="https://t.me/remnaum/5">💡 Предложить идею</a>
+  <a href="https://t.me/remnaum/6"><img src="assets/community-help.svg" alt="Помощь" width="176"></a>
+  <a href="https://t.me/remnaum/3"><img src="assets/community-bugs.svg" alt="Сообщить об ошибке" width="176"></a>
+  <a href="https://t.me/remnaum/5"><img src="assets/community-ideas.svg" alt="Предложить идею" width="176"></a>
 </p>
 
 <div align="center">
