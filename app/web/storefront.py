@@ -11,7 +11,6 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
-from sqlalchemy.dialects.postgresql import insert
 
 from app.config import settings
 from app.db.models import User
@@ -22,6 +21,7 @@ from app.services.payment_service import (
 from app.services.plans import list_plans
 from app.services.store_auth import issue_store_session, verify_store_session, verify_telegram_login
 from app.services.store_profile import get_store_profile, get_terms_url
+from app.services.users import BLOCKED_MESSAGE, BlockedCustomer, customer_is_blocked, upsert_active_customer
 from app.services.store_settings import PROVIDER_LABELS, get_store_payment_settings, public_payment_settings
 
 router = APIRouter()
@@ -66,13 +66,11 @@ async def store_auth(request: Request):
         identity = verify_telegram_login(values, settings.telegram_bot_token)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
-    async with SessionLocal() as session:
-        stmt = insert(User).values(telegram_id=identity["id"], username=identity["username"])
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[User.telegram_id], set_={"username": identity["username"]},
-        )
-        await session.execute(stmt)
-        await session.commit()
+    try:
+        async with SessionLocal.begin() as session:
+            await upsert_active_customer(session, identity["id"], identity["username"])
+    except BlockedCustomer as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     response = RedirectResponse("/store", status_code=303)
     response.set_cookie(
         COOKIE_NAME, issue_store_session(identity["id"], settings.app_secret_key),
@@ -102,6 +100,8 @@ async def store_me(request: Request):
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
     if user is None:
         raise HTTPException(status_code=401, detail="Account not registered")
+    if user.blocked_at:
+        raise HTTPException(status_code=403, detail=BLOCKED_MESSAGE)
     return {"id": telegram_id, "first_name": user.username or ""}
 
 
@@ -116,6 +116,8 @@ async def store_checkout(request: Request, data: StoreCheckoutPayload):
     telegram_id = _store_user(request)
     if request.headers.get("origin") != settings.public_base_url.rstrip("/"):
         raise HTTPException(status_code=403, detail="Invalid checkout origin")
+    if await customer_is_blocked(telegram_id):
+        raise HTTPException(status_code=403, detail=BLOCKED_MESSAGE)
     if data.provider not in PROVIDER_LABELS:
         raise HTTPException(status_code=422, detail="Unsupported payment provider")
     if await get_terms_url() and not data.accepted_terms:

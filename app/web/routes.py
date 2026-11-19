@@ -3,6 +3,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
 import logging
+
+import httpx
 from math import ceil
 from pathlib import Path
 from html import escape
@@ -10,7 +12,6 @@ from html import escape
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from sqlalchemy import Date, cast, func, select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.bot.runtime import bot, dispatcher
 from app.config import settings
@@ -23,6 +24,8 @@ from app.services.tariffs import format_traffic
 from app.services.subscriptions import provision_paid_payment
 from app.services.payment_notifications import notify_external_payment_success
 from app.services.telegram_webapp import validate_telegram_init_data
+from app.services import customer_admin
+from app.services.users import BLOCKED_MESSAGE, BlockedCustomer, customer_is_blocked, upsert_active_customer
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -218,7 +221,6 @@ from fastapi import Header, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from aiogram.types import LabeledPrice
 
 from app.db.models import Subscription, SubscriptionDetails, TermsAcceptance, User
@@ -242,16 +244,11 @@ def _require_telegram_identity(init_data: str | None) -> dict:
 async def _webapp_user(init_data: str):
     identity = _require_telegram_identity(init_data)
     telegram_id = int(identity["id"])
-    async with SessionLocal() as session:
-        statement = pg_insert(User).values(
-            telegram_id=telegram_id,
-            username=identity.get("username"),
-        ).on_conflict_do_update(
-            index_elements=[User.telegram_id],
-            set_={"username": identity.get("username")},
-        )
-        await session.execute(statement)
-        await session.commit()
+    try:
+        async with SessionLocal.begin() as session:
+            await upsert_active_customer(session, telegram_id, identity.get("username"))
+    except BlockedCustomer as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return identity
 
 
@@ -285,6 +282,8 @@ async def _webapp_subscription_data(telegram_id: int) -> dict | None:
 @router.get("/api/v1/webapp/subscription")
 async def webapp_subscription(x_telegram_init_data: str | None = Header(default=None)):
     identity = _require_telegram_identity(x_telegram_init_data)
+    if await customer_is_blocked(int(identity["id"])):
+        raise HTTPException(status_code=403, detail=BLOCKED_MESSAGE)
     return {"subscription": await _webapp_subscription_data(int(identity["id"]))}
 
 
@@ -374,7 +373,8 @@ async def admin_overview(x_telegram_init_data: str | None = Header(default=None)
         active_groups = (await session.execute(
             select(Subscription.paid_tariff, func.count())
             .join(latest, latest.c.id == Subscription.id)
-            .where(Subscription.status == "active", Subscription.expires_at > now)
+            .join(User, User.id == Subscription.user_id)
+            .where(Subscription.status == "active", Subscription.expires_at > now, User.blocked_at.is_(None))
             .group_by(Subscription.paid_tariff)
         )).all()
         plan_ids = [int(key) for key, _ in active_groups if key and key.isascii() and key.isdecimal()]
@@ -503,6 +503,8 @@ async def admin_users(
             items.append({
                 "telegram_id": user.telegram_id,
                 "username": user.username,
+                "display_name": user.display_name,
+                "blocked": user.blocked_at is not None,
                 "created_at": user.created_at.isoformat(),
                 "subscription_status": subscription.status if subscription else "нет подписки",
                 "expires_at": subscription.expires_at.isoformat() if subscription and subscription.expires_at else None,
@@ -543,7 +545,7 @@ async def admin_payments(
         total = await session.scalar(select(func.count(Payment.id))) or 0
         result = await session.execute(
             select(Payment, User.telegram_id, User.username)
-            .join(User, User.id == Payment.user_id)
+            .outerjoin(User, User.id == Payment.user_id)
             .order_by(Payment.created_at.desc(), Payment.id.desc())
             .limit(limit)
             .offset(offset)
@@ -567,8 +569,9 @@ async def admin_user_detail(
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
         if user is None:
             raise HTTPException(status_code=404, detail="User not found")
-        subscriptions = (await session.scalars(
-            select(Subscription)
+        subscriptions = (await session.execute(
+            select(Subscription, SubscriptionDetails)
+            .outerjoin(SubscriptionDetails, SubscriptionDetails.subscription_id == Subscription.id)
             .where(Subscription.user_id == user.id)
             .order_by(Subscription.created_at.desc(), Subscription.id.desc())
             .limit(50)
@@ -582,13 +585,19 @@ async def admin_user_detail(
     return {
         "telegram_id": user.telegram_id,
         "username": user.username,
+        "display_name": user.display_name,
+        "blocked": user.blocked_at is not None,
+        "is_admin": telegram_id in settings.admin_id_set,
         "created_at": user.created_at.isoformat(),
         "subscriptions": [{
             "id": subscription.id,
             "status": subscription.status,
             "expires_at": subscription.expires_at.isoformat() if subscription.expires_at else None,
             "created_at": subscription.created_at.isoformat(),
-        } for subscription in subscriptions],
+            "plan_id": int(subscription.paid_tariff) if subscription.paid_tariff and subscription.paid_tariff.isdigit() else None,
+            "traffic_gb": details.traffic_gb if details else None,
+            "device_limit": details.device_limit if details else None,
+        } for subscription, details in subscriptions],
         "payments": [{
             "id": payment.id,
             "provider": payment.provider,
@@ -598,6 +607,82 @@ async def admin_user_detail(
             "created_at": payment.created_at.isoformat(),
         } for payment in payments],
     }
+
+
+class CustomerProfileUpdate(BaseModel):
+    display_name: str = Field(max_length=80)
+
+
+class CustomerBlockUpdate(BaseModel):
+    blocked: bool
+
+
+class CustomerSubscriptionUpdate(BaseModel):
+    plan_id: int = Field(gt=0)
+    expires_at: datetime
+    traffic_gb: int = Field(ge=0, le=1_000_000)
+    device_limit: int = Field(ge=1, le=1000)
+
+
+class CustomerRemoval(BaseModel):
+    confirm_telegram_id: int = Field(gt=0)
+
+
+async def _customer_operation(operation, *args, **kwargs):
+    try:
+        await operation(*args, **kwargs)
+    except customer_admin.CustomerNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (RuntimeError, httpx.HTTPError) as exc:
+        logger.warning("Customer operation %s could not synchronize with Remnawave: %s",
+                       operation.__name__, type(exc).__name__)
+        detail = str(exc) if isinstance(exc, RuntimeError) else "Remnawave не подтвердил операцию. Повторите попытку."
+        raise HTTPException(status_code=502, detail=detail) from exc
+    return {"ok": True}
+
+
+@router.patch("/admin/api/users/{telegram_id}")
+async def admin_change_customer_profile(
+    telegram_id: int, data: CustomerProfileUpdate, x_telegram_init_data: str | None = Header(default=None),
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    return await _customer_operation(customer_admin.change_display_name, telegram_id, data.display_name)
+
+
+@router.put("/admin/api/users/{telegram_id}/block")
+async def admin_change_customer_block(
+    telegram_id: int, data: CustomerBlockUpdate, x_telegram_init_data: str | None = Header(default=None),
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    return await _customer_operation(customer_admin.set_customer_block, telegram_id, data.blocked)
+
+
+@router.put("/admin/api/users/{telegram_id}/subscription")
+async def admin_save_customer_subscription(
+    telegram_id: int, data: CustomerSubscriptionUpdate, x_telegram_init_data: str | None = Header(default=None),
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    return await _customer_operation(customer_admin.save_customer_subscription, telegram_id, **data.model_dump())
+
+
+@router.delete("/admin/api/users/{telegram_id}/subscription")
+async def admin_remove_customer_subscription(
+    telegram_id: int, x_telegram_init_data: str | None = Header(default=None),
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    return await _customer_operation(customer_admin.remove_customer, telegram_id, delete_account=False)
+
+
+@router.delete("/admin/api/users/{telegram_id}")
+async def admin_remove_customer(
+    telegram_id: int, data: CustomerRemoval, x_telegram_init_data: str | None = Header(default=None),
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    if data.confirm_telegram_id != telegram_id:
+        raise HTTPException(status_code=422, detail="Для удаления подтвердите Telegram ID клиента.")
+    return await _customer_operation(customer_admin.remove_customer, telegram_id, delete_account=True)
 
 
 @router.post("/webhooks/remnawave")
@@ -905,7 +990,7 @@ async def webapp_hwid_devices(x_telegram_init_data: str | None = Header(default=
     identity = await _webapp_user(x_telegram_init_data)
     subscription = await get_user_subscription(int(identity["id"]))
     if not subscription or not subscription.get("panel_user_id"):
-        return {"limit": None, "items": []}
+        return {"limit": None, "total": 0, "items": []}
     try:
         client = RemnawaveClient()
         panel_id = await client.resolve_user_id(
@@ -916,8 +1001,12 @@ async def webapp_hwid_devices(x_telegram_init_data: str | None = Header(default=
         raise HTTPException(status_code=502, detail="Device list temporarily unavailable") from exc
     data = result.get("response", result) if isinstance(result, dict) else result
     devices = data if isinstance(data, list) else data.get("devices", data.get("items", [])) if isinstance(data, dict) else []
-    return {"limit": subscription.get("device_limit"), "items": [
-        {"name": str(device.get("deviceModel") or device.get("platform") or device.get("userAgent") or "Устройство")[:100]}
+    return {"limit": subscription.get("device_limit"), "total": len(devices), "items": [
+        {
+            "name": str(device.get("deviceModel") or device.get("platform") or device.get("userAgent") or "Устройство")[:100],
+            "platform": str(device.get("platform") or "")[:40],
+            "os_version": str(device.get("osVersion") or "")[:40],
+        }
         for device in devices[:25] if isinstance(device, dict)
     ]}
 
@@ -931,10 +1020,12 @@ async def webapp_referrals(x_telegram_init_data: str | None = Header(default=Non
     telegram_id = int(identity["id"])
     from app.services.bot_identity import bot_username
     username = bot_username()
+    referral_settings = await get_referral_settings()
     return {
         "link": f"https://t.me/{username}?start={referral_code(telegram_id)}" if username else None,
         "count": await referral_count(telegram_id),
-        "rewards_enabled": (await get_referral_settings())["enabled"],
+        "rewards_enabled": referral_settings["enabled"],
+        "reward_days": referral_settings["reward_days"],
         "reward": await reward_balance(telegram_id),
     }
 

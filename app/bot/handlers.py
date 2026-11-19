@@ -43,14 +43,7 @@ router.message.middleware(MenuMiddleware())
 router.callback_query.middleware(MenuMiddleware())
 
 
-def _admin_webapp_url() -> str:
-    url = urlsplit(settings.webapp_url)
-    if url.scheme == "https" and url.netloc:
-        return f"https://{url.netloc}/admin"
-    return f"{settings.public_base_url.rstrip('/')}/admin"
-
-
-def main_menu(*, is_admin: bool = False) -> InlineKeyboardMarkup:
+def main_menu() -> InlineKeyboardMarkup:
     rows = []
     has_webapp = settings.webapp_url.startswith("https://")
     if has_webapp:
@@ -63,10 +56,6 @@ def main_menu(*, is_admin: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🧾 Покупки", callback_data="menu:purchases"),
          InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support")],
     ])
-    if is_admin and has_webapp:
-        rows.append([InlineKeyboardButton(
-            text="⚙️ Админка", web_app=WebAppInfo(url=_admin_webapp_url()),
-        )])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def back_menu(destination: str = "menu:home") -> InlineKeyboardMarkup:
@@ -105,8 +94,8 @@ async def send_menu(
     await remember_menu(sent, markup, previous=previous)
 
 
-async def send_home_menu(message: Message, telegram_id: int, profile: dict, *, is_admin: bool) -> None:
-    await send_menu(message, await home_text(telegram_id, profile), main_menu(is_admin=is_admin))
+async def send_home_menu(message: Message, telegram_id: int, profile: dict) -> None:
+    await send_menu(message, await home_text(telegram_id, profile), main_menu())
 
 
 async def show_command_section(message: Message, text: str, markup: InlineKeyboardMarkup) -> None:
@@ -150,10 +139,7 @@ async def start_handler(message: Message) -> None:
     if is_new_user and inviter is not None:
         await register_referral(message.from_user.id, inviter)
     profile = await get_store_profile()
-    await send_home_menu(
-        message, message.from_user.id, profile,
-        is_admin=message.from_user.id in settings.admin_id_set,
-    )
+    await send_home_menu(message, message.from_user.id, profile)
     await remove_command(message)
 
 
@@ -162,11 +148,7 @@ async def admin_command_handler(message: Message) -> None:
     if message.from_user is None or message.from_user.id not in settings.admin_id_set:
         await show_command_section(message, "Доступ к панели управления запрещён.", back_menu())
         return
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⚙️ Открыть админку", web_app=WebAppInfo(url=_admin_webapp_url()))],
-        back_menu().inline_keyboard[0],
-    ])
-    await show_command_section(message, "<b>Панель управления</b>", keyboard)
+    await show_command_section(message, "Откройте в Mini App «Профиль» → «Админ-панель».", main_menu())
 
 
 @router.message(Command("help"))
@@ -181,7 +163,7 @@ async def home_handler(callback: CallbackQuery) -> None:
     if callback.message:
         profile = await get_store_profile()
         text = await home_text(callback.from_user.id, profile)
-        keyboard = main_menu(is_admin=callback.from_user.id in settings.admin_id_set)
+        keyboard = main_menu()
         await edit_menu_message(callback.message, text, reply_markup=keyboard)
 
 

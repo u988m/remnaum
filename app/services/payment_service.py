@@ -23,6 +23,7 @@ from app.services.subscriptions import (
     get_panel_user, has_panel_squads, matches_panel_account, paid_tariff_key, panel_expiry,
 )
 from app.services.store_profile import get_terms_url
+from app.services.users import BlockedCustomer
 
 logger = logging.getLogger(__name__)
 
@@ -120,9 +121,11 @@ async def create_payment_for_user(
     if not settings.remnawave_base_url or not settings.remnawave_api_token:
         raise RuntimeError("Магазин не подключён к Remnawave. Обратитесь в поддержку.")
     async with SessionLocal() as session:
-        user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+        user = await session.scalar(select(User).where(User.telegram_id == telegram_id).with_for_update())
         if user is None:
             raise ValueError("Telegram user is not registered")
+        if user.blocked_at:
+            raise BlockedCustomer()
         plan, quote = await _payment_quote(session, user.id, draft_quote, plan_id, extra_devices, revision)
         amount_minor = quote.amount_minor
         if amount_minor <= 0:
@@ -205,14 +208,17 @@ async def settle_payment(verified: VerifiedPayment, provider_name: str) -> bool:
             raise ValueError("Provider payment ID mismatch")
         if payment.status == "succeeded":
             return False
+        can_provision = payment.user_id is not None and await session.scalar(select(User.id).where(
+            User.id == payment.user_id, User.blocked_at.is_(None),
+        )) is not None
         if payment.status == "paid":
-            return True
+            return can_provision
         if payment.status != "pending":
             raise ValueError("Payment is not pending")
         payment.provider_payment_id = verified.provider_payment_id
         payment.status = "paid"
         await session.commit()
-        return True
+        return can_provision
 
 
 async def has_accepted_current_terms(telegram_id: int) -> bool:
@@ -221,7 +227,7 @@ async def has_accepted_current_terms(telegram_id: int) -> bool:
             select(TermsAcceptance.id)
             .join(User, TermsAcceptance.user_id == User.id)
             .where(
-                User.telegram_id == telegram_id,
+                User.telegram_id == telegram_id, User.blocked_at.is_(None),
                 TermsAcceptance.terms_version == settings.telegram_terms_version,
             )
         )
@@ -255,9 +261,11 @@ async def create_stars_payment_for_user(
         raise RuntimeError("Магазин не подключён к Remnawave. Обратитесь в поддержку.")
 
     async with SessionLocal() as session:
-        user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+        user = await session.scalar(select(User).where(User.telegram_id == telegram_id).with_for_update())
         if user is None:
             raise ValueError("Telegram user is not registered")
+        if user.blocked_at:
+            raise BlockedCustomer()
         plan, quote = await _payment_quote(session, user.id, draft_quote, plan_id, extra_devices, revision)
         if isinstance(quote, PlanQuote):
             if quote.stars is None:
@@ -301,7 +309,7 @@ async def validate_stars_pre_checkout(
                 Payment.status == "pending",
                 Payment.amount == amount,
                 Payment.currency == "XTR",
-                User.telegram_id == telegram_id,
+                User.telegram_id == telegram_id, User.blocked_at.is_(None),
             )
         )
         if payment is None:
@@ -329,7 +337,7 @@ async def retry_paid_payments_for_user(telegram_id: int) -> None:
             select(Payment.id)
             .join(User, Payment.user_id == User.id)
             .where(
-                User.telegram_id == telegram_id,
+                User.telegram_id == telegram_id, User.blocked_at.is_(None),
                 Payment.status == "paid",
             )
             .order_by(Payment.id)

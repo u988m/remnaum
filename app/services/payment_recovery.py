@@ -8,7 +8,7 @@ import logging
 
 from sqlalchemy import select
 
-from app.db.models import Payment
+from app.db.models import Payment, User
 from app.db.session import SessionLocal
 from app.services.payment_notifications import notify_external_payment_success
 from app.services.subscriptions import provision_paid_payment
@@ -30,16 +30,16 @@ async def recover_paid_payments_batch(*, after_id: int = 0, limit: int = RECOVER
 
     async with SessionLocal() as session:
         query = (
-            select(Payment.id)
-            .where(Payment.status == "paid", Payment.id > after_id)
+            select(Payment.id).join(User)
+            .where(User.blocked_at.is_(None), Payment.status == "paid", Payment.id > after_id)
             .order_by(Payment.id)
             .limit(limit)
         )
         payment_ids = list((await session.scalars(query)).all())
         if not payment_ids and after_id:
             payment_ids = list((await session.scalars(
-                select(Payment.id)
-                .where(Payment.status == "paid")
+                select(Payment.id).join(User)
+                .where(User.blocked_at.is_(None), Payment.status == "paid")
                 .order_by(Payment.id)
                 .limit(limit)
             )).all())

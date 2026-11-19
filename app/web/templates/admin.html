@@ -13,7 +13,7 @@
 <div id="dashboard" hidden>
 <button type="button" class="admin-menu-backdrop" id="admin-menu-backdrop" aria-label="Закрыть меню" hidden></button>
 <aside class="admin-sidebar" id="admin-sidebar" aria-label="Навигация админки">
-<div class="sidebar-heading"><span>Управление</span><button type="button" id="admin-menu-close" aria-label="Закрыть меню">✕</button></div>
+<div class="sidebar-heading"><span>Управление</span><a class="admin-return-link" href="/app">⌂ Магазин</a><button type="button" id="admin-menu-close" aria-label="Закрыть меню">✕</button></div>
 <nav class="admin-tabs" aria-label="Разделы управления">
   <p class="sidebar-category">Магазин</p>
   <button aria-current="page" data-tab="overview" type="button">Обзор</button>
@@ -26,7 +26,6 @@
   <p class="sidebar-category">Система</p>
   <button data-tab="configuration" type="button">Настройки</button>
 </nav>
-<a class="admin-return-link" href="/app">← В магазин</a>
 </aside>
 <div class="admin-workspace">
 <section id="overview-view" class="dashboard-view">
@@ -79,16 +78,60 @@
     <button type="button" data-open-tab="settings"><strong>Платёжные системы</strong><span>Telegram Stars, ЮKassa, ЮMoney, Crypto Pay и Platega</span></button>
     <button type="button" data-open-tab="brand"><strong>Оформление и поддержка</strong><span>Название, изображения и контакт магазина</span></button>
     <button type="button" data-open-tab="trial"><strong>Пробный доступ</strong><span>Срок, трафик и число устройств</span></button>
-    <button type="button" data-open-tab="pricing"><strong>Формула цен</strong><span>Расчёт для старых гибких тарифов</span></button>
   </div>
 </section>
-<section class="section" id="users-view" hidden><div class="toolbar"><h2>Клиенты и подписки</h2><button class="action" id="users-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>Telegram ID</th><th>Username</th><th>Подписка</th><th>До</th><th>Регистрация</th><th>Действие</th></tr></thead><tbody id="users-table"></tbody></table></div><div id="customer-detail" class="section" hidden aria-live="polite"><div class="toolbar"><h2 id="customer-title">Карточка клиента</h2><button class="action" id="customer-close">Закрыть</button></div><p class="muted" id="customer-summary"></p><h3>Подписки</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Статус</th><th>Действует до</th><th>Создана</th></tr></thead><tbody id="customer-subscriptions"></tbody></table></div><h3>Платежи</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="customer-payments"></tbody></table></div></div><div class="toolbar"><button class="action" id="users-prev">Назад</button><span id="users-page" class="muted">Страница 1</span><button class="action" id="users-next">Далее</button></div></section>
-<section class="section" id="payments-view" hidden><div class="toolbar"><h2>История платежей</h2><button class="action" id="payments-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Клиент</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="payments-table"></tbody></table></div><div class="toolbar"><button class="action" id="payments-prev">Назад</button><span id="payments-page" class="muted">Страница 1</span><button class="action" id="payments-next">Далее</button></div></section>
+<section class="section" id="users-view" hidden>
+  <div class="toolbar section-heading"><h2>Клиенты и подписки</h2><button class="action refresh-action" id="users-refresh" type="button">Обновить</button></div>
+  <div class="table-wrap"><table><thead><tr><th>Telegram ID</th><th>Клиент</th><th>Подписка</th><th>До</th><th>Регистрация</th><th>Действие</th></tr></thead><tbody id="users-table"></tbody></table></div>
+  <div class="pagination"><button class="action" id="users-prev" type="button">Назад</button><span id="users-page" class="muted"></span><button class="action" id="users-next" type="button">Далее</button></div>
+  <section id="customer-detail" class="customer-detail" hidden>
+    <div class="toolbar section-heading"><h2>Карточка клиента</h2><button class="action" id="customer-close" type="button">Закрыть</button></div>
+    <div><strong id="customer-title"></strong><p class="muted" id="customer-summary"></p></div>
+    <form id="customer-profile-form" class="customer-form">
+      <label>Имя для админки<input id="customer-name" type="text" maxlength="80" autocomplete="off"></label>
+      <button class="action" type="submit">Сохранить имя</button>
+    </form>
+    <form id="customer-subscription-form" class="customer-form">
+      <h3 id="customer-subscription-title">Выдать подписку</h3>
+      <label>Тариф<select id="customer-plan" required></select></label>
+      <label>Действует до<input id="customer-expiry" type="datetime-local" required></label>
+      <div class="grid">
+        <label>Трафик, ГБ<input id="customer-traffic" type="number" min="0" max="1000000" required><small>0 — безлимит</small></label>
+        <label>Устройства<input id="customer-devices" type="number" min="1" max="1000" required></label>
+      </div>
+      <div class="customer-actions">
+        <button class="action primary" id="customer-subscription-save" type="submit">Выдать</button>
+        <button class="action danger-action" id="customer-revoke" type="button" hidden>Удалить подписку</button>
+      </div>
+    </form>
+    <div class="customer-actions">
+      <button class="action" id="customer-block" type="button">Заблокировать</button>
+      <button class="action danger-action" id="customer-delete-open" type="button">Удалить аккаунт</button>
+    </div>
+    <form id="customer-delete-form" class="customer-form customer-danger" hidden>
+      <p>Доступ VPN и аккаунт будут удалены. Платежи останутся в журнале без привязки к клиенту.</p>
+      <label>Для подтверждения введите Telegram ID<input id="customer-delete-id" inputmode="numeric" required autocomplete="off"></label>
+      <div class="customer-actions">
+        <button class="action" id="customer-delete-cancel" type="button">Отмена</button>
+        <button class="action danger-action" type="submit">Удалить полностью</button>
+      </div>
+    </form>
+    <p id="customer-feedback" class="muted" role="status"></p>
+    <details class="customer-history">
+      <summary>История подписок и оплат</summary>
+      <h3>Подписки</h3>
+      <div class="table-wrap"><table><thead><tr><th>ID</th><th>Статус</th><th>Действует до</th><th>Создана</th></tr></thead><tbody id="customer-subscriptions"></tbody></table></div>
+      <h3>Платежи</h3>
+      <div class="table-wrap"><table><thead><tr><th>ID</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="customer-payments"></tbody></table></div>
+    </details>
+  </section>
+</section>
+<section class="section" id="payments-view" hidden><div class="toolbar section-heading"><h2>История платежей</h2><button class="action refresh-action" id="payments-refresh" type="button">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Клиент</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="payments-table"></tbody></table></div><div class="pagination"><button class="action" id="payments-prev" type="button">Назад</button><span id="payments-page" class="muted">Страница 1</span><button class="action" id="payments-next" type="button">Далее</button></div></section>
 <section class="section" id="plans-view" hidden>
   <div class="toolbar section-heading">
     <h1>Тарифы</h1>
-    <div class="toolbar">
-      <button class="action" type="button" id="plans-refresh">Обновить</button>
+    <div class="toolbar heading-actions">
+      <button class="action refresh-action" type="button" id="plans-refresh">Обновить</button>
       <button class="action primary" type="button" id="plan-new">Новый тариф</button>
     </div>
   </div>
@@ -127,11 +170,11 @@
   <details class="squad-settings">
     <summary>Internal Squads · гибкий и пробный доступ</summary>
     <div id="mode-policies"></div>
+    <div class="toolbar">
+      <button class="action refresh-action" id="squads-refresh" type="button">Обновить сквады</button>
+      <span id="squads-status" role="status"></span>
+    </div>
   </details>
-  <div class="toolbar">
-    <button class="action" id="squads-refresh" type="button">Обновить список сквадов</button>
-    <span id="squads-status" role="status"></span>
-  </div>
 </section>
 <section class="section" id="referrals-view" hidden>
 <h2>Реферальная программа</h2>
@@ -325,13 +368,6 @@
     </div>
     <small class="muted">Укажите адрес в личном кабинете Platega в разделе «Настройки → Callback URLs».</small>
   </div>
-</section>
-<section class="section" id="pricing-view" hidden>
-<button class="provider-back" type="button" data-open-tab="configuration">← Настройки</button>
-<h2>Служебная формула цен</h2>
-<p class="muted">Настройка для прежних заказов. Новые покупки используют только опубликованные тарифы администратора. Рубли указываются в копейках; Stars — целыми единицами.</p>
-<div id="pricing-fields" class="grid"></div>
-<button class="action primary" id="pricing-save">Сохранить формулу цен</button>
 </section>
 <div id="status" class="status" role="status"></div>
 </div>

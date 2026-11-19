@@ -24,12 +24,12 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('loadPurchases()', mini_js)
         self.assertIn('id="renew-plan"', mini)
         self.assertIn('id="repeat-plan"', mini)
-        self.assertEqual(mini.count('<button type="button" data-page='), 4)
-        for symbol in ("i-shop", "i-shield", "i-gift", "i-user"):
+        self.assertEqual(mini.count('<button type="button" data-page='), 5)
+        for symbol in ("i-home", "i-device", "i-help", "i-gift", "i-user"):
             self.assertIn('href="#' + symbol + '"', mini)
-        for page in ("devices", "guide", "support"):
-            self.assertEqual(mini.count(f'data-go-page="{page}"'), 1)
-        self.assertIn('data-page="shop" aria-current="page"', mini)
+        self.assertEqual(mini.count('data-go-page="guide"'), 1)
+        self.assertIn('data-page="vpn" aria-current="page"', mini)
+        self.assertIn('id="device-capacity"', mini)
         self.assertIn('id="admin-sidebar"', admin)
         self.assertIn('id="admin-menu-backdrop"', admin)
         self.assertIn('id="configuration-view"', admin)
@@ -42,16 +42,19 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('class="admin-icon-sprite"', admin)
         self.assertIn('const sidebarIconNames =', admin_js)
         self.assertIn('id="ai-wallet"', admin)
-        for section in ("referrals-view", "trial-view", "pricing-view", "payment-settings-view",
+        for section in ("referrals-view", "trial-view", "payment-settings-view",
                         "payment-telegram_stars-view", "payment-yookassa-view",
                         "payment-yoomoney-view", "payment-cryptopay-view", "payment-platega-view"):
             self.assertIn('id="' + section + '"', admin)
         for tab in ("referrals", "configuration"):
             self.assertIn('data-tab="' + tab + '"', admin)
-        for tab in ("trial", "pricing", "settings"):
+        for tab in ("trial", "settings"):
             self.assertIn('data-open-tab="' + tab + '"', admin)
         self.assertNotIn('id="payment-diagnostics-refresh"', admin)
         self.assertNotIn('id="payment-terms-state"', admin)
+        self.assertNotIn('id="pricing-view"', admin)
+        self.assertIn('id="customer-subscription-form"', admin)
+        self.assertIn('id="customer-delete-form"', admin)
         self.assertIn('data-provider-form="platega"', admin)
         self.assertIn('"pay-platega"', admin_js)
         self.assertIn('async function savePaymentProvider(provider)', admin_js)
@@ -74,7 +77,8 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('id="bot-identity"', admin)
         for panel in ('shop', 'vpn', 'bonuses', 'account'):
             self.assertIn(f'id="page-{panel}"', mini)
-            self.assertIn(f'data-page="{panel}"', mini)
+            if panel != 'shop':
+                self.assertIn(f'data-page="{panel}"', mini)
         for page in ("order", "devices", "purchases", "support", "guide"):
             self.assertIn(f'id="page-{page}"', mini)
         for html in (mini, admin):

@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 from redis.exceptions import LockError
 
 from app.config import settings
+from app.services.users import BLOCKED_MESSAGE, customer_is_blocked
 
 logger = logging.getLogger(__name__)
 redis = Redis.from_url(settings.redis_url, decode_responses=True)
@@ -88,7 +89,16 @@ class MenuMiddleware(BaseMiddleware):
             if is_callback:
                 await event.answer("Откройте меню командой /start.")
             return None
-        if message.chat.type != "private" or message.successful_payment:
+        if message.successful_payment:
+            return await handler(event, data)
+        actor = event.from_user if is_callback else message.from_user
+        if actor and await customer_is_blocked(actor.id):
+            if is_callback:
+                await event.answer(BLOCKED_MESSAGE, show_alert=True)
+            else:
+                await message.answer(BLOCKED_MESSAGE)
+            return None
+        if message.chat.type != "private":
             return await handler(event, data)
         try:
             async with menu_session(data["bot"], message.chat.id, wait=0.3 if is_callback else 60) as state:

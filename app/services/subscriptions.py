@@ -12,6 +12,7 @@ from app.db.session import SessionLocal
 from app.services.remnawave import RemnawaveClient
 from app.services.referrals import pending_rewards_for_payment, grant_referral_reward
 from app.services.promos import pending_promo_redemptions
+from app.services.users import BlockedCustomer
 
 
 def _unwrap(data: Any) -> dict[str, Any]:
@@ -68,19 +69,27 @@ async def paid_tariff_key(session, subscription):
 
 async def provision_paid_payment(payment_id: int) -> bool:
     async with SessionLocal() as session:
-        payment = await session.scalar(
-            select(Payment).where(Payment.id == payment_id).with_for_update()
-        )
+        payment = await session.get(Payment, payment_id)
         if payment is None:
             raise ValueError("Payment not found")
         if payment.status == "succeeded":
             return False
-        if payment.status != "paid":
-            raise ValueError("Payment has not been verified as paid")
+        if payment.user_id is None:
+            raise RuntimeError("Payment owner was removed")
 
+        # Owner mutations and payment issuance both acquire the customer row first.
         user = await session.get(User, payment.user_id, with_for_update=True)
         if user is None:
             raise RuntimeError("Payment owner not found")
+        if user.blocked_at:
+            raise BlockedCustomer()
+        payment = await session.get(Payment, payment_id, with_for_update=True, populate_existing=True)
+        if payment is None or payment.user_id != user.id:
+            raise RuntimeError("Payment owner not found")
+        if payment.status == "succeeded":
+            return False
+        if payment.status != "paid":
+            raise ValueError("Payment has not been verified as paid")
         order = json.loads(payment.payload or "{}")
         tariff_key = str(order["plan_id"] or "flexible") if "plan_id" in order else None
         snapshot = order.get("tariff") or {}

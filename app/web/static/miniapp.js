@@ -3,13 +3,14 @@ tg?.ready?.();
 tg?.expand?.();
 const $=id=>document.getElementById(id);
 function switchPage(page){
+  document.querySelector(".topbar").hidden = page === "vpn";
   document.querySelectorAll("[data-page-panel]").forEach(panel=>{
     const visible=panel.dataset.pagePanel===page;
     panel.hidden=!visible;
     panel.classList.toggle("active",visible);
   });
   document.querySelectorAll("#bottom-nav [data-page]").forEach(button=>{
-    const active = button.dataset.page === ({order: "shop", devices: "vpn", guide: "vpn", purchases: "account", support: "account"}[page] || page);
+    const active = button.dataset.page === ({order: "vpn", shop: "vpn", guide: "vpn", purchases: "account"}[page] || page);
     if(active)button.setAttribute("aria-current","page");else button.removeAttribute("aria-current");
   });
   window.scrollTo({top:0,behavior:"smooth"});
@@ -53,7 +54,8 @@ $("trial-claim").onclick=async()=>{
     location.reload();
   }catch(e){$("trial-status").textContent=e.message;$("trial-claim").disabled=false}
 };
-$("promo-activate").onclick=async()=>{
+$("promo-form").onsubmit=async event=>{
+  event.preventDefault();
   const code=$("promo-input").value.trim();
   $("promo-activate").disabled=true;
   try{const d=await api("/api/v1/webapp/promos/redeem",{code});
@@ -64,29 +66,44 @@ $("promo-activate").onclick=async()=>{
 };
 async function loadDevices() {
   const box = $("account-device-info");
+  const refresh = $("devices-refresh"), capacity = $("device-capacity");
+  if (refresh.disabled) return;
+  refresh.disabled = true;
   try {
     const data = await api("/api/v1/webapp/devices");
     box.replaceChildren();
-    const headline = document.createElement("p");
-    headline.className = "muted";
-    headline.textContent = "Зарегистрировано: " + data.items.length + " / " + (data.limit ?? "—");
-    box.append(headline);
-    const list = document.createElement("div");
-    list.className = "record-list";
+    const count = data.total ?? data.items.length;
+    $("device-count").textContent = data.limit ? count + " из " + data.limit : count + " подключено";
+    capacity.hidden = !data.limit;
+    if (data.limit) {
+      capacity.max = data.limit;
+      capacity.value = count;
+    }
     for (const [index, device] of data.items.entries()) {
-      const record = document.createElement("div");
-      record.className = "record-card";
+      const record = document.createElement("article");
+      record.className = "panel device-card";
       const title = document.createElement("strong");
       title.textContent = device.name || "Устройство " + (index + 1);
       record.append(title);
-      list.append(record);
+      const platform = [device.platform, device.os_version].filter(Boolean).join(" ");
+      if (platform) {
+        const detail = document.createElement("p");
+        detail.className = "muted";
+        detail.textContent = platform;
+        record.append(detail);
+      }
+      box.append(record);
     }
-    if (!data.items.length) list.textContent = "Подключённых устройств пока нет.";
-    box.append(list);
+    if (!data.items.length) box.textContent = "Подключённых устройств пока нет.";
   } catch {
-    box.textContent = "Информация об устройствах временно недоступна.";
+    capacity.hidden = true;
+    box.replaceChildren();
+    $("device-count").textContent = "Информация об устройствах временно недоступна.";
+  } finally {
+    refresh.disabled = false;
   }
 }
+$("devices-refresh").onclick = loadDevices;
 
 async function loadPurchases() {
   const box = $("account-purchase-info");
@@ -129,11 +146,17 @@ async function loadPurchases() {
 async function loadReferrals() {
   try {
     const d = await api("/api/v1/webapp/referrals");
-    $("account-referral-info").textContent = "Приглашено: " + d.count + " · Бонусных дней: " + (d.reward?.days || 0)
-      + (d.rewards_enabled ? " · Дни добавятся при продлении." : " · Бонусы отключены.");
+    $("account-referral-info").textContent = d.rewards_enabled
+      ? (d.reward_days ? "За первую оплату друга начисляется " + d.reward_days + " дн." : "Дни начисляются после первой оплаты друга.")
+      : "Реферальные бонусы отключены.";
+    $("referral-count").textContent = d.count;
+    $("referral-earned").textContent = d.reward?.earned || 0;
+    $("referral-days").textContent = d.reward?.days || 0;
+    $("referral-metrics").hidden = false;
     if (d.link) {
       $("account-referral-link").href = d.link;
       $("account-referral-link").textContent = d.link;
+      $("account-referral-link").hidden = false;
       $("copy-referral").hidden = false;
       $("share-referral").href = "https://t.me/share/url?url=" + encodeURIComponent(d.link);
       $("share-referral").hidden = false;
@@ -384,19 +407,23 @@ async function loadReadyPlans() {
 function renderProfile(profile, user) {
   const name = profile?.name || "Remnaum";
   $("store-name").textContent = name;
-  $("store-mark").textContent = name.trim().charAt(0).toUpperCase() || "R";
+  $("landing-name").textContent = name;
+  const mark = name.trim().charAt(0).toUpperCase() || "R";
+  $("store-mark").textContent = mark;
+  $("landing-mark").textContent = mark;
   const description = profile?.description?.trim() || profile?.tagline?.trim();
   if (description) {
     $("store-description").textContent = description;
     $("store-description").hidden = false;
   }
-  for (const [id, url] of [["store-logo", profile?.logo_image_url]]) {
+  for (const [id, url] of [["store-logo", profile?.logo_image_url], ["landing-logo", profile?.logo_image_url]]) {
     if (url) {
       $(id).src = url;
       $(id).hidden = false;
     }
   }
   $("store-mark").hidden = Boolean(profile?.logo_image_url);
+  $("landing-mark").hidden = Boolean(profile?.logo_image_url);
   const contact = profile?.support_contact?.trim();
   if (contact) {
     $("support-text").textContent = contact;
@@ -423,6 +450,9 @@ function renderRenewalActions() {
     devices: (currentSubscription.device_limit ?? plan.devices_included) - plan.devices_included,
     renewal: true,
   }) : null;
+  const purchasedSlots = plan ? Math.max(0, (currentSubscription.device_limit ?? plan.devices_included) - plan.devices_included) : 0;
+  $("device-upgrade").hidden = !plan || purchasedSlots >= plan.max_extra_devices;
+  $("device-upgrade").onclick = plan ? () => showOrder(plan, {devices: purchasedSlots + 1, renewal: true}) : null;
   const purchase = purchaseHistory.find(item => item.status === "succeeded" && availablePlans.has(item.plan_id));
   $("repeat-plan").hidden = !purchase;
   $("repeat-plan").onclick = purchase

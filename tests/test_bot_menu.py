@@ -79,6 +79,7 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
         credentials = {"platega": {"merchant_id": "test", "secret_key": "test"}}
         with (
             patch.object(menu, "redis", mock_redis),
+            patch.object(menu, "customer_is_blocked", return_value=False),
             patch.object(bot.session, "make_request", side_effect=send),
             patch.object(handlers, "get_or_create_user", return_value=False),
             patch.object(handlers, "get_store_profile", return_value=profile),
