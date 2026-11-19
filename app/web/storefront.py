@@ -16,7 +16,9 @@ from sqlalchemy.dialects.postgresql import insert
 from app.config import settings
 from app.db.models import User
 from app.db.session import SessionLocal
-from app.services.payment_service import accept_current_terms, create_payment_for_user
+from app.services.payment_service import (
+    PaymentProviderUnavailable, TermsAcceptanceRequired, accept_current_terms, create_payment_for_user,
+)
 from app.services.plans import list_plans
 from app.services.store_auth import issue_store_session, verify_store_session, verify_telegram_login
 from app.services.store_profile import get_store_profile, get_terms_url
@@ -117,14 +119,19 @@ async def store_checkout(request: Request, data: StoreCheckoutPayload):
         raise HTTPException(status_code=403, detail="Invalid checkout origin")
     if data.provider not in EXTERNAL_PROVIDERS:
         raise HTTPException(status_code=422, detail="Unsupported payment provider")
-    if not data.accepted_terms or not await get_terms_url():
-        raise HTTPException(status_code=403, detail="Please accept published terms")
+    if await get_terms_url() and not data.accepted_terms:
+        raise HTTPException(status_code=403, detail="Перед оплатой примите условия продажи.")
     methods, _ = await get_store_payment_settings()
     if not methods.get(data.provider):
         raise HTTPException(status_code=403, detail="Payment method is disabled")
     try:
-        await accept_current_terms(telegram_id)
+        if data.accepted_terms:
+            await accept_current_terms(telegram_id)
         payment, link = await create_payment_for_user(telegram_id, data.provider, plan_id=data.plan_id)
+    except TermsAcceptanceRequired as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except PaymentProviderUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not link.url.startswith("https://"):

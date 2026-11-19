@@ -1,18 +1,21 @@
 import asyncio
 import json
+import logging
 from typing import Any
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 import httpx
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 
 from app.db.models import Subscription, Payment, TariffDraft, TariffPlan, TermsAcceptance, User
 from app.db.session import SessionLocal
 from app.config import settings
 from app.services.payment_providers import VerifiedPayment, get_provider
 from app.services.tariffs import TariffQuote, calculate_store_price, calculate_store_stars_price, ensure_tariff_draft
-from app.services.store_settings import get_store_payment_settings
+from app.services.store_settings import get_store_payment_settings, public_payment_settings
 from app.services.plans import PlanQuote, quote_plan, selected_plan_for_user
 from app.services.squads import fetch_catalog, mode_squads, require_available
 from app.services.remnawave import RemnawaveClient
@@ -20,6 +23,18 @@ from app.services.subscriptions import (
     get_panel_user, has_panel_squads, matches_panel_account, paid_tariff_key, panel_expiry,
 )
 from app.services.store_profile import get_terms_url
+
+logger = logging.getLogger(__name__)
+
+
+class TermsAcceptanceRequired(ValueError):
+    def __init__(self):
+        super().__init__("Перед оплатой примите условия продажи.")
+
+
+class PaymentProviderUnavailable(RuntimeError):
+    def __init__(self):
+        super().__init__("Платёжная система не смогла создать счёт. Повторите попытку или выберите другой способ оплаты.")
 
 
 async def checkout_squads(session, user, plan) -> tuple[list[str], bool]:
@@ -98,11 +113,12 @@ async def create_payment_for_user(
     methods, credentials = await get_store_payment_settings()
     if provider_name not in {"yookassa", "yoomoney", "cryptopay"} or not methods.get(provider_name):
         raise ValueError("Выбранный способ оплаты отключён администратором")
-    if not await get_terms_url() or not await has_accepted_current_terms(telegram_id):
-        raise ValueError("Перед покупкой примите опубликованные условия продажи")
+    await require_checkout_terms(telegram_id)
+    if not public_payment_settings(methods, credentials)["configured"][provider_name]:
+        raise ValueError("Реквизиты выбранного способа оплаты недоступны. Обратитесь в поддержку магазина.")
     draft_quote = await ensure_tariff_draft(telegram_id) if plan_id is None else None
     if not settings.remnawave_base_url or not settings.remnawave_api_token:
-        raise RuntimeError("Remnawave is not configured; payment checkout is disabled")
+        raise RuntimeError("Магазин не подключён к Remnawave. Обратитесь в поддержку.")
     async with SessionLocal() as session:
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
         if user is None:
@@ -110,7 +126,7 @@ async def create_payment_for_user(
         plan, quote = await _payment_quote(session, user.id, draft_quote, plan_id, extra_devices, revision)
         amount_minor = quote.amount_minor
         if amount_minor <= 0:
-            raise ValueError("Tariff amount must be greater than zero")
+            raise ValueError("Для этого заказа не задана цена в рублях.")
 
         if provider_name == "yoomoney" and quote.currency.upper() != "RUB":
             raise ValueError("Set TARIFF_CURRENCY=RUB to enable YooMoney wallet payments")
@@ -138,16 +154,22 @@ async def create_payment_for_user(
             currency=currency,
             description=f"Remnaum VPN subscription #{payment_id}",
         )
-    except Exception:
+        url = urlsplit(link.url)
+        if url.scheme != "https" or not url.hostname:
+            raise ValueError("Payment provider did not return an HTTPS payment URL")
+    except Exception as exc:
+        status_code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+        logger.warning("Could not create %s invoice %s (%s, HTTP %s)",
+                       provider_name, payment_id, type(exc).__name__, status_code)
         async with SessionLocal() as session:
-            failed = await session.get(Payment, payment_id)
+            failed = await session.get(Payment, payment_id, with_for_update=True)
             if failed is not None and failed.status == "pending":
                 failed.status = "failed"
                 await session.commit()
-        raise
+        raise PaymentProviderUnavailable() from exc
 
     async with SessionLocal() as session:
-        stored = await session.get(Payment, payment_id)
+        stored = await session.get(Payment, payment_id, with_for_update=True)
         if stored is None:
             raise RuntimeError("Local payment record disappeared")
         if stored.status == "pending":
@@ -205,37 +227,31 @@ async def has_accepted_current_terms(telegram_id: int) -> bool:
         return accepted is not None
 
 
+async def require_checkout_terms(telegram_id: int) -> None:
+    if await get_terms_url() and not await has_accepted_current_terms(telegram_id):
+        raise TermsAcceptanceRequired()
+
+
 async def accept_current_terms(telegram_id: int) -> None:
     if not await get_terms_url():
-        raise RuntimeError("Terms URL is not configured")
+        return
     async with SessionLocal() as session:
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
         if user is None:
             raise ValueError("Telegram user is not registered")
-        existing = await session.scalar(
-            select(TermsAcceptance).where(
-                TermsAcceptance.user_id == user.id,
-                TermsAcceptance.terms_version == settings.telegram_terms_version,
-            )
-        )
-        if existing is None:
-            session.add(TermsAcceptance(
-                user_id=user.id,
-                terms_version=settings.telegram_terms_version,
-            ))
-            await session.commit()
+        await session.execute(insert(TermsAcceptance).values(
+            user_id=user.id, terms_version=settings.telegram_terms_version,
+        ).on_conflict_do_nothing(index_elements=[TermsAcceptance.user_id, TermsAcceptance.terms_version]))
+        await session.commit()
 
 
 async def create_stars_payment_for_user(
     telegram_id: int, *, plan_id: int | None = None, extra_devices: int = 0, revision: str | None = None,
 ) -> tuple[Payment, int]:
+    await require_checkout_terms(telegram_id)
     draft_quote = await ensure_tariff_draft(telegram_id) if plan_id is None else None
-    if not await get_terms_url():
-        raise RuntimeError("Publish the terms URL in the admin branding settings before enabling sales")
-    if not await has_accepted_current_terms(telegram_id):
-        raise ValueError("The user has not accepted the current terms")
     if not settings.remnawave_base_url or not settings.remnawave_api_token:
-        raise RuntimeError("Remnawave is not configured; checkout is disabled")
+        raise RuntimeError("Магазин не подключён к Remnawave. Обратитесь в поддержку.")
 
     async with SessionLocal() as session:
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
@@ -270,15 +286,14 @@ async def validate_stars_pre_checkout(
 ) -> bool:
     if currency != "XTR" or payload != f"remnaum:{payment_id}":
         return False
+    try:
+        await require_checkout_terms(telegram_id)
+    except TermsAcceptanceRequired:
+        return False
     async with SessionLocal() as session:
         payment = await session.scalar(
             select(Payment)
             .join(User, Payment.user_id == User.id)
-            .join(
-                TermsAcceptance,
-                (TermsAcceptance.user_id == User.id)
-                & (TermsAcceptance.terms_version == settings.telegram_terms_version),
-            )
             .where(
                 Payment.id == payment_id,
                 Payment.provider == "telegram_stars",

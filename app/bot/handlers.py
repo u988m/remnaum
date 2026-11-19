@@ -11,6 +11,7 @@ from app.config import settings
 from app.services.tariffs import TariffQuote, format_traffic, get_tariff_draft, update_tariff_draft, calculate_store_stars_price
 from app.services.payment_service import (
     accept_current_terms,
+    PaymentProviderUnavailable,
     create_stars_payment_for_user,
     create_payment_for_user,
     has_accepted_current_terms,
@@ -27,7 +28,7 @@ from app.services.store_profile import get_store_profile
 from app.services.store_media import welcome_image_path
 from app.services.bot_identity import bot_username
 from app.services.referrals import parse_referral_start, register_referral, referral_count, referral_code, reward_balance, get_referral_settings
-from app.services.plans import clear_selected_plan, get_plan, list_plans, max_extra_devices, plan_revision, quote_plan, selected_stars_price
+from app.services.plans import PlanQuote, clear_selected_plan, get_plan, list_plans, max_extra_devices, plan_revision, quote_plan, selected_stars_price
 from app.services.trials import get_trial_settings, trial_eligible, claim_trial
 from app.services.promos import redeem_promo, promo_balance
 from app.db.models import Payment, User
@@ -288,30 +289,34 @@ async def fixed_plan_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     controls = []
     if extra_devices:
-        controls.append(InlineKeyboardButton(text="− Устройство", callback_data=f"plan:select:{plan_id}:{extra_devices - 1}"))
+        controls.append(InlineKeyboardButton(text="− 1 устройство", callback_data=f"plan:select:{plan_id}:{extra_devices - 1}"))
     if extra_devices < max_extra_devices(plan):
-        controls.append(InlineKeyboardButton(text="+ Устройство", callback_data=f"plan:select:{plan_id}:{extra_devices + 1}"))
-    details = [
-        f"<b>{escape(quote.name)}</b>",
-        f"{quote.duration_days} дней · {format_traffic(quote.traffic_gb)}",
-        "",
-        f"Устройств включено: {quote.devices_included}",
-        f"Устройств добавлено: {quote.extra_devices}",
-    ]
-    addon_price = f"{quote.unit_minor / 100:.2f} ₽" if quote.unit_minor is not None else "недоступно"
-    details.append(f"Доп. устройство: {addon_price}")
+        controls.append(InlineKeyboardButton(text="+ 1 устройство", callback_data=f"plan:select:{plan_id}:{extra_devices + 1}"))
     price = f"{quote.amount_minor / 100:.2f} ₽" if quote.amount_minor else ""
     if quote.stars is not None:
         price = " / ".join(filter(None, (price, f"{quote.stars} ⭐")))
-    details.append(f"\nИтого: <b>{price}</b>")
     key = f"{plan_id}:{extra_devices}:{plan_revision(plan)}"
     rows = [controls] if controls else []
     rows.extend([
-        [InlineKeyboardButton(text="Подтвердить заказ", callback_data=f"plan:confirm:{key}")],
+        [InlineKeyboardButton(text="Выбрать оплату", callback_data=f"plan:confirm:{key}")],
         [InlineKeyboardButton(text="← К тарифам", callback_data="menu:plans")],
     ])
     if callback.message:
+        details = [_plan_summary(quote)]
+        if extra_devices:
+            details.append(f"Устройств добавлено: {extra_devices}")
+        if quote.unit_minor is not None:
+            addon_price = f"{quote.unit_minor / 100:.2f} ₽"
+            if plan.extra_device_price_stars is not None:
+                addon_price += f" / {plan.extra_device_price_stars} ⭐"
+            details.append(f"За доп. устройство: {addon_price}")
+        details.append(f"\nИтого: <b>{price}</b>")
         await edit_menu_message(callback.message, "\n".join(details), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+def _plan_summary(quote: PlanQuote) -> str:
+    return (f"<b>{escape(quote.name)}</b>\n{quote.duration_days} дн. · {format_traffic(quote.traffic_gb)}"
+            f"\nУстройств: {quote.device_limit}")
 
 
 @router.callback_query(F.data.regexp(
@@ -323,11 +328,9 @@ async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
     try:
         quote = quote_plan(await get_plan(order["plan_id"]), order["extra_devices"], revision)
         terms = await get_terms_url()
-        if not terms:
-            raise ValueError("Магазин пока не опубликовал условия продажи.")
-        if action == "accept":
+        if terms and action == "accept":
             await accept_current_terms(callback.from_user.id)
-        accepted = await has_accepted_current_terms(callback.from_user.id)
+        accepted = not terms or await has_accepted_current_terms(callback.from_user.id)
     except (ValueError, RuntimeError) as exc:
         await callback.answer(str(exc), show_alert=True)
         return
@@ -360,9 +363,10 @@ async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
                     rows.append([InlineKeyboardButton(
                         text=f"{title} · {quote.amount_minor / 100:.2f} ₽", callback_data=f"plan:pay:{provider}:{key}",
                     )])
-        text = f"<b>{escape(quote.name)}</b>\nВыберите способ оплаты." if rows else "Для этого заказа нет доступных способов оплаты."
+        text = "Выберите способ оплаты." if rows else "Для этого заказа нет доступных способов оплаты."
     rows.append([InlineKeyboardButton(text="← К заказу", callback_data=f"plan:select:{plan_id}:{extras}")])
-    await edit_menu_message(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    await edit_menu_message(callback.message, f"{_plan_summary(quote)}\n\n{text}",
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
 @router.callback_query(F.data.startswith("tariff:"))
@@ -383,6 +387,9 @@ async def send_external_invoice(message: Message, telegram_id: int, name: str, *
         payment, link = await create_payment_for_user(telegram_id, name, **order)
         if urlsplit(link.url).scheme != "https":
             raise RuntimeError("Провайдер вернул недопустимую платёжную ссылку")
+    except (ValueError, PaymentProviderUnavailable) as exc:
+        await message.answer(escape(str(exc)), reply_markup=back_menu())
+        return
     except Exception:
         await message.answer(
             "Не удалось создать платёж. Проверьте тариф или выберите другой способ.",

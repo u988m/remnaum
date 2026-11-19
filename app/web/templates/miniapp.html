@@ -2,7 +2,7 @@
 <html lang="ru" data-theme="monochrome">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Remnaum · VPN</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="stylesheet" href="/static/theme.css">
@@ -62,15 +62,15 @@
             </dd>
           </div>
         </dl>
-        <div class="checkout-summary"><span>Итого</span><strong id="order-total" aria-live="polite"></strong></div>
-        <button class="primary-btn full" type="button" id="order-confirm">Подтвердить заказ</button>
         <form id="order-payment" hidden>
           <label class="form-field">Способ оплаты<select id="order-method" required></select></label>
-          <p class="muted" id="order-provider-total"></p>
-          <label class="check"><input id="order-terms" type="checkbox" required><span>Принимаю <a id="order-terms-link" target="_blank" rel="noopener">условия продажи</a></span></label>
-          <button class="primary-btn full" type="submit" id="order-pay">Перейти к оплате</button>
+          <div class="checkout-summary"><span>Итого</span><strong id="order-total" aria-live="polite"></strong></div>
+          <label class="check" id="order-consent" hidden><input id="order-terms" type="checkbox"><span>Принимаю <a id="order-terms-link" target="_blank" rel="noopener">условия продажи</a></span></label>
+          <button class="primary-btn full" type="submit" id="order-pay">Оплатить</button>
         </form>
         <p class="status" id="order-status" role="status"></p>
+        <a class="primary-btn full" id="order-open-invoice" target="_blank" rel="noopener" hidden>Открыть счёт</a>
+        <button class="secondary-btn full" type="button" id="order-show-purchases" data-go-page="purchases" hidden>Мои покупки</button>
       </div>
     </section>
     <section class="page" id="page-vpn" data-page-panel="vpn" hidden>

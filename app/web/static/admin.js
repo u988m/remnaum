@@ -319,7 +319,6 @@ const providerCredentials = {
   yoomoney: {receiver:"pay-yoomoney-receiver", notification_secret:"pay-yoomoney-secret"},
   cryptopay: {api_token:"pay-crypto-token"},
 };
-const providerSecretInputs = ["pay-yookassa-secret","pay-yoomoney-secret","pay-crypto-token"];
 async function loadPaymentSettings() {
   const d = await adminApi("GET", "/admin/api/payment-settings");
   const grid = $("method-list");
@@ -327,7 +326,7 @@ async function loadPaymentSettings() {
   for (const [provider, label] of Object.entries(providerLabels)) {
     const enabled = Boolean(d.methods?.[provider]);
     const configured = Boolean(d.configured?.[provider]);
-    const status = !configured ? "Нужны реквизиты" : enabled ? "Активен" : "Выключен";
+    const status = enabled ? (configured ? "Включён" : "Нужны реквизиты") : "Выключен";
     $("method-" + provider).checked = enabled;
     $("provider-" + provider + "-state").textContent =
       configured ? (enabled ? "Подключён и включён" : "Настроен, но выключен") : "Не настроен";
@@ -352,18 +351,22 @@ async function loadPaymentDiagnostics() {
     const d=await api("/admin/api/payment-diagnostics");
     for (const [name,info] of Object.entries(d.providers||{})) {
       const state=$("provider-"+name+"-state");
-      if (state) state.textContent=info.enabled && info.configured
-        ? "Настройки заполнены. Сделайте тестовый платёж."
-        : info.enabled ? "Не хватает настроек провайдера" : "Выключен";
+      if (state) state.textContent = !info.enabled ? "Выключен" : info.configured ? "Включён"
+        : name === "telegram_stars" ? "Бот не подключён" : "Реквизиты недоступны";
       const webhook=$("provider-"+name+"-webhook");
       if (webhook) webhook.value=info.webhook_url||"";
     }
-    $("payment-diagnostics-status").textContent="Проверены локальные настройки. Подтверждение оплаты проверяйте в истории.";
+    $("payment-terms-state").textContent = d.terms_url ? "Покупатели принимают условия перед оплатой."
+      : "Ссылка не указана. Оплата доступна без подтверждения условий.";
+    $("payment-diagnostics-status").textContent="Настройки обновлены. Статус платежа смотрите в истории.";
   } catch(error) {
     $("payment-diagnostics-status").textContent=error.message;
   }
 }
-$("payment-diagnostics-refresh").onclick=()=>loadPaymentDiagnostics();
+$("payment-diagnostics-refresh").onclick=async()=>{
+  try { await loadPaymentSettings(); await loadPaymentDiagnostics(); }
+  catch (error) { $("payment-diagnostics-status").textContent = error.message; }
+};
 document.querySelectorAll("[data-copy-webhook]").forEach(button=>{
   button.addEventListener("click",async()=>{
     const url=$("provider-"+button.dataset.copyWebhook+"-webhook")?.value;
@@ -375,26 +378,35 @@ document.querySelectorAll("[data-copy-webhook]").forEach(button=>{
 async function savePaymentProvider(provider) {
   if (!Object.hasOwn(providerLabels,provider)) throw Error("Неизвестная платёжная система");
   const button = document.querySelector('[data-save-provider="' + provider + '"]');
+  const feedback = $("provider-" + provider + "-feedback");
+  const fields = Object.entries(providerCredentials[provider] || {});
+  const toggle = $("method-" + provider);
   button.disabled = true;
+  toggle.disabled = true;
+  feedback.textContent = "Сохраняем…";
   try {
     const values = {};
-    for (const [key,id] of Object.entries(providerCredentials[provider] || {})) {
+    for (const [key,id] of fields) {
       // Sending an empty field never overwrites an encrypted secret in the API.
       const value = $(id).value.trim();
       if (value) values[key] = value;
     }
     const credentials = Object.keys(values).length ? {[provider]:values} : {};
-    await adminApi("PUT","/admin/api/payment-settings",{
-      methods:{[provider]:$("method-" + provider).checked},
+    const saved = await adminApi("PUT","/admin/api/payment-settings",{
+      methods:{[provider]:toggle.checked},
       credentials,
     });
-    for (const id of providerSecretInputs) $(id).value = "";
-    $("status").textContent = providerLabels[provider] + ": настройки сохранены";
-    await loadPaymentSettings();
+    for (const [key, id] of fields) {
+      const input = $(id);
+      if (input.type === "password" && input.value.trim() === values[key]) input.value = "";
+    }
+    toggle.checked = Boolean(saved.methods[provider]);
+    feedback.textContent = toggle.checked ? "Способ оплаты включён." : "Способ оплаты выключен.";
     await loadPaymentDiagnostics();
   } catch(error) {
-    $("status").textContent = error.message;
+    feedback.textContent = error.message;
   } finally {
+    toggle.disabled = false;
     button.disabled = false;
   }
 }

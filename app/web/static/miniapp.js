@@ -14,6 +14,7 @@ function switchPage(page){
     if(active)button.setAttribute("aria-current","page");else button.removeAttribute("aria-current");
   });
   window.scrollTo({top:0,behavior:"smooth"});
+  if (page === "purchases") loadAccountPanels();
   tg?.HapticFeedback?.selectionChanged?.();
 }
 document.querySelectorAll("[data-page], [data-go-page]").forEach(button=>{
@@ -123,79 +124,92 @@ function openCheckoutUrl(url){
 let selectedPlan = null;
 let extraDevices = 0;
 let orderBusy = false;
+let checkout = null;
 
-function showOrder(plan) {
+async function showOrder(plan) {
+  if (orderBusy) return;
+  const currentCheckout = {};
+  checkout = currentCheckout;
   selectedPlan = plan;
   extraDevices = 0;
   $("order-title").textContent = plan.name;
   $("order-specification").textContent = `${plan.days} дней · ${trafficLabel(plan.traffic_gb)}`;
   $("order-included").textContent = plan.devices_included;
-  $("order-unit").textContent = plan.extra_device_price_rub_minor == null
-    ? "Недоступно" : money(plan.extra_device_price_rub_minor);
   $("order-terms").checked = false;
   updateOrder();
   switchPage("order");
+  try {
+    const {methods, terms_url: termsUrl} = await api("/api/v1/payment-methods");
+    if (checkout !== currentCheckout) return;
+    Object.assign(checkout, {methods, termsUrl});
+    updateOrder();
+  } catch {
+    if (checkout === currentCheckout) $("order-status").textContent =
+      "Не удалось загрузить способы оплаты. Вернитесь к тарифам и откройте заказ ещё раз.";
+  }
 }
 
 function orderTotals() {
   const plan = selectedPlan;
   const rub = plan.price_rub_minor + extraDevices * (plan.extra_device_price_rub_minor ?? 0);
-  const stars = extraDevices && plan.extra_device_price_stars == null
-    ? null : plan.price_stars + extraDevices * (plan.extra_device_price_stars ?? 0);
+  const starTotal = plan.price_stars + extraDevices * (plan.extra_device_price_stars ?? 0);
+  const stars = (extraDevices && plan.extra_device_price_stars == null) || starTotal > 2147483647
+    ? null : starTotal;
   return {rub, stars};
 }
 
 function updateOrder() {
   const {rub, stars} = orderTotals();
   $("order-extra").value = String(extraDevices);
-  $("order-minus").disabled = extraDevices === 0;
-  $("order-plus").disabled = extraDevices >= selectedPlan.max_extra_devices;
-  $("order-total").textContent = rub > 0 ? money(rub) : stars == null ? "—" : stars + " ⭐";
-  $("order-confirm").hidden = false;
-  $("order-payment").hidden = true;
-  $("order-status").textContent = "";
+  $("order-minus").disabled = !checkout.methods || extraDevices === 0;
+  $("order-plus").disabled = !checkout.methods || extraDevices >= selectedPlan.max_extra_devices;
+  const unit = $("order-unit");
+  const prices = [];
+  if (selectedPlan.extra_device_price_rub_minor != null) {
+    prices.push(money(selectedPlan.extra_device_price_rub_minor));
+    if (selectedPlan.extra_device_price_stars != null) prices.push(selectedPlan.extra_device_price_stars + " ⭐");
+  }
+  unit.textContent = prices.join(" / ") || "Недоступно";
+  $("order-open-invoice").hidden = true;
+  $("order-show-purchases").hidden = true;
+  const select = $("order-method");
+  const previous = select.value;
+  select.replaceChildren();
+  for (const [key, label] of Object.entries(providerLabels)) {
+    if (!checkout.methods?.[key]) continue;
+    if (key === "telegram_stars" ? stars == null || stars < 1 : rub <= 0) continue;
+    select.add(new Option(label, key));
+  }
+  if ([...select.options].some(option => option.value === previous)) select.value = previous;
+  const hasMethods = select.options.length > 0;
+  $("order-payment").hidden = !hasMethods;
+  $("order-consent").hidden = !checkout.termsUrl;
+  $("order-terms").required = Boolean(checkout.termsUrl);
+  if (checkout.termsUrl) $("order-terms-link").href = checkout.termsUrl;
+  $("order-status").textContent = !checkout.methods ? "Загружаем способы оплаты…"
+    : hasMethods ? "" : "Для этого заказа нет способов оплаты. Проверьте тариф или число устройств.";
+  if (hasMethods) updateProviderTotal();
 }
 
 for (const [button, delta] of [["order-minus", -1], ["order-plus", 1]]) {
   $(button).onclick = () => {
-    if (!selectedPlan || orderBusy) return;
+    if (!selectedPlan || orderBusy || !checkout.methods) return;
     extraDevices = Math.max(0, Math.min(selectedPlan.max_extra_devices, extraDevices + delta));
     updateOrder();
   };
 }
 
-$("order-confirm").onclick = () => {
-  const {rub, stars} = orderTotals();
-  const select = $("order-method");
-  select.replaceChildren();
-  for (const [key, label] of Object.entries(providerLabels)) {
-    if (!data.payment_methods?.[key]) continue;
-    if (key === "telegram_stars" ? stars == null || stars < 1 : rub <= 0) continue;
-    select.add(new Option(label, key));
-  }
-  if (!select.options.length || !data.terms_url) {
-    $("order-status").textContent = !data.terms_url ? "Условия продажи пока не опубликованы." : "Для этого заказа нет доступных способов оплаты.";
-    return;
-  }
-  $("order-status").textContent = "";
-  $("order-confirm").hidden = true;
-  $("order-payment").hidden = false;
-  updateProviderTotal();
-  select.focus();
-};
-
 function updateProviderTotal() {
   const {rub, stars} = orderTotals();
-  $("order-provider-total").textContent = "К оплате · " + (
-    $("order-method").value === "telegram_stars" ? stars + " ⭐" : money(rub)
-  );
+  $("order-total").textContent = $("order-method").value === "telegram_stars" ? stars + " ⭐" : money(rub);
 }
 $("order-method").onchange = updateProviderTotal;
 
 $("order-payment").onsubmit = async event => {
   event.preventDefault();
-  if (orderBusy || !$("order-terms").checked) return;
+  if (orderBusy || !selectedPlan || (checkout.termsUrl && !$("order-terms").checked)) return;
   const provider = $("order-method").value;
+  if (!provider) return;
   const useStars = provider === "telegram_stars";
   const payload = {plan_id: selectedPlan.id, extra_devices: extraDevices, revision: selectedPlan.revision};
   orderBusy = true;
@@ -203,21 +217,30 @@ $("order-payment").onsubmit = async event => {
   $("order-status").textContent = "Создаём счёт…";
   try {
     if (useStars && !tg?.openInvoice) throw Error("Откройте Mini App через Telegram");
-    await api("/api/v1/webapp/terms/accept", {accepted: true});
+    if (checkout.termsUrl) await api("/api/v1/webapp/terms/accept", {accepted: true});
     if (useStars) {
       const invoice = await api("/api/v1/webapp/plans/checkout", payload);
       const status = await new Promise(resolve => tg.openInvoice(invoice.invoice_url, resolve));
-      $("order-status").textContent = status === "paid" ? "Оплата подтверждена" : status === "cancelled" ? "Оплата отменена" : "Проверьте заказ в разделе «Покупки».";
-      if (status === "paid") {
-        $("order-status").textContent = "Telegram принял оплату. Подключаем VPN…";
-        await loadAccountPanels();
-        switchPage("purchases");
-        window.setTimeout(() => window.location.reload(), 2400);
+      $("order-status").textContent = {
+        paid: "Telegram принял оплату. Статус подписки доступен в покупках.",
+        cancelled: "Оплата отменена.",
+        failed: "Telegram не подтвердил оплату. Попробуйте ещё раз.",
+        pending: "Telegram обрабатывает платёж. Статус доступен в покупках.",
+      }[status] || "Проверьте статус заказа в покупках.";
+      if (status === "paid" || status === "pending") {
+        $("order-payment").hidden = true;
+        $("order-show-purchases").hidden = false;
       }
     } else {
       const invoice = await api("/api/v1/webapp/plans/external/checkout", {...payload, provider});
-      openCheckoutUrl(invoice.url);
-      $("order-status").textContent = "Счёт №" + invoice.payment_id + " создан. Статус доступен в покупках.";
+      if (!invoice.url.startsWith("https://")) throw Error("Некорректный адрес провайдера");
+      const link = $("order-open-invoice");
+      link.href = invoice.url;
+      link.hidden = false;
+      $("order-payment").hidden = true;
+      $("order-show-purchases").hidden = false;
+      $("order-status").textContent = "Счёт №" + invoice.payment_id + " создан.";
+      if (tg?.openLink) openCheckoutUrl(invoice.url);
     }
   } catch (error) {
     $("order-status").textContent = error.message;
@@ -337,10 +360,6 @@ async function start() {
     renderSubscription(data.subscription);
     $("admin-entry").hidden = !data.is_admin;
     if (data.is_admin) $("admin-entry").onclick = () => window.location.assign("/admin" + window.location.hash);
-    for (const id of ["order-terms-link"]) {
-      if (data.terms_url) $(id).href = data.terms_url;
-      else $(id).textContent = "условия не опубликованы";
-    }
     $("loading").hidden = true;
     $("app").hidden = false;
     $("bottom-nav").hidden = false;

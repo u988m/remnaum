@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-theme="monochrome"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<html lang="ru" data-theme="monochrome"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="color-scheme" content="dark"><title>Remnaum — панель управления</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="stylesheet" href="/static/theme.css">
@@ -181,26 +181,30 @@
 <label>Слоган<input id="brand-tagline" maxlength="300"></label>
 <label>Описание<input id="brand-description" maxlength="300"></label>
 <label>Поддержка<input id="brand-support" maxlength="300" placeholder="@username или HTTPS-ссылка"></label>
-<label>Ссылка на условия продажи (HTTPS)<input id="brand-terms" maxlength="300" placeholder="https://..."></label>
+<label>Ссылка на условия продажи (HTTPS)<input id="brand-terms" type="url" maxlength="300" placeholder="https://..."><small>Если указать ссылку, покупатель увидит условия перед оплатой.</small></label>
 <button type="submit" class="action primary">Сохранить оформление</button>
 </form>
 </section>
 <section class="section" id="payment-settings-view" hidden>
   <div class="section-heading"><h1>Способы оплаты</h1></div>
-  <p class="muted">Каждый провайдер настраивается отдельно. Выключенный способ оплаты не показывается покупателям.</p>
   <div id="method-list" class="provider-grid" aria-label="Платёжные провайдеры"></div>
-  <p class="muted">Проверка здесь показывает только настройки. Реальное получение оплаты подтверждается в истории платежей после тестовой транзакции.</p>
-  <button class="action" id="payment-diagnostics-refresh" type="button">Проверить настройки</button>
-  <p class="muted" id="payment-diagnostics-status" role="status"></p>
+  <div class="payment-terms">
+    <div><h2>Условия продажи</h2><p class="muted" id="payment-terms-state"></p></div>
+    <button class="action" type="button" data-open-tab="brand">Настроить</button>
+  </div>
+  <div class="toolbar payment-diagnostics">
+    <button class="action" id="payment-diagnostics-refresh" type="button">Проверить настройки</button>
+    <p class="muted" id="payment-diagnostics-status" role="status"></p>
+  </div>
 </section>
 <section class="section payment-provider-view" id="payment-telegram_stars-view" hidden>
   <button class="action provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
   <h1>Telegram Stars</h1>
   <p class="muted">Оплата внутри Telegram. Дополнительные реквизиты не требуются.</p>
   <p class="provider-state" id="provider-telegram_stars-state" role="status">Проверяем настройки…</p>
-  Для реального теста потребуется счёт в Stars.
   <label class="provider-toggle"><input type="checkbox" id="method-telegram_stars"> Принимать Telegram Stars</label>
   <button class="action primary provider-save" type="button" data-save-provider="telegram_stars">Сохранить Stars</button>
+  <p class="provider-feedback muted" id="provider-telegram_stars-feedback" role="status"></p>
 </section>
 <section class="section payment-provider-view" id="payment-yookassa-view" hidden>
   <button class="action provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
@@ -214,6 +218,7 @@
     <label>Секретный ключ<input id="pay-yookassa-secret" type="password" autocomplete="new-password" placeholder="Оставьте пустым, чтобы сохранить старый"></label>
   </div>
   <button class="action primary provider-save" type="button" data-save-provider="yookassa">Сохранить YooKassa</button>
+  <p class="provider-feedback muted" id="provider-yookassa-feedback" role="status"></p>
 </section>
 <section class="section payment-provider-view" id="payment-yoomoney-view" hidden>
   <button class="action provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
@@ -227,6 +232,7 @@
     <label>Секрет уведомлений<input id="pay-yoomoney-secret" type="password" autocomplete="new-password" placeholder="Оставьте пустым, чтобы сохранить старый"></label>
   </div>
   <button class="action primary provider-save" type="button" data-save-provider="yoomoney">Сохранить YooMoney</button>
+  <p class="provider-feedback muted" id="provider-yoomoney-feedback" role="status"></p>
 </section>
 <section class="section payment-provider-view" id="payment-cryptopay-view" hidden>
   <button class="action provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
@@ -239,6 +245,7 @@
     <label>API-токен<input id="pay-crypto-token" type="password" autocomplete="new-password" placeholder="Оставьте пустым, чтобы сохранить старый"></label>
   </div>
   <button class="action primary provider-save" type="button" data-save-provider="cryptopay">Сохранить Crypto Pay</button>
+  <p class="provider-feedback muted" id="provider-cryptopay-feedback" role="status"></p>
 </section>
 <section class="section" id="pricing-view" hidden>
 <h2>Служебная формула цен</h2>

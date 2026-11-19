@@ -26,6 +26,7 @@
 }
 
 * { box-sizing: border-box; }
+html { touch-action: pan-x pan-y; }
 [hidden] { display: none !important; }
 body {
     margin: 0;
@@ -67,6 +68,7 @@ h2 { font-size: clamp(1.35rem, 4vw, 1.8rem); font-weight: 650; }
     border-radius: var(--radius-control);
     background: var(--color-input);
     color: var(--color-text);
+    font-size: max(16px, 1em);
 }
 input[type="checkbox"] { accent-color: var(--color-primary); }
 :where(.primary-btn, .secondary-btn, .link-button, .action) {

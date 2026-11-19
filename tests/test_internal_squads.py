@@ -160,9 +160,9 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
         provider = AsyncMock()
         provider.create_payment.return_value = PaymentLink("yookassa", "external-1", "https://payment.example")
         order = {"plan_id": plan["id"], "extra_devices": 2, "revision": plan["revision"]}
-        with patch.object(payment_service, "get_terms_url", return_value="terms"), \
-             patch.object(payment_service, "has_accepted_current_terms", return_value=True), \
-             patch.object(payment_service, "get_store_payment_settings", return_value=({"yookassa": True}, {})), \
+        credentials = {"yookassa": {"shop_id": "shop", "secret_key": "test-key"}}
+        with patch.object(payment_service, "get_terms_url", return_value=""), \
+             patch.object(payment_service, "get_store_payment_settings", return_value=({"yookassa": True}, credentials)), \
              patch.object(payment_service, "get_provider", return_value=provider):
             with self.assertRaisesRegex(ValueError, "количество"):
                 await payment_service.create_stars_payment_for_user(31, **(order | {"extra_devices": -1}))
@@ -264,7 +264,8 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
             (await session.get(TariffPlan, plan["id"])).internal_squads = []
 
         async def approve_invoice():
-            return await payment_service.validate_stars_pre_checkout(42, order.id, amount, "XTR", f"remnaum:{order.id}")
+            with patch.object(payment_service, "get_terms_url", return_value="https://store.test/terms"):
+                return await payment_service.validate_stars_pre_checkout(42, order.id, amount, "XTR", f"remnaum:{order.id}")
 
         self.assertFalse(await approve_invoice())
         self.panel.get_user_by_username.return_value = {"response": {
