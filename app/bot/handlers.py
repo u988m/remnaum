@@ -211,11 +211,13 @@ async def builder_handler(callback: CallbackQuery) -> None:
     await callback.answer("Тарифы задаёт администратор. Выберите готовый вариант.", show_alert=True)
 
 
-@router.callback_query(F.data.regexp(r"^plan:select:[0-9]+(?::[0-9]+)?$"))
+@router.callback_query(F.data.regexp(r"^plan:select:[0-9]+(?::[0-9]+(?::r)?)?$"))
 async def fixed_plan_handler(callback: CallbackQuery) -> None:
     parts = callback.data.split(":")
     plan_id = int(parts[2])
-    extra_devices = int(parts[3]) if len(parts) == 4 else 0
+    extra_devices = int(parts[3]) if len(parts) >= 4 else 0
+    renewal = parts[-1] == "r"
+    suffix = ":r" if renewal else ""
     plan = await get_plan(plan_id)
     try:
         quote = quote_plan(plan, extra_devices)
@@ -225,17 +227,17 @@ async def fixed_plan_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     controls = []
     if extra_devices:
-        controls.append(InlineKeyboardButton(text="➖ 1", callback_data=f"plan:select:{plan_id}:{extra_devices - 1}"))
+        controls.append(InlineKeyboardButton(text="− Устройство", callback_data=f"plan:select:{plan_id}:{extra_devices - 1}{suffix}"))
     if extra_devices < max_extra_devices(plan):
-        controls.append(InlineKeyboardButton(text="➕ 1", callback_data=f"plan:select:{plan_id}:{extra_devices + 1}"))
+        controls.append(InlineKeyboardButton(text="+ Устройство", callback_data=f"plan:select:{plan_id}:{extra_devices + 1}{suffix}"))
     price = f"{quote.amount_minor / 100:.2f} ₽" if quote.amount_minor else ""
     if quote.stars is not None:
         price = " / ".join(filter(None, (price, f"{quote.stars} ⭐")))
-    key = f"{plan_id}:{extra_devices}:{plan_revision(plan)}"
+    key = f"{plan_id}:{extra_devices}:{plan_revision(plan)}{suffix}"
     rows = [controls] if controls else []
     rows.extend([
         [InlineKeyboardButton(text="💳 Выбрать оплату", callback_data=f"plan:confirm:{key}")],
-        [InlineKeyboardButton(text="← К тарифам", callback_data="menu:plans")],
+        [InlineKeyboardButton(text="← Назад", callback_data="menu:subscription" if renewal else "menu:plans")],
     ])
     if callback.message:
         details = [_plan_summary(quote)]
@@ -257,10 +259,12 @@ def _plan_summary(quote: PlanQuote) -> str:
 
 
 @router.callback_query(F.data.regexp(
-    rf"^plan:(?:confirm|accept|pay:(?:stars|{'|'.join(PROVIDER_LABELS)})):[0-9]+:[0-9]+:[0-9a-f]{{20}}$"
+    rf"^plan:(?:confirm|accept|pay:(?:stars|{'|'.join(PROVIDER_LABELS)})):[0-9]+:[0-9]+:[0-9a-f]{{20}}(?::r)?$"
 ))
 async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
-    action, plan_id, extras, revision = callback.data[5:].rsplit(":", 3)
+    renewal = callback.data.endswith(":r")
+    suffix = ":r" if renewal else ""
+    action, plan_id, extras, revision = callback.data.removesuffix(suffix)[5:].rsplit(":", 3)
     order = {"plan_id": int(plan_id), "extra_devices": int(extras), "revision": revision}
     try:
         quote = quote_plan(await get_plan(order["plan_id"]), order["extra_devices"], revision)
@@ -274,7 +278,7 @@ async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     if not callback.message:
         return
-    key = f"{plan_id}:{extras}:{revision}"
+    key = f"{plan_id}:{extras}:{revision}{suffix}"
     rows = []
     if not accepted:
         rows.extend([
@@ -285,9 +289,9 @@ async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
     elif action.startswith("pay:"):
         provider = action.split(":", 1)[1]
         if provider == "stars":
-            await send_stars_invoice(callback.message, callback.from_user.id, **order)
+            await send_stars_invoice(callback.message, callback.from_user.id, renewal=renewal, **order)
         else:
-            await send_external_invoice(callback.message, callback.from_user.id, provider, **order)
+            await send_external_invoice(callback.message, callback.from_user.id, provider, renewal=renewal, **order)
         return
     else:
         methods, credentials = await get_store_payment_settings()
@@ -301,7 +305,7 @@ async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
                         text=f"💳 {title} · {quote.amount_minor / 100:.2f} ₽", callback_data=f"plan:pay:{provider}:{key}",
                     )])
         text = "Выберите способ оплаты." if rows else "Для этого заказа нет доступных способов оплаты."
-    rows.append([InlineKeyboardButton(text="← К заказу", callback_data=f"plan:select:{plan_id}:{extras}")])
+    rows.append([InlineKeyboardButton(text="← Назад", callback_data=f"plan:select:{plan_id}:{extras}{suffix}")])
     await edit_menu_message(callback.message, f"{_plan_summary(quote)}\n\n{text}",
                             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
@@ -319,16 +323,15 @@ async def legacy_checkout_disabled(callback: CallbackQuery) -> None:
     await callback.answer("Выберите тариф из списка магазина.", show_alert=True)
 
 
-def payment_back_button(order: dict) -> InlineKeyboardButton:
+def payment_back_button(order: dict, *, renewal: bool = False) -> InlineKeyboardButton:
     if order.get("revision") is None:
         return back_menu().inline_keyboard[0][0]
-    return InlineKeyboardButton(
-        text="← Назад", callback_data=f"plan:confirm:{order['plan_id']}:{order['extra_devices']}:{order['revision']}",
-    )
+    key = f"{order['plan_id']}:{order['extra_devices']}:{order['revision']}"
+    return InlineKeyboardButton(text="← Назад", callback_data=f"plan:confirm:{key}" + (":r" if renewal else ""))
 
 
-async def send_external_invoice(message: Message, telegram_id: int, name: str, **order) -> None:
-    back = payment_back_button(order)
+async def send_external_invoice(message: Message, telegram_id: int, name: str, *, renewal: bool = False, **order) -> None:
+    back = payment_back_button(order, renewal=renewal)
     reply_markup = InlineKeyboardMarkup(inline_keyboard=[[back]])
     try:
         payment, link = await create_payment_for_user(telegram_id, name, **order)
@@ -347,8 +350,8 @@ async def send_external_invoice(message: Message, telegram_id: int, name: str, *
     )
 
 
-async def send_stars_invoice(message: Message, telegram_id: int, **order) -> None:
-    back = payment_back_button(order)
+async def send_stars_invoice(message: Message, telegram_id: int, *, renewal: bool = False, **order) -> None:
+    back = payment_back_button(order, renewal=renewal)
     reply_markup = InlineKeyboardMarkup(inline_keyboard=[[back]])
     try:
         if not await is_payment_method_enabled("telegram_stars"):
@@ -596,7 +599,7 @@ async def subscription_handler(callback: CallbackQuery) -> None:
             extras = max(0, (subscription.get("device_limit") or plan.device_limit) - plan.device_limit)
             extras = min(extras, max_extra_devices(plan))
             rows.insert(0, [InlineKeyboardButton(
-                text="🔄 Продлить", callback_data=f"plan:select:{plan.id}:{extras}",
+                text="🔄 Продлить", callback_data=f"plan:select:{plan.id}:{extras}:r",
             )])
     if isinstance(url, str) and url.startswith("https://"):
         rows.insert(0, [InlineKeyboardButton(text="🔗 Подключить VPN", url=url)])

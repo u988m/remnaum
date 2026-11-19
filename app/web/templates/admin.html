@@ -5,15 +5,16 @@
 <link rel="stylesheet" href="/static/theme.css">
 <link rel="stylesheet" href="/static/admin.css"></head><body><main>
 <header class="admin-header">
-<button id="admin-menu-open" type="button" class="action" aria-label="Открыть разделы" aria-expanded="false" aria-controls="admin-sidebar" hidden>☰</button>
+<button id="admin-menu-open" type="button" class="action" aria-label="Открыть разделы" aria-expanded="false" aria-controls="admin-sidebar" hidden><svg aria-hidden="true"><use href="#ai-menu"/></svg></button>
 <div class="brand-logo"><span id="admin-shop-mark" aria-hidden="true">R</span><img id="admin-shop-logo" alt="" hidden></div>
 <div class="brand-block"><div class="brand" id="admin-shop-name">Remnaum</div><small>Управление магазином</small></div>
+<button id="admin-back" class="action admin-icon-action" type="button" aria-label="Назад" hidden><svg aria-hidden="true"><use href="#ai-back"/></svg></button>
 </header>
 <div id="loading" class="section access-loading" role="status">Проверяем права владельца…</div>
 <div id="dashboard" hidden>
 <button type="button" class="admin-menu-backdrop" id="admin-menu-backdrop" aria-label="Закрыть меню" hidden></button>
 <aside class="admin-sidebar" id="admin-sidebar" aria-label="Навигация админки">
-<div class="sidebar-heading"><span>Управление</span><a class="admin-return-link" href="/app">⌂ Магазин</a><button type="button" id="admin-menu-close" aria-label="Закрыть меню">✕</button></div>
+<div class="sidebar-heading"><span>Управление</span><a class="admin-return-link" href="/app"><svg aria-hidden="true"><use href="#ai-home"/></svg>Магазин</a><button type="button" id="admin-menu-close" aria-label="Закрыть меню">✕</button></div>
 <nav class="admin-tabs" aria-label="Разделы управления">
   <p class="sidebar-category">Магазин</p>
   <button aria-current="page" data-tab="overview" type="button">Обзор</button>
@@ -31,7 +32,7 @@
 <section id="overview-view" class="dashboard-view">
   <div class="dashboard-heading">
     <h1>Обзор</h1>
-    <button class="action" id="overview-refresh" type="button">Обновить обзор</button>
+    <button class="action admin-icon-action" id="overview-refresh" type="button" aria-label="Обновить обзор"><svg aria-hidden="true"><use href="#ai-refresh"/></svg></button>
   </div>
   <div class="overview-metrics">
     <div class="overview-stat"><span>Пользователи</span><b id="users-count">—</b></div>
@@ -75,17 +76,19 @@
 <section id="configuration-view" class="dashboard-view" hidden>
   <h1>Настройки</h1>
   <div class="settings-list">
-    <button type="button" data-open-tab="settings"><strong>Платёжные системы</strong><span>Telegram Stars, ЮKassa, ЮMoney, Crypto Pay и Platega</span></button>
+    <button type="button" data-open-tab="settings"><strong>Платёжные системы</strong><span>Способы оплаты и реквизиты</span></button>
     <button type="button" data-open-tab="brand"><strong>Оформление и поддержка</strong><span>Название, изображения и контакт магазина</span></button>
     <button type="button" data-open-tab="trial"><strong>Пробный доступ</strong><span>Срок, трафик и число устройств</span></button>
   </div>
 </section>
 <section class="section" id="users-view" hidden>
-  <div class="toolbar section-heading"><h2>Клиенты и подписки</h2><button class="action refresh-action" id="users-refresh" type="button">Обновить</button></div>
+  <div id="customers-list">
+  <div class="toolbar section-heading"><h2>Клиенты</h2><button class="action admin-icon-action" id="users-refresh" type="button" aria-label="Обновить клиентов"><svg aria-hidden="true"><use href="#ai-refresh"/></svg></button></div>
   <div class="table-wrap"><table><thead><tr><th>Telegram ID</th><th>Клиент</th><th>Подписка</th><th>До</th><th>Регистрация</th><th>Действие</th></tr></thead><tbody id="users-table"></tbody></table></div>
   <div class="pagination"><button class="action" id="users-prev" type="button">Назад</button><span id="users-page" class="muted"></span><button class="action" id="users-next" type="button">Далее</button></div>
+  </div>
   <section id="customer-detail" class="customer-detail" hidden>
-    <div class="toolbar section-heading"><h2>Карточка клиента</h2><button class="action" id="customer-close" type="button">Закрыть</button></div>
+    <div class="toolbar section-heading"><h2>Карточка клиента</h2><button class="action" id="customer-close" type="button">← Назад</button></div>
     <div><strong id="customer-title"></strong><p class="muted" id="customer-summary"></p></div>
     <form id="customer-profile-form" class="customer-form">
       <label>Имя для админки<input id="customer-name" type="text" maxlength="80" autocomplete="off"></label>
@@ -126,38 +129,44 @@
     </details>
   </section>
 </section>
-<section class="section" id="payments-view" hidden><div class="toolbar section-heading"><h2>История платежей</h2><button class="action refresh-action" id="payments-refresh" type="button">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Клиент</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="payments-table"></tbody></table></div><div class="pagination"><button class="action" id="payments-prev" type="button">Назад</button><span id="payments-page" class="muted">Страница 1</span><button class="action" id="payments-next" type="button">Далее</button></div></section>
+<section class="section" id="payments-view" hidden><div class="toolbar section-heading"><h2>История платежей</h2><button class="action admin-icon-action" id="payments-refresh" type="button" aria-label="Обновить платежи"><svg aria-hidden="true"><use href="#ai-refresh"/></svg></button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Клиент</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="payments-table"></tbody></table></div><div class="pagination"><button class="action" id="payments-prev" type="button">Назад</button><span id="payments-page" class="muted">Страница 1</span><button class="action" id="payments-next" type="button">Далее</button></div></section>
 <section class="section" id="plans-view" hidden>
+  <div id="plans-list-view">
   <div class="toolbar section-heading">
     <h1>Тарифы</h1>
     <div class="toolbar heading-actions">
-      <button class="action refresh-action" type="button" id="plans-refresh">Обновить</button>
+      <button class="action admin-icon-action" id="plans-refresh" type="button" aria-label="Обновить тарифы"><svg aria-hidden="true"><use href="#ai-refresh"/></svg></button>
       <button class="action primary" type="button" id="plan-new">Новый тариф</button>
     </div>
   </div>
   <div class="table-wrap">
     <table aria-label="Список тарифов"><thead><tr><th>Тариф</th><th>Условия</th><th>Рубли</th><th>Stars</th><th>Статус</th><th>Действие</th></tr></thead><tbody id="plans-table"></tbody></table>
   </div>
+  </div>
   <form id="plan-form" hidden>
-    <div class="toolbar section-heading"><h2 id="plan-form-title">Новый тариф</h2><button class="action" type="button" id="plan-cancel">Закрыть</button></div>
+    <div class="toolbar section-heading"><h2 id="plan-form-title">Новый тариф</h2><button class="action" type="button" id="plan-cancel">← Назад</button></div>
     <input type="hidden" id="plan-id">
     <label>Название<input id="plan-title" required maxlength="80"></label>
     <label>Описание<textarea id="plan-description" maxlength="2000" rows="3"></textarea></label>
-    <div class="grid">
+    <fieldset class="editor-group"><legend>Подписка</legend><div class="grid">
       <label>Срок, дней<input id="plan-days" type="number" value="30" min="1" max="365" required></label>
       <label>Трафик, ГБ<input id="plan-traffic" type="number" value="100" min="0" required><small>0 — безлимит</small></label>
       <label>Устройств включено<input id="plan-devices" type="number" value="1" min="1" required></label>
       <label>Сортировка<input id="plan-order" type="number" value="0" min="0" max="10000" required></label>
+    </div></fieldset>
+    <fieldset class="editor-group"><legend>Оплата</legend><div class="grid">
       <label>Цена, ₽<input id="plan-rub" type="number" min="0" max="1000000" step="0.01" required></label>
       <label>За доп. устройство, ₽<input id="plan-extra-rub" type="number" min="0" max="1000000" step="0.01"><small>Пусто — доп. устройства за рубли недоступны</small></label>
       <label>Цена, Stars<input id="plan-stars" type="number" min="1" max="1000000" required></label>
       <label>За доп. устройство, Stars<input id="plan-extra-stars" type="number" min="0" max="1000000"><small>Пусто — Stars только за базовый тариф</small></label>
+    </div></fieldset>
+    <fieldset class="editor-group"><legend>Каталог</legend><div class="grid">
       <label>Бейдж<select id="plan-badge"><option value="">Без бейджа</option><option>Популярный</option><option>Выгодно</option></select></label>
       <div class="check-group">
         <label><input id="plan-active" type="checkbox" checked> Активен</label>
         <label><input id="plan-featured" type="checkbox"> Выделить в каталоге</label>
       </div>
-    </div>
+    </div></fieldset>
     <fieldset><legend>Internal Squads</legend>
       <p id="squads-policy" class="muted"></p>
       <div id="squads-selected" aria-label="Выбранные сквады"></div>
@@ -167,7 +176,7 @@
     <button class="action primary" type="submit">Сохранить тариф</button>
     <p id="plan-status" role="status"></p>
   </form>
-  <details class="squad-settings">
+  <details class="squad-settings" id="squad-settings">
     <summary>Internal Squads · гибкий и пробный доступ</summary>
     <div id="mode-policies"></div>
     <div class="toolbar">
@@ -186,7 +195,7 @@
 </form>
 </section>
 <section class="section" id="trial-view" hidden>
-<button class="provider-back" type="button" data-open-tab="configuration">← Настройки</button>
+<button class="provider-back" type="button" data-back-tab="configuration">← Назад</button>
 <h2>Пробный доступ</h2><p class="muted">Один пробный доступ для каждого нового покупателя. Настройте срок, трафик и устройства.</p>
 <form id="trial-form">
 <label><input id="trial-enabled" type="checkbox"> Включить пробный доступ</label>
@@ -205,7 +214,7 @@
 </form>
 <div id="promo-admin-list"></div></section>
 <section class="section" id="brand-view" hidden>
-<button class="provider-back" type="button" data-open-tab="configuration">← Настройки</button>
+<button class="provider-back" type="button" data-back-tab="configuration">← Назад</button>
 <h1>Магазин</h1>
 <div class="brand-image-settings">
   <div class="image-preview logo-preview"><img id="brand-logo-preview" alt="Логотип магазина" hidden><span id="brand-logo-placeholder">Логотип</span></div>
@@ -247,12 +256,12 @@
 </form>
 </section>
 <section class="section" id="payment-settings-view" hidden>
-  <button class="provider-back" type="button" data-open-tab="configuration">← Настройки</button>
+  <button class="provider-back" type="button" data-back-tab="configuration">← Назад</button>
   <h1>Платёжные системы</h1>
   <div id="method-list" class="provider-grid" aria-label="Платёжные провайдеры"></div>
 </section>
 <section class="section payment-provider-view" id="payment-telegram_stars-view" hidden>
-  <button class="provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
+  <button class="provider-back" type="button" data-back-tab="settings">← Назад</button>
   <h1>Telegram Stars</h1>
   <p class="muted">Для оплаты нужен подключённый Telegram-бот.</p>
   <form data-provider-form="telegram_stars">
@@ -267,7 +276,7 @@
   </form>
 </section>
 <section class="section payment-provider-view" id="payment-yookassa-view" hidden>
-  <button class="provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
+  <button class="provider-back" type="button" data-back-tab="settings">← Назад</button>
   <h1>ЮKassa</h1>
   <form data-provider-form="yookassa">
     <label class="provider-toggle">
@@ -276,7 +285,7 @@
     </label>
     <div class="provider-fields">
       <label>ID магазина<input id="pay-yookassa-id" type="text" autocomplete="off" spellcheck="false"></label>
-      <label>Секретный ключ<input id="pay-yookassa-secret" type="password" autocomplete="new-password" spellcheck="false"><small>Оставьте поле пустым, чтобы сохранить текущий ключ.</small></label>
+      <label>Секретный ключ<input id="pay-yookassa-secret" type="password" autocomplete="new-password" spellcheck="false"><small>Пустое поле сохраняет текущий ключ.</small></label>
     </div>
     <div class="provider-actions">
       <button class="action primary provider-save" type="submit" data-save-provider="yookassa" disabled>Сохранить</button>
@@ -293,7 +302,7 @@
   </div>
 </section>
 <section class="section payment-provider-view" id="payment-yoomoney-view" hidden>
-  <button class="provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
+  <button class="provider-back" type="button" data-back-tab="settings">← Назад</button>
   <h1>ЮMoney</h1>
   <form data-provider-form="yoomoney">
     <label class="provider-toggle">
@@ -302,7 +311,7 @@
     </label>
     <div class="provider-fields">
       <label>Номер кошелька<input id="pay-yoomoney-receiver" type="text" autocomplete="off" spellcheck="false"></label>
-      <label>Секрет уведомлений<input id="pay-yoomoney-secret" type="password" autocomplete="new-password" spellcheck="false"><small>Оставьте поле пустым, чтобы сохранить текущий ключ.</small></label>
+      <label>Секрет уведомлений<input id="pay-yoomoney-secret" type="password" autocomplete="new-password" spellcheck="false"><small>Пустое поле сохраняет текущий ключ.</small></label>
     </div>
     <div class="provider-actions">
       <button class="action primary provider-save" type="submit" data-save-provider="yoomoney" disabled>Сохранить</button>
@@ -319,7 +328,7 @@
   </div>
 </section>
 <section class="section payment-provider-view" id="payment-cryptopay-view" hidden>
-  <button class="provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
+  <button class="provider-back" type="button" data-back-tab="settings">← Назад</button>
   <h1>Crypto Pay</h1>
   <form data-provider-form="cryptopay">
     <label class="provider-toggle">
@@ -327,7 +336,7 @@
       <input type="checkbox" role="switch" id="method-cryptopay" disabled>
     </label>
     <div class="provider-fields">
-      <label>API-токен приложения<input id="pay-crypto-token" type="password" autocomplete="new-password" spellcheck="false"><small>Оставьте поле пустым, чтобы сохранить текущий ключ.</small></label>
+      <label>API-токен приложения<input id="pay-crypto-token" type="password" autocomplete="new-password" spellcheck="false"><small>Пустое поле сохраняет текущий ключ.</small></label>
     </div>
     <div class="provider-actions">
       <button class="action primary provider-save" type="submit" data-save-provider="cryptopay" disabled>Сохранить</button>
@@ -344,7 +353,7 @@
   </div>
 </section>
 <section class="section payment-provider-view" id="payment-platega-view" hidden>
-  <button class="provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
+  <button class="provider-back" type="button" data-back-tab="settings">← Назад</button>
   <h1>Platega</h1>
   <form data-provider-form="platega">
     <label class="provider-toggle">
@@ -353,7 +362,7 @@
     </label>
     <div class="provider-fields">
       <label>Merchant ID<input id="pay-platega-id" type="text" autocomplete="off" spellcheck="false"></label>
-      <label>Секретный ключ<input id="pay-platega-secret" type="password" autocomplete="new-password" spellcheck="false"><small>Оставьте поле пустым, чтобы сохранить текущий ключ.</small></label>
+      <label>Секретный ключ<input id="pay-platega-secret" type="password" autocomplete="new-password" spellcheck="false"><small>Пустое поле сохраняет текущий ключ.</small></label>
     </div>
     <div class="provider-actions">
       <button class="action primary provider-save" type="submit" data-save-provider="platega" disabled>Сохранить</button>
@@ -373,6 +382,10 @@
 </div>
 </div></main>
 <svg class="admin-icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <symbol id="ai-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h12"/></symbol>
+  <symbol id="ai-back" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></symbol>
+  <symbol id="ai-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10h-6v-7H9v7H3z"/></symbol>
+  <symbol id="ai-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5m10-4a8 8 0 0 0-13-2m12 12a8 8 0 0 1-13-2"/></symbol>
   <symbol id="ai-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
   <symbol id="ai-tag" viewBox="0 0 24 24"><path d="M3 3h9l9 9-9 9-9-9z"/><circle cx="8" cy="8" r="1"/></symbol>
   <symbol id="ai-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21v-2a7 7 0 0 1 14 0v2M17 4a4 4 0 0 1 0 8m3 9v-2a7 7 0 0 0-4-6"/></symbol>

@@ -218,7 +218,7 @@ class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Устройств добавлено: 2", review)
         self.assertIn("570.00 ₽", review)
         keyboard = message.edit_text.call_args.kwargs["reply_markup"]
-        self.assertEqual([button.text for button in keyboard.inline_keyboard[0]], ["➖ 1", "➕ 1"])
+        self.assertEqual([button.text for button in keyboard.inline_keyboard[0]], ["− Устройство", "+ Устройство"])
         self.assertIn("plan:confirm:4:2:" + plan_revision(plan), [
             button.callback_data for row in keyboard.inline_keyboard for button in row
         ])

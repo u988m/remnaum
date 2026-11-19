@@ -200,7 +200,7 @@ async function loadUsers() {
     button.type = "button";
     button.className = "action";
     button.textContent = "Управлять";
-    button.onclick = () => showCustomer(user.telegram_id);
+    button.onclick = () => openTab("users", {panel: "customer", record: user.telegram_id});
     const action = cell("");
     action.append(button);
     $("users-table").lastElementChild.append(action);
@@ -229,10 +229,10 @@ $("customer-plan").onchange = fillSubscriptionPlan;
 
 async function showCustomer(id, {scroll = true} = {}) {
   const request = ++openingCustomer;
-  $("status").textContent = "";
   if (scroll) {
     customer = null;
     $("customer-detail").hidden = true;
+    $("status").textContent = "Загружаем карточку клиента…";
   }
   try {
     const [data, plans] = await Promise.all([api(customerPath(id)), api("/admin/api/plans")]);
@@ -275,17 +275,16 @@ async function showCustomer(id, {scroll = true} = {}) {
     ]));
     $("customer-feedback").textContent = "";
     $("customer-detail").hidden = false;
-    if (scroll) $("customer-detail").scrollIntoView({behavior:"smooth", block:"start"});
+    if (scroll) {
+      $("status").textContent = "";
+      $("customer-detail").scrollIntoView({block:"start"});
+    }
   } catch (error) {
     if (request === openingCustomer) $("status").textContent = error.message;
   }
 }
 
-$("customer-close").onclick = () => {
-  openingCustomer++;
-  customer = null;
-  $("customer-detail").hidden = true;
-};
+$("customer-close").onclick = () => goAdminBack("users");
 
 async function mutateCustomer(method, suffix, payload, success, deleted = false) {
   if (!customer || savingCustomer) return;
@@ -298,8 +297,8 @@ async function mutateCustomer(method, suffix, payload, success, deleted = false)
     await loadUsers().catch(error => { $("status").textContent = error.message; });
     if (customer?.telegram_id === id) {
       if (deleted) {
-        $("customer-close").click();
-        $("status").textContent = success;
+        returnNotice = success;
+        goAdminBack("users");
       } else {
         await showCustomer(id, {scroll:false});
         if (customer?.telegram_id === id) $("customer-feedback").textContent = success;
@@ -459,6 +458,7 @@ function renderModePolicies() {
     container.append(fieldset);
   }
 }
+let planCatalog = new Map();
 async function loadPlans(){
   if (!modeSquads) {
     const policies = await adminApi("GET", "/admin/api/squad-policies");
@@ -466,6 +466,7 @@ async function loadPlans(){
   }
   await loadSquads();
   const {items} = await adminApi("GET", "/admin/api/plans");
+  planCatalog = new Map(items.map(plan => [plan.id, plan]));
   const table = $("plans-table");
   table.replaceChildren();
   if (!items.length) {
@@ -488,7 +489,7 @@ async function loadPlans(){
     button.type = "button";
     button.className = "action";
     button.textContent = "Изменить";
-    button.onclick = () => fillPlan(plan);
+    button.onclick = () => openTab("plans", {panel: "plan", record: plan.id});
     td.append(button);
     table.lastElementChild.append(td);
   }
@@ -514,10 +515,9 @@ function fillPlan(plan = null) {
     $("plan-featured").checked = plan.is_featured;
   }
   $("plan-form").hidden = false;
-  $("plan-title").focus();
 }
-$("plan-new").onclick = () => fillPlan();
-$("plan-cancel").onclick = () => { $("plan-form").hidden = true; };
+$("plan-new").onclick = () => openTab("plans", {panel: "plan"});
+$("plan-cancel").onclick = () => goAdminBack("plans");
 $("plans-refresh").onclick = () => loadPlans().catch(e => { $("status").textContent = e.message; });
 $("plan-form").onsubmit = async event => {
   event.preventDefault();
@@ -534,9 +534,14 @@ $("plan-form").onsubmit = async event => {
       sort_order: +$("plan-order").value, is_active: $("plan-active").checked,
       badge: $("plan-badge").value, is_featured: $("plan-featured").checked, internal_squads: selectedSquads,
     };
+    const frameId = activeFrame.id;
     const saved = await adminApi(id ? "PUT" : "POST", "/admin/api/plans" + (id ? "/" + id : ""), payload);
-    fillPlan(saved);
-    $("plan-status").textContent = "Тариф сохранён";
+    if (activeFrame.id === frameId) {
+      fillPlan(saved);
+      $("plan-status").textContent = "Тариф сохранён";
+      activeFrame = {...activeFrame, record: saved.id};
+      history.replaceState({adminPanel: activeFrame}, "");
+    }
     await loadPlans();
   } catch (error) {
     $("plan-status").textContent = error.message;
@@ -655,6 +660,7 @@ const providerCredentials = {
   cryptopay: {api_token:"pay-crypto-token"},
   platega: {merchant_id:"pay-platega-id", secret_key:"pay-platega-secret"},
 };
+const providerMarks = {telegram_stars:"★", yookassa:"ЮК", yoomoney:"ЮМ", cryptopay:"₿", platega:"P"};
 const savingProviders = new Set();
 let paymentSettingsRequest = 0;
 
@@ -685,17 +691,21 @@ async function loadPaymentSettings() {
     button.type = "button";
     button.className = "provider-tile";
     button.dataset.openTab = providerTabs[provider];
+    const mark = document.createElement("span");
+    mark.className = "provider-mark";
+    mark.textContent = providerMarks[provider];
+    mark.setAttribute("aria-hidden", "true");
     const title = document.createElement("strong");
     title.textContent = label;
     const indicator = document.createElement("span");
     indicator.className = "provider-indicator";
-    indicator.dataset.enabled = Boolean(info.enabled && info.configured);
+    indicator.dataset.status = info.configured ? (info.enabled ? "enabled" : "disabled") : "unconfigured";
     indicator.textContent = status;
     const arrow = document.createElement("span");
     arrow.setAttribute("aria-hidden", "true");
     arrow.className = "provider-chevron";
     arrow.textContent = "›";
-    button.append(title, indicator, arrow);
+    button.append(mark, title, indicator, arrow);
     button.addEventListener("click", () => openTab(providerTabs[provider]));
     list.appendChild(button);
   }
@@ -818,6 +828,7 @@ function setAdminMenu(open) {
   document.querySelector(".admin-workspace").inert = open;
   adminBackdrop.hidden=!open;
   adminMenuOpen.setAttribute("aria-expanded",String(open));
+  syncAdminBack();
   if(open){adminReturnFocus=document.activeElement; adminSidebar.querySelector('[data-tab][aria-current="page"]')?.focus();}
   else if(adminReturnFocus?.isConnected){adminReturnFocus.focus({preventScroll:true});adminReturnFocus=null;}
 }
@@ -845,40 +856,123 @@ for (const [tab, provider] of Object.entries(providerByTab)) {
   tabs[tab] = {sections: [`payment-${provider}-view`], load: loadPaymentSettings};
 }
 
-let activeTab = null;
-async function openTab(requested, {updateHistory = true} = {}) {
-  const legacy = {promos: "bonuses", tariffs: "plans", pricing: "plans", payment_methods: "settings"};
-  let key = Object.hasOwn(legacy, requested) ? legacy[requested] : requested;
-  if (!Object.hasOwn(tabs, key)) key = "overview";
-  const tab = tabs[key];
-  const provider = providerByTab[key];
-  const parentTab = provider || ["settings", "brand", "trial"].includes(key)
-    ? "configuration" : key;
+const legacyTabs = {promos: "bonuses", tariffs: "plans", pricing: "plans", payment_methods: "settings"};
+const fromProfile = new URLSearchParams(location.search).get("from") === "profile";
+const adminScroll = new Map();
+let activeFrame = null;
+let frameSequence = 0;
+let lastPlanFrame = null;
+let returnNotice = "";
 
-  $("status").textContent = "";
+function canonicalTab(requested) {
+  const key = Object.hasOwn(legacyTabs, requested) ? legacyTabs[requested] : requested;
+  return Object.hasOwn(tabs, key) ? key : "overview";
+}
+
+function parentFor({tab, panel}) {
+  if (panel) return tab;
+  if (providerByTab[tab]) return "settings";
+  if (["settings", "brand", "trial"].includes(tab)) return "configuration";
+  return null;
+}
+
+function syncAdminBack() {
+  if (!activeFrame) return;
+  const hasParent = Boolean(parentFor(activeFrame));
+  const canGoBack = Boolean(activeFrame.depth || hasParent || fromProfile);
+  $("admin-back").hidden = !canGoBack || hasParent;
+  if (canGoBack || adminSidebar.classList.contains("is-open")) tg?.BackButton?.show?.();
+  else tg?.BackButton?.hide?.();
+}
+
+async function renderAdminFrame(frame) {
+  const previous = activeFrame;
+  frameSequence = Math.max(frameSequence, frame.id);
+  activeFrame = frame;
+  const tab = tabs[frame.tab];
+  const customerOpen = frame.panel === "customer";
+  const planOpen = frame.panel === "plan";
+  const mainTab = parentFor(frame) && !frame.panel ? "configuration" : frame.tab;
+
+  $("status").textContent = returnNotice;
+  returnNotice = "";
   for (const item of Object.values(tabs)) {
     for (const section of item.sections) $(section).hidden = tab !== item;
   }
   for (const button of document.querySelectorAll("nav [data-tab]")) {
-    if (button.dataset.tab === parentTab) {
-      button.setAttribute("aria-current", "page");
-    } else {
-      button.removeAttribute("aria-current");
-    }
+    if (button.dataset.tab === mainTab) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
   }
   if (adminSidebar.classList.contains("is-open")) setAdminMenu(false);
-  if (key !== activeTab && activeTab !== null) window.scrollTo(0, 0);
-  if (updateHistory && key !== activeTab) {
-    const url = new URL(window.location.href);
-    url.searchParams.set("tab", key);
-    history.pushState(null, "", url);
+  syncAdminBack();
+
+  $("customers-list").hidden = customerOpen;
+  if (!customerOpen) {
+    openingCustomer++;
+    customer = null;
+    $("customer-detail").hidden = true;
   }
-  activeTab = key;
-  try { await tab.load?.(); }
-  catch (error) { if (activeTab === key) $("status").textContent = error.message; }
+  $("plans-list-view").hidden = planOpen;
+  $("squad-settings").hidden = planOpen;
+  $("plan-form").hidden = !planOpen || lastPlanFrame !== frame.id;
+  if (previous?.id !== frame.id) window.scrollTo(0, adminScroll.get(frame.id) || 0);
+  try {
+    if (customerOpen) {
+      await showCustomer(frame.record);
+    } else if (planOpen) {
+      if (lastPlanFrame !== frame.id) {
+        if (frame.record && !planCatalog.has(frame.record)) await loadPlans();
+        if (activeFrame !== frame) return;
+        const plan = planCatalog.get(frame.record);
+        if (frame.record && !plan) throw Error("Тариф больше недоступен.");
+        fillPlan(plan);
+        lastPlanFrame = frame.id;
+      }
+    } else {
+      await tab.load?.();
+    }
+  } catch (error) {
+    if (activeFrame === frame) $("status").textContent = error.message;
+  }
 }
-function tabFromLocation() { return new URLSearchParams(window.location.search).get("tab") || "overview"; }
-window.addEventListener("popstate", () => openTab(tabFromLocation(), {updateHistory:false}));
+
+function openTab(requested, {panel = null, record = null, replace = false} = {}) {
+  const tab = canonicalTab(requested);
+  if (!activeFrame || (activeFrame.tab === tab && activeFrame.panel === panel && activeFrame.record === record)) {
+    if (adminSidebar.classList.contains("is-open")) setAdminMenu(false);
+    return;
+  }
+  adminScroll.set(activeFrame.id, window.scrollY);
+  const frame = {tab, panel, record, depth: activeFrame.depth + (replace ? 0 : 1), id: ++frameSequence};
+  const url = new URL(location.href);
+  url.searchParams.set("tab", tab);
+  if (replace) history.replaceState({adminPanel: frame}, "", url);
+  else history.pushState({adminPanel: frame}, "", url);
+  renderAdminFrame(frame);
+}
+
+function goAdminBack(fallback = null) {
+  if (adminSidebar.classList.contains("is-open")) {
+    setAdminMenu(false);
+    return;
+  }
+  if (!activeFrame) return;
+  const parent = fallback || parentFor(activeFrame);
+  if (activeFrame.depth) history.back();
+  else if (parent) openTab(parent, {replace: true});
+  else if (fromProfile) {
+    if (document.referrer && new URL(document.referrer).pathname === "/app") history.back();
+    else location.assign(document.querySelector(".admin-return-link").href);
+  }
+}
+
+$("admin-back").onclick = () => goAdminBack();
+tg?.BackButton?.onClick?.(() => goAdminBack());
+window.addEventListener("popstate", event => {
+  if (!activeFrame || !event.state?.adminPanel) return;
+  adminScroll.set(activeFrame.id, window.scrollY);
+  renderAdminFrame(event.state.adminPanel);
+});
 
 async function start() {
   try {
@@ -892,8 +986,14 @@ async function start() {
     $("loading").hidden = true;
     $("dashboard").hidden = false;
     adminMenuOpen.hidden = false;
-    document.querySelector(".admin-return-link").href = "/app" + window.location.hash;
-    await openTab(tabFromLocation(), {updateHistory:false});
+    document.querySelector(".admin-return-link").href = "/app?section=account" + location.hash;
+    const initial = history.state?.adminPanel || {
+      tab: canonicalTab(new URLSearchParams(location.search).get("tab")), panel: null, record: null, depth: 0, id: 0,
+    };
+    frameSequence = initial.id;
+    history.replaceState({adminPanel: initial}, "");
+    history.scrollRestoration = "manual";
+    await renderAdminFrame(initial);
   } catch (error) {
     $("loading").textContent = error.message;
   }
@@ -902,6 +1002,9 @@ async function start() {
 document.querySelectorAll("[data-tab], [data-open-tab]").forEach(button => {
   button.addEventListener("click", () => openTab(button.dataset.tab || button.dataset.openTab));
 });
+for (const button of document.querySelectorAll("[data-back-tab]")) {
+  button.onclick = () => goAdminBack(button.dataset.backTab);
+}
 $("users-refresh").onclick=()=>loadUsers().catch(e=>$("status").textContent=e.message);$("payments-refresh").onclick=()=>loadPayments().catch(e=>$("status").textContent=e.message);
 $("users-prev").onclick=()=>{userOffset=Math.max(0,userOffset-pageSize);loadUsers()};$("users-next").onclick=()=>{userOffset+=pageSize;loadUsers()};
 $("payments-prev").onclick=()=>{paymentOffset=Math.max(0,paymentOffset-pageSize);loadPayments()};$("payments-next").onclick=()=>{paymentOffset+=pageSize;loadPayments()};
