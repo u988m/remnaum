@@ -145,7 +145,11 @@ async def provision_paid_payment(payment_id: int) -> bool:
                     require_available(selected, await fetch_catalog())
                 now = datetime.now(timezone.utc)
                 new_expiry = max(panel_expiry(panel_user) or now, now) + timedelta(days=total_days)
-                new_description = f"{description} | {marker}".strip(" |")
+                description_parts = [part.strip() for part in description.split("|")]
+                new_description = " | ".join([
+                    part for part in description_parts
+                    if part and not (part.startswith("remnaum-payment:") and part.removeprefix("remnaum-payment:").isdigit())
+                ] + [marker])
                 await panel.update_user(
                     panel_user_id,
                     traffic_limit_bytes=traffic_bytes,
@@ -228,22 +232,22 @@ async def provision_paid_payment(payment_id: int) -> bool:
 
 
 async def get_user_subscription(telegram_id: int) -> dict[str, Any] | None:
-    from sqlalchemy import outerjoin
-
     async with SessionLocal() as session:
         result = await session.execute(
             select(Subscription, SubscriptionDetails)
             .join(User, Subscription.user_id == User.id)
             .outerjoin(SubscriptionDetails, SubscriptionDetails.subscription_id == Subscription.id)
             .where(User.telegram_id == telegram_id)
-            .order_by(Subscription.created_at.desc())
+            .order_by(Subscription.created_at.desc(), Subscription.id.desc())
             .limit(1)
         )
         row = result.first()
         if row is None:
             return None
         subscription, details = row
+        tariff_key = subscription.paid_tariff
         return {
+            "plan_id": int(tariff_key) if tariff_key and tariff_key.isdigit() else None,
             "status": subscription.status,
             "panel_user_id": subscription.panel_user_id,
             "expires_at": subscription.expires_at,

@@ -70,10 +70,12 @@ class PremiumMenuTests(unittest.TestCase):
             ordinary = main_menu(is_admin=False)
             owner = main_menu(is_admin=True)
         self.assertEqual([[button.text for button in row] for row in ordinary.inline_keyboard], [
-            ["🛒 Тарифы", "🔐 Подписка"],
-            ["🧾 Покупки", "🎁 Бонусы"],
-            ["👤 Профиль", "💬 Помощь"],
+            ["✨ Mini App"],
+            ["👤 Профиль", "🔐 Подписка"],
+            ["🛒 Тарифы", "🎁 Бонусы"],
+            ["🧾 Покупки", "💬 Поддержка"],
         ])
+        self.assertEqual(ordinary.inline_keyboard[0][0].web_app.url, "https://miniapp.example.com/app")
         self.assertEqual(owner.inline_keyboard[:-1], ordinary.inline_keyboard)
         self.assertEqual(owner.inline_keyboard[-1][0].text, "⚙️ Админка")
         self.assertEqual(owner.inline_keyboard[-1][0].web_app.url, "https://miniapp.example.com/admin")

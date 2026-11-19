@@ -167,3 +167,37 @@ main {
 @media (min-width: 520px) {
     .plan-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+.profile-card { min-height: 86px; }
+.profile-actions, .profile-action {
+    min-width: 0;
+    border: 1px solid var(--color-border);
+    border-radius: 15px;
+    background: var(--color-surface);
+}
+.profile-action {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 3px 10px;
+    width: 100%;
+    padding: 12px 15px;
+    color: var(--color-text);
+    text-align: left;
+}
+.profile-action strong, .profile-action span { grid-column: 1; overflow-wrap: anywhere; }
+.profile-action span { color: var(--color-muted); font-size: .84rem; }
+.profile-action::after { content: "›"; grid-column: 2; grid-row: 1 / 3; color: var(--color-muted); }
+.profile-actions .profile-action { border: 0; background: transparent; border-radius: 0; }
+.profile-actions .profile-action + .profile-action { border-top: 1px solid var(--color-border); }
+.profile-actions .profile-action:focus-visible { outline-offset: -3px; }
+.admin-entry { border-color: #3b5750; background: #14241f; }
+.admin-entry strong { color: #a4dfca; }
+.renewal-note { padding: 10px 12px; border-left: 2px solid var(--color-border-strong); background: var(--color-input); color: var(--color-muted); }
+.order-cost { display: grid; gap: 6px; margin: 0; }
+.order-cost div { display: flex; justify-content: space-between; gap: 8px; }
+.order-cost dt { color: var(--color-muted); }
+.order-cost dd { margin: 0; flex: none; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+#order-device-total { text-align: right; }
+.record-badge:is([data-status="paid"], [data-status="succeeded"]) { color: #a4dfca; border-color: #34584e; }
+#repeat-plan { justify-self: start; }

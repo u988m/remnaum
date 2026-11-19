@@ -13,7 +13,10 @@ function switchPage(page){
     if(active)button.setAttribute("aria-current","page");else button.removeAttribute("aria-current");
   });
   window.scrollTo({top:0,behavior:"smooth"});
-  if (page === "purchases") loadAccountPanels();
+  if (page === "purchases") loadPurchases();
+  if (page === "devices") loadDevices();
+  if (page === "vpn") refreshSubscription().catch(() => {});
+  if (page === "bonuses") { loadOffers(); loadReferrals(); }
   tg?.HapticFeedback?.selectionChanged?.();
 }
 document.querySelectorAll("[data-page], [data-go-page]").forEach(button=>{
@@ -59,57 +62,85 @@ $("promo-activate").onclick=async()=>{
   }catch(e){$("promo-status").textContent=e.message}
   $("promo-activate").disabled=false;
 };
-async function loadAccountPanels(){
-  const results=await Promise.allSettled([
-    api("/api/v1/webapp/devices"),api("/api/v1/webapp/purchases"),api("/api/v1/webapp/referrals")
-  ]);
-  if(results[0].status==="fulfilled"){
-    const d=results[0].value;
-    const box=$("account-device-info");box.replaceChildren();
-    const headline=document.createElement("p");headline.className="muted";
-    headline.textContent="Зарегистрировано: "+d.items.length+" / "+(d.limit??"—");
+async function loadDevices() {
+  const box = $("account-device-info");
+  try {
+    const data = await api("/api/v1/webapp/devices");
+    box.replaceChildren();
+    const headline = document.createElement("p");
+    headline.className = "muted";
+    headline.textContent = "Зарегистрировано: " + data.items.length + " / " + (data.limit ?? "—");
     box.append(headline);
-    if(!d.items.length){const empty=document.createElement("p");empty.className="muted";empty.textContent="Подключённых устройств пока нет.";box.append(empty)}
-    else{
-      const list=document.createElement("div");list.className="record-list";
-      d.items.forEach((device,index)=>{
-        const record=document.createElement("div");record.className="record-card";
-        const title=document.createElement("strong");title.textContent=(device.name||"Устройство "+(index+1));
-        const details=document.createElement("span");details.className="record-meta";details.textContent=device.platform||"Подключено к подписке";
-        record.append(title,details);list.append(record);
-      });box.append(list);
+    const list = document.createElement("div");
+    list.className = "record-list";
+    for (const [index, device] of data.items.entries()) {
+      const record = document.createElement("div");
+      record.className = "record-card";
+      const title = document.createElement("strong");
+      title.textContent = device.name || "Устройство " + (index + 1);
+      record.append(title);
+      list.append(record);
     }
-  }else $("account-device-info").textContent="Информация об устройствах временно недоступна";
-  if(results[1].status==="fulfilled"){
-    const d=results[1].value,box=$("account-purchase-info");box.replaceChildren();
-    if(!d.items.length){box.textContent="Покупок пока нет."}
-    else{
-      const list=document.createElement("div");list.className="record-list";
-      d.items.forEach(payment=>{
-        const record=document.createElement("div");record.className="record-card";
-        const top=document.createElement("div");top.className="record-heading";
-        const title=document.createElement("strong");title.textContent="Заказ №"+payment.id;
-        const status=document.createElement("span");status.className="record-badge";
-        const statuses={succeeded:"Выдан",paid:"Оплачен, готовится",pending:"Ожидает оплаты",failed:"Не оплачен",cancelled:"Отменён"};
-        status.textContent=statuses[payment.status]||payment.status;
-        status.dataset.status=payment.status;top.append(title,status);
-        const details=document.createElement("span");details.className="record-meta";
-        details.textContent=(payment.currency==="XTR"?payment.amount+" ⭐":(payment.amount/100).toFixed(2)+" "+payment.currency)+" · "+payment.provider;
-        record.append(top,details);list.append(record);
-      });box.append(list);
+    if (!data.items.length) list.textContent = "Подключённых устройств пока нет.";
+    box.append(list);
+  } catch {
+    box.textContent = "Информация об устройствах временно недоступна.";
+  }
+}
+
+async function loadPurchases() {
+  const box = $("account-purchase-info");
+  try {
+    const data = await api("/api/v1/webapp/purchases");
+    purchaseHistory = data.items;
+    renderRenewalActions();
+    box.replaceChildren();
+    const list = document.createElement("div");
+    list.className = "record-list";
+    for (const payment of purchaseHistory) {
+      const record = document.createElement("article");
+      record.className = "record-card";
+      const top = document.createElement("div");
+      top.className = "record-heading";
+      const title = document.createElement("strong");
+      title.textContent = payment.plan_name || "Заказ №" + payment.id;
+      const status = document.createElement("span");
+      status.className = "record-badge";
+      const statuses = {succeeded:"Выдан", paid:"Оплачен", pending:"Ожидает оплаты", failed:"Ошибка", cancelled:"Отменён"};
+      status.textContent = statuses[payment.status] || payment.status;
+      status.dataset.status = payment.status;
+      top.append(title, status);
+      const details = document.createElement("span");
+      details.className = "record-meta";
+      const amount = payment.currency === "XTR" ? payment.amount + " ⭐"
+        : payment.currency === "RUB" ? money(payment.amount) : (payment.amount / 100).toFixed(2) + " " + payment.currency;
+      details.textContent = [amount, providerLabels[payment.provider] || payment.provider,
+        new Date(payment.created_at).toLocaleDateString("ru-RU")].join(" · ");
+      record.append(top, details);
+      list.append(record);
     }
-  }else $("account-purchase-info").textContent="История покупок временно недоступна";
-  if(results[2].status==="fulfilled"){
-    const d=results[2].value;
-    $("account-referral-info").textContent="Приглашено: "+d.count+" · Бонусных дней: "+(d.reward?.days||0)+" · Начислено: "+(d.reward?.earned||0)+(d.rewards_enabled?" · Бонусы применятся при следующем продлении.":" · Программа пока отключена.");
-    if(d.link){
-      $("account-referral-link").href=d.link;
-      $("account-referral-link").textContent=d.link;
-      $("copy-referral").hidden=false;
-      $("share-referral").href="https://t.me/share/url?url="+encodeURIComponent(d.link)+"&text="+encodeURIComponent("Приглашаю тебя в мой VPN-магазин!");
-      $("share-referral").hidden=false;
+    if (!purchaseHistory.length) list.textContent = "Покупок пока нет.";
+    box.append(list);
+  } catch {
+    box.textContent = "История покупок временно недоступна.";
+  }
+}
+
+async function loadReferrals() {
+  try {
+    const d = await api("/api/v1/webapp/referrals");
+    $("account-referral-info").textContent = "Приглашено: " + d.count + " · Бонусных дней: " + (d.reward?.days || 0)
+      + (d.rewards_enabled ? " · Дни добавятся при продлении." : " · Бонусы отключены.");
+    if (d.link) {
+      $("account-referral-link").href = d.link;
+      $("account-referral-link").textContent = d.link;
+      $("copy-referral").hidden = false;
+      $("share-referral").href = "https://t.me/share/url?url=" + encodeURIComponent(d.link);
+      $("share-referral").hidden = false;
     }
-  }else $("account-referral-info").textContent="Реферальная информация временно недоступна";
+  } catch {
+    $("account-referral-info").textContent = "Реферальная информация временно недоступна.";
+  }
 }
 const providerLabels={telegram_stars:"Telegram Stars",yookassa:"ЮKassa",yoomoney:"ЮMoney",cryptopay:"Crypto Pay",platega:"Platega"};
 const rubles = new Intl.NumberFormat("ru-RU", {style: "currency", currency: "RUB", maximumFractionDigits: 2});
@@ -123,20 +154,26 @@ function openCheckoutUrl(url){
   else if (tg?.openLink) tg.openLink(url);
   else window.open(url,"_blank","noopener,noreferrer");
 }
+let availablePlans = new Map();
+let currentSubscription = null;
+let purchaseHistory = [];
 let selectedPlan = null;
 let extraDevices = 0;
 let orderBusy = false;
 let checkout = null;
+let pendingPayment = null;
 
-async function showOrder(plan) {
+async function showOrder(plan, {devices = 0, renewal = false} = {}) {
   if (orderBusy) return;
   const currentCheckout = {};
   checkout = currentCheckout;
   selectedPlan = plan;
-  extraDevices = 0;
+  extraDevices = Math.min(Math.max(0, devices), plan.max_extra_devices);
   $("order-title").textContent = plan.name;
   $("order-specification").textContent = `${plan.days} дней · ${trafficLabel(plan.traffic_gb)}`;
-  $("order-included").textContent = plan.devices_included;
+  $("order-renewal-note").hidden = !renewal;
+  $("order-renewal-note").textContent = currentSubscription?.status === "active"
+    ? `Добавим ${plan.days} дн. к действующей подписке.` : `Новый срок: ${plan.days} дн.`;
   $("order-terms").checked = false;
   updateOrder();
   switchPage("order");
@@ -144,6 +181,11 @@ async function showOrder(plan) {
     const {methods, terms_url: termsUrl} = await api("/api/v1/payment-methods");
     if (checkout !== currentCheckout) return;
     Object.assign(checkout, {methods, termsUrl});
+    extraDevices = Math.min(extraDevices, availableExtraDevices());
+    if (extraDevices < devices) {
+      $("order-renewal-note").hidden = false;
+      $("order-renewal-note").textContent += " Проверьте число устройств: условия тарифа изменились.";
+    }
     updateOrder();
   } catch {
     if (checkout === currentCheckout) $("order-status").textContent =
@@ -151,26 +193,43 @@ async function showOrder(plan) {
   }
 }
 
+function availableExtraDevices() {
+  const methods = checkout.methods;
+  if (!methods) return 0;
+  const external = Object.keys(methods).some(method => method !== "telegram_stars" && methods[method]);
+  return Math.max(
+    external ? (selectedPlan.max_extra_devices_rub ?? selectedPlan.max_extra_devices) : 0,
+    methods.telegram_stars ? (selectedPlan.max_extra_devices_stars ?? selectedPlan.max_extra_devices) : 0,
+  );
+}
+
 function orderTotals() {
   const plan = selectedPlan;
-  const rub = plan.price_rub_minor + extraDevices * (plan.extra_device_price_rub_minor ?? 0);
-  const starTotal = plan.price_stars + extraDevices * (plan.extra_device_price_stars ?? 0);
-  const stars = (extraDevices && plan.extra_device_price_stars == null) || starTotal > 2147483647
-    ? null : starTotal;
+  const rub = extraDevices > (plan.max_extra_devices_rub ?? plan.max_extra_devices)
+    ? 0 : plan.price_rub_minor + extraDevices * (plan.extra_device_price_rub_minor ?? 0);
+  const stars = extraDevices > (plan.max_extra_devices_stars ?? plan.max_extra_devices)
+    || (extraDevices && plan.extra_device_price_stars == null)
+    ? null : plan.price_stars + extraDevices * (plan.extra_device_price_stars ?? 0);
   return {rub, stars};
 }
 
 function updateOrder() {
   const {rub, stars} = orderTotals();
+  const extraLimit = checkout.methods ? availableExtraDevices() : selectedPlan.max_extra_devices;
   $("order-extra").value = String(extraDevices);
+  $("order-device-total").textContent = extraDevices
+    ? `${selectedPlan.devices_included + extraDevices} · ${selectedPlan.devices_included} в тарифе`
+    : String(selectedPlan.devices_included);
+  $("order-unit-row").hidden = extraLimit === 0;
+  $("order-extra-row").hidden = extraLimit === 0;
   $("order-minus").disabled = !checkout.methods || extraDevices === 0;
-  $("order-plus").disabled = !checkout.methods || extraDevices >= selectedPlan.max_extra_devices;
+  $("order-plus").disabled = !checkout.methods || extraDevices >= extraLimit;
   const unit = $("order-unit");
   const prices = [];
   if (selectedPlan.extra_device_price_rub_minor != null) {
     prices.push(money(selectedPlan.extra_device_price_rub_minor));
-    if (selectedPlan.extra_device_price_stars != null) prices.push(selectedPlan.extra_device_price_stars + " ⭐");
   }
+  if (selectedPlan.extra_device_price_stars != null) prices.push(selectedPlan.extra_device_price_stars + " ⭐");
   unit.textContent = prices.join(" / ") || "Недоступно";
   $("order-open-invoice").hidden = true;
   $("order-show-purchases").hidden = true;
@@ -196,14 +255,21 @@ function updateOrder() {
 for (const [button, delta] of [["order-minus", -1], ["order-plus", 1]]) {
   $(button).onclick = () => {
     if (!selectedPlan || orderBusy || !checkout.methods) return;
-    extraDevices = Math.max(0, Math.min(selectedPlan.max_extra_devices, extraDevices + delta));
+    extraDevices = Math.max(0, Math.min(availableExtraDevices(), extraDevices + delta));
     updateOrder();
   };
 }
 
 function updateProviderTotal() {
   const {rub, stars} = orderTotals();
-  $("order-total").textContent = $("order-method").value === "telegram_stars" ? stars + " ⭐" : money(rub);
+  const inStars = $("order-method").value === "telegram_stars";
+  const base = inStars ? selectedPlan.price_stars : selectedPlan.price_rub_minor;
+  const total = inStars ? stars : rub;
+  const format = inStars ? amount => amount + " ⭐" : money;
+  $("order-base-amount").textContent = format(base);
+  $("order-extra-cost").hidden = extraDevices === 0;
+  $("order-extra-amount").textContent = format(total - base);
+  $("order-total").textContent = format(total);
 }
 $("order-method").onchange = updateProviderTotal;
 
@@ -230,8 +296,10 @@ $("order-payment").onsubmit = async event => {
         pending: "Telegram обрабатывает платёж. Статус доступен в покупках.",
       }[status] || "Проверьте статус заказа в покупках.";
       if (status === "paid" || status === "pending") {
+        pendingPayment = invoice.payment_id;
         $("order-payment").hidden = true;
         $("order-show-purchases").hidden = false;
+        refreshAfterPayment();
       }
     } else {
       const invoice = await api("/api/v1/webapp/plans/external/checkout", {...payload, provider});
@@ -246,6 +314,7 @@ $("order-payment").onsubmit = async event => {
       link.hidden = false;
       $("order-payment").hidden = true;
       $("order-show-purchases").hidden = false;
+      pendingPayment = invoice.payment_id;
       $("order-status").textContent = "Счёт №" + invoice.payment_id + " создан.";
       if (tg?.openLink) openCheckoutUrl(invoice.url);
     }
@@ -260,6 +329,8 @@ $("order-payment").onsubmit = async event => {
 async function loadReadyPlans() {
   try {
     const result = await api("/api/v1/plans");
+    availablePlans = new Map(result.items.map(plan => [plan.id, plan]));
+    renderRenewalActions();
     const list = $("plans-list");
     list.replaceChildren();
     for (const plan of result.items) {
@@ -344,10 +415,64 @@ function renderProfile(profile, user) {
   $("profile-id").textContent = user.id;
 }
 
+function renderRenewalActions() {
+  const plan = availablePlans.get(currentSubscription?.plan_id);
+  $("subscription-name").textContent = plan?.name || "Доступ VPN";
+  $("renew-plan").hidden = !plan;
+  $("renew-plan").onclick = plan ? () => showOrder(plan, {
+    devices: (currentSubscription.device_limit ?? plan.devices_included) - plan.devices_included,
+    renewal: true,
+  }) : null;
+  const purchase = purchaseHistory.find(item => item.status === "succeeded" && availablePlans.has(item.plan_id));
+  $("repeat-plan").hidden = !purchase;
+  $("repeat-plan").onclick = purchase
+    ? () => showOrder(availablePlans.get(purchase.plan_id), {devices: purchase.extra_devices || 0, renewal: true})
+    : null;
+}
+
+async function refreshSubscription() {
+  const data = await api("/api/v1/webapp/subscription");
+  renderSubscription(data.subscription);
+}
+
+let refreshingPayment = false;
+async function refreshAfterPayment() {
+  if (!pendingPayment || refreshingPayment) return;
+  refreshingPayment = true;
+  try {
+    const paymentId = pendingPayment;
+    for (const delay of [0, 1000, 2500]) {
+      if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+      if (pendingPayment !== paymentId) return;
+      await loadPurchases();
+      const payment = purchaseHistory.find(item => item.id === paymentId);
+      if (payment?.status === "succeeded") {
+        await refreshSubscription();
+        if (pendingPayment === paymentId) pendingPayment = null;
+        return;
+      }
+      if (["failed", "cancelled"].includes(payment?.status)) {
+        pendingPayment = null;
+        return;
+      }
+    }
+  } catch {
+    // The subscription and purchase screens reload on navigation.
+  } finally {
+    refreshingPayment = false;
+  }
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refreshAfterPayment();
+});
+
 function renderSubscription(subscription) {
+  currentSubscription = subscription;
+  $("no-subscription").hidden = Boolean(subscription);
+  $("subscription").hidden = !subscription;
+  $("sub-link").hidden = true;
+  renderRenewalActions();
   if (!subscription) return;
-  $("no-subscription").hidden = true;
-  $("subscription").hidden = false;
   const status = subscriptionStatuses[subscription.status] || subscription.status;
   $("sub-status").dataset.status = subscription.status;
   $("sub-status").textContent = status;
@@ -372,7 +497,7 @@ async function start() {
     $("loading").hidden = true;
     $("app").hidden = false;
     $("bottom-nav").hidden = false;
-    await Promise.all([loadAccountPanels(), loadOffers(), loadReadyPlans()]);
+    await loadReadyPlans();
   } catch (error) {
     $("loading").hidden = false;
     $("loading").textContent = error.message;

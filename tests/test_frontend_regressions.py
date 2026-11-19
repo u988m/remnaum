@@ -21,7 +21,9 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         mini_js = (STATIC / "miniapp.js").read_text(encoding="utf-8")
         admin_js = (STATIC / "admin.js").read_text(encoding="utf-8")
         self.assertIn('loadReadyPlans()', mini_js)
-        self.assertIn('loadAccountPanels()', mini_js)
+        self.assertIn('loadPurchases()', mini_js)
+        self.assertIn('id="renew-plan"', mini)
+        self.assertIn('id="repeat-plan"', mini)
         self.assertEqual(mini.count('<button type="button" data-page='), 4)
         for symbol in ("i-shop", "i-shield", "i-gift", "i-user"):
             self.assertIn('href="#' + symbol + '"', mini)
@@ -30,7 +32,7 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('data-page="shop" aria-current="page"', mini)
         self.assertIn('id="admin-sidebar"', admin)
         self.assertIn('id="admin-menu-backdrop"', admin)
-        self.assertIn('id="settings-accordion"', admin)
+        self.assertIn('id="configuration-view"', admin)
         self.assertIn('id="revenue-count"', admin)
         self.assertIn('id="stars-count"', admin)
         self.assertIn('id="dashboard-payments"', admin)
@@ -44,8 +46,12 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
                         "payment-telegram_stars-view", "payment-yookassa-view",
                         "payment-yoomoney-view", "payment-cryptopay-view", "payment-platega-view"):
             self.assertIn('id="' + section + '"', admin)
-        for tab in ("referrals", "trial", "pricing", "settings"):
+        for tab in ("referrals", "configuration"):
             self.assertIn('data-tab="' + tab + '"', admin)
+        for tab in ("trial", "pricing", "settings"):
+            self.assertIn('data-open-tab="' + tab + '"', admin)
+        self.assertNotIn('id="payment-diagnostics-refresh"', admin)
+        self.assertNotIn('id="payment-terms-state"', admin)
         self.assertIn('data-provider-form="platega"', admin)
         self.assertIn('"pay-platega"', admin_js)
         self.assertIn('async function savePaymentProvider(provider)', admin_js)

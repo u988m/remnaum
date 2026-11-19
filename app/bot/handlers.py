@@ -51,15 +51,19 @@ def _admin_webapp_url() -> str:
 
 
 def main_menu(*, is_admin: bool = False) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text="🛒 Тарифы", callback_data="menu:plans"),
-         InlineKeyboardButton(text="🔐 Подписка", callback_data="menu:subscription")],
-        [InlineKeyboardButton(text="🧾 Покупки", callback_data="menu:purchases"),
-         InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses")],
+    rows = []
+    has_webapp = settings.webapp_url.startswith("https://")
+    if has_webapp:
+        rows.append([InlineKeyboardButton(text="✨ Mini App", web_app=WebAppInfo(url=settings.webapp_url))])
+    rows.extend([
         [InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile"),
-         InlineKeyboardButton(text="💬 Помощь", callback_data="menu:support")],
-    ]
-    if is_admin and settings.webapp_url.startswith("https://"):
+         InlineKeyboardButton(text="🔐 Подписка", callback_data="menu:subscription")],
+        [InlineKeyboardButton(text="🛒 Тарифы", callback_data="menu:plans"),
+         InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses")],
+        [InlineKeyboardButton(text="🧾 Покупки", callback_data="menu:purchases"),
+         InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support")],
+    ])
+    if is_admin and has_webapp:
         rows.append([InlineKeyboardButton(
             text="⚙️ Админка", web_app=WebAppInfo(url=_admin_webapp_url()),
         )])
@@ -253,12 +257,14 @@ async def fixed_plan_handler(callback: CallbackQuery) -> None:
     ])
     if callback.message:
         details = [_plan_summary(quote)]
-        if quote.unit_minor is not None:
+        if max_extra_devices(plan):
             details.append(f"Устройств добавлено: {extra_devices}")
-            addon_price = f"{quote.unit_minor / 100:.2f} ₽"
+            addon_prices = []
+            if quote.unit_minor is not None:
+                addon_prices.append(f"{quote.unit_minor / 100:.2f} ₽")
             if plan.extra_device_price_stars is not None:
-                addon_price += f" / {plan.extra_device_price_stars} ⭐"
-            details.append(f"За доп. устройство: {addon_price}")
+                addon_prices.append(f"{plan.extra_device_price_stars} ⭐")
+            details.append(f"За доп. устройство: {' / '.join(addon_prices)}")
         details.append(f"\nИтого: <b>{price}</b>")
         await edit_menu_message(callback.message, "\n".join(details), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
@@ -602,6 +608,14 @@ async def subscription_handler(callback: CallbackQuery) -> None:
         f"Устройства: <b>{subscription['device_limit'] or '—'}</b>"
     )
     url = subscription.get("subscription_url")
+    if subscription.get("plan_id") is not None:
+        plan = await get_plan(subscription["plan_id"])
+        if plan and plan.is_active:
+            extras = max(0, (subscription.get("device_limit") or plan.device_limit) - plan.device_limit)
+            extras = min(extras, max_extra_devices(plan))
+            rows.insert(0, [InlineKeyboardButton(
+                text="🔄 Продлить", callback_data=f"plan:select:{plan.id}:{extras}",
+            )])
     if isinstance(url, str) and url.startswith("https://"):
         rows.insert(0, [InlineKeyboardButton(text="🔗 Подключить VPN", url=url)])
     await edit_menu_message(callback.message, details, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))

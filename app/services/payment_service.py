@@ -126,7 +126,7 @@ async def create_payment_for_user(
         plan, quote = await _payment_quote(session, user.id, draft_quote, plan_id, extra_devices, revision)
         amount_minor = quote.amount_minor
         if amount_minor <= 0:
-            raise ValueError("Для этого заказа не задана цена в рублях.")
+            raise ValueError("Оплата в рублях недоступна для выбранного числа устройств.")
 
         if provider_name == "yoomoney" and quote.currency.upper() != "RUB":
             raise ValueError("Set TARIFF_CURRENCY=RUB to enable YooMoney wallet payments")
