@@ -1,0 +1,14 @@
+"""Ensure migration files are discoverable and the initial revision exists."""
+import unittest
+from pathlib import Path
+
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+
+
+class MigrationRevisionTests(unittest.TestCase):
+    def test_alembic_has_single_baseline_head(self):
+        config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+        script = ScriptDirectory.from_config(config)
+        self.assertEqual(script.get_heads(), ["0001_legacy_baseline"])
+        self.assertEqual(script.get_revision("0001_legacy_baseline").down_revision, None)
