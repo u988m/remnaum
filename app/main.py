@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.bot.runtime import bot, dispatcher, setup_bot
 from app.config import settings
+from app.version import __version__
 from app.db.session import engine, initialize_schema
 from app.services.squads import refresh_catalog
 from app.services.payment_recovery import run_payment_recovery_forever
@@ -97,7 +98,7 @@ async def lifespan(_: FastAPI):
         await engine.dispose()
 
 
-app = FastAPI(title=settings.app_name, version="0.0.1", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version=__version__, lifespan=lifespan)
 app.include_router(api_router)
 app.include_router(store_router)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "static"), name="static")

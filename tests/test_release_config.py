@@ -1,13 +1,9 @@
 import unittest
-from app.main import app
 from app.services.plans import validate_plan
 from app.services.store_profile import validate_profile
 
 
 class ReleaseConfigTests(unittest.TestCase):
-    def test_first_release_version(self):
-        self.assertEqual(app.version, "0.0.1")
-
     def test_ready_plan_validation(self):
         plan = {
             "title": "Starter", "description": "", "duration_days": 30,
