@@ -77,6 +77,7 @@ jobs:
             sleep 2
           done
           docker compose exec -T app python -c "import urllib.request; assert urllib.request.urlopen('http://localhost:8080/health').status == 200"
+          docker compose exec -T app python -c "import urllib.request; assert urllib.request.urlopen('http://localhost:8080/ready').status == 200"
           if [ "${{ matrix.mode }}" != standalone ]; then
             curl -fsS http://127.0.0.1:18080/health
             test "$(docker inspect -f '{{.State.Running}}' simulated-panel-proxy)" = "true"
