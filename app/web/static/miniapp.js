@@ -1,13 +1,11 @@
 const tg = window.Telegram?.WebApp;
 tg?.ready?.();
 tg?.expand?.();
+if (tg?.isVersionAtLeast?.("6.1") ?? true) tg?.BackButton?.hide?.();
 const $=id=>document.getElementById(id);
 const orderDialog = $("page-order");
 const deviceEditor = $("device-editor");
-const nativeBack = tg?.BackButton?.onClick && (tg.isVersionAtLeast?.("6.1") ?? true) ? tg.BackButton : null;
-let nativeBackAvailable = false;
 let awaitingBack = false;
-$("order-close").hidden = Boolean(nativeBack);
 const rootPage = new URLSearchParams(location.search).get("section") === "account" ? "account" : "vpn";
 const primaryPages = new Set(["vpn", "bonuses", "devices", "account"]);
 const orderScreens = new Map();
@@ -27,7 +25,7 @@ function renderScreen(next) {
   const visiblePage = order ? next.origin : next.page;
   const topbar = document.querySelector(".topbar");
   topbar.hidden = visiblePage === "vpn";
-  $("shop-back").hidden = Boolean(nativeBack) || !next.depth;
+  $("shop-back").hidden = !next.depth;
   if (deviceEditor.open && next.page !== "devices") deviceEditor.close();
   for (const panel of document.querySelectorAll("[data-page-panel]")) {
     panel.hidden = panel.dataset.pagePanel !== visiblePage;
@@ -52,7 +50,6 @@ function renderScreen(next) {
       if (next.page === "bonuses") { loadOffers(); loadReferrals(); }
     }
   }
-  syncNativeBack();
 }
 
 function switchPage(page, order = null) {
@@ -66,21 +63,13 @@ function switchPage(page, order = null) {
     orderScreens.set(next.id, order);
   }
   history.pushState({miniShop: next}, "");
-  nativeBackAvailable = true;
   renderScreen(next);
   tg?.HapticFeedback?.selectionChanged?.();
-}
-
-function syncNativeBack() {
-  if (nativeBackAvailable || deviceEditor.open) nativeBack?.show?.();
-  else nativeBack?.hide?.();
 }
 
 function goBack() {
   if (!screen.depth || awaitingBack) return;
   awaitingBack = true;
-  nativeBackAvailable = false;
-  syncNativeBack();
   history.back();
 }
 
@@ -90,19 +79,9 @@ for (const button of document.querySelectorAll("[data-page], [data-go-page]")) {
 $("shop-back").onclick = $("order-close").onclick = goBack;
 orderDialog.addEventListener("cancel", event => { event.preventDefault(); goBack(); });
 orderDialog.addEventListener("click", event => { if (event.target === orderDialog) goBack(); });
-nativeBack?.onClick(() => {
-  if (deviceEditor.open) {
-    nativeBackAvailable = false;
-    deviceEditor.close();
-    syncNativeBack();
-  } else if (nativeBackAvailable) {
-    goBack();
-  }
-});
 window.addEventListener("popstate", event => {
   awaitingBack = false;
   if (!navigationReady || !event.state?.miniShop) return;
-  nativeBackAvailable = false;
   if (!orderDialog.open) scrollPositions.set(screen.id, window.scrollY);
   renderScreen(event.state.miniShop);
 });
@@ -177,13 +156,11 @@ function openDeviceEditor(device, remove) {
   $("device-editor-submit").className = remove ? "secondary-btn danger-btn" : "primary-btn";
   deviceEditor.showModal();
   if (!remove) $("device-name-input").focus();
-  syncNativeBack();
 }
 
 $("device-editor-cancel").onclick = () => deviceEditor.close();
 deviceEditor.addEventListener("close", () => {
   deviceAction = null;
-  syncNativeBack();
 });
 
 $("device-form").onsubmit = async event => {
