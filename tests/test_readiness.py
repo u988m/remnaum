@@ -1,6 +1,6 @@
 """Readiness endpoint reports DB/Redis failures without exposing secrets."""
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
 from app.main import readiness
@@ -15,7 +15,7 @@ class ReadinessTests(unittest.IsolatedAsyncioTestCase):
     async def test_healthy_dependencies(self):
         connection = self._connection()
         redis = AsyncMock()
-        with patch("app.main.engine.connect", return_value=connection), \
+        with patch("app.main.engine", new=MagicMock(connect=MagicMock(return_value=connection))), \
              patch("app.main.aioredis.from_url", return_value=redis):
             self.assertEqual(await readiness(), {"status": "ready", "service": "remnaum"})
         redis.ping.assert_awaited_once()
@@ -24,7 +24,7 @@ class ReadinessTests(unittest.IsolatedAsyncioTestCase):
     async def test_database_failure_is_503(self):
         connection = self._connection()
         connection.execute.side_effect = OSError("database offline")
-        with patch("app.main.engine.connect", return_value=connection):
+        with patch("app.main.engine", new=MagicMock(connect=MagicMock(return_value=connection))):
             with self.assertRaises(HTTPException) as context:
                 await readiness()
         self.assertEqual(context.exception.status_code, 503)
@@ -34,7 +34,7 @@ class ReadinessTests(unittest.IsolatedAsyncioTestCase):
         connection = self._connection()
         redis = AsyncMock()
         redis.ping.side_effect = OSError("redis offline")
-        with patch("app.main.engine.connect", return_value=connection), \
+        with patch("app.main.engine", new=MagicMock(connect=MagicMock(return_value=connection))), \
              patch("app.main.aioredis.from_url", return_value=redis):
             with self.assertRaises(HTTPException) as context:
                 await readiness()
