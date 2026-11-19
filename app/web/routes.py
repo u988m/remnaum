@@ -313,41 +313,8 @@ async def webapp_accept_terms(data: WebAppTermsAcceptance, x_telegram_init_data:
 
 @router.post("/api/v1/webapp/checkout")
 async def webapp_create_checkout(data: WebAppCheckout, x_telegram_init_data: str | None = Header(default=None)):
-    if not x_telegram_init_data:
-        raise HTTPException(status_code=401, detail="Telegram authentication is required")
-    identity = await _webapp_user(x_telegram_init_data)
-    if not await has_accepted_current_terms(int(identity["id"])):
-        raise HTTPException(status_code=403, detail="Accept the current terms before checkout")
-    if not await is_payment_method_enabled("telegram_stars"):
-        raise HTTPException(status_code=403, detail="Telegram Stars checkout is disabled")
-    if min(data.days, data.traffic, data.devices) < 1:
-        raise HTTPException(status_code=422, detail="Tariff values must be positive")
-    if not settings.tariff_min_days <= data.days <= settings.tariff_max_days:
-        raise HTTPException(status_code=422, detail="Duration is outside configured limits")
-    if not settings.tariff_min_traffic_gb <= data.traffic <= settings.tariff_max_traffic_gb:
-        raise HTTPException(status_code=422, detail="Traffic is outside configured limits")
-    if not settings.tariff_min_devices <= data.devices <= settings.tariff_max_devices:
-        raise HTTPException(status_code=422, detail="Device count is outside configured limits")
-    await set_tariff_draft(int(identity["id"]), identity.get("username"), data.days, data.traffic, data.devices)
-    try:
-        payment, stars = await create_stars_payment_for_user(int(identity["id"]))
-    except (ValueError, RuntimeError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if bot is None:
-        raise HTTPException(status_code=503, detail="Telegram bot is not initialized")
-    try:
-        invoice_url = await bot.create_invoice_link(
-            title=(await get_store_profile())["name"][:28] + " VPN",
-            description=f"VPN-подписка: {data.days} дней, {data.traffic} ГБ, {data.devices} устройств",
-            payload=f"remnaum:{payment.id}",
-            provider_token="",
-            currency="XTR",
-            prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="Could not create Telegram Stars invoice") from exc
-    return {"payment_id": payment.id, "stars": stars, "invoice_url": invoice_url}
-
+    await _webapp_user(x_telegram_init_data or "")
+    raise HTTPException(status_code=410, detail="Конструктор отключён. Выберите готовый тариф.")
 
 
 async def _require_telegram_admin(init_data: str | None) -> dict:
@@ -1017,19 +984,8 @@ async def _external_checkout(telegram_id: int, provider: str, **plan_options):
 async def webapp_external_checkout(
     data: WebAppExternalCheckout, x_telegram_init_data: str | None = Header(default=None),
 ):
-    if not x_telegram_init_data:
-        raise HTTPException(status_code=401, detail="Telegram authentication is required")
-    identity = await _webapp_user(x_telegram_init_data)
-    _validate_external_provider(data.provider)
-    telegram_id = int(identity["id"])
-    if not await has_accepted_current_terms(telegram_id):
-        raise HTTPException(status_code=403, detail="Accept the current terms before checkout")
-    if not (settings.tariff_min_days <= data.days <= settings.tariff_max_days
-            and settings.tariff_min_traffic_gb <= data.traffic <= settings.tariff_max_traffic_gb
-            and settings.tariff_min_devices <= data.devices <= settings.tariff_max_devices):
-        raise HTTPException(status_code=422, detail="Tariff values outside allowed range")
-    await set_tariff_draft(telegram_id, identity.get("username"), data.days, data.traffic, data.devices)
-    return await _external_checkout(telegram_id, data.provider)
+    await _webapp_user(x_telegram_init_data or "")
+    raise HTTPException(status_code=410, detail="Конструктор отключён. Выберите готовый тариф.")
 
 
 @router.post("/api/v1/webapp/plans/external/checkout")

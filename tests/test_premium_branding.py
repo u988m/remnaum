@@ -109,15 +109,6 @@ class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
         markup = message.answer_photo.call_args.kwargs["reply_markup"]
         self.assertEqual(len(markup.inline_keyboard[0]), 2)
 
-    async def test_photo_menu_callback_opens_section_without_edit_text(self):
-        from app.bot.handlers import edit_menu_message
-        message = SimpleNamespace(photo=[object()], answer=AsyncMock(), delete=AsyncMock(), edit_text=AsyncMock())
-        markup = main_menu(is_admin=False)
-        await edit_menu_message(message, "Доступные тарифы", reply_markup=markup)
-        message.answer.assert_awaited_once_with("Доступные тарифы", reply_markup=markup)
-        message.delete.assert_awaited_once()
-        message.edit_text.assert_not_awaited()
-
     async def test_text_menu_callback_edits_existing_message(self):
         from app.bot.handlers import edit_menu_message
         message = SimpleNamespace(edit_text=AsyncMock())
@@ -135,6 +126,43 @@ class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
             await home_handler(callback)
         message.edit_caption.assert_awaited_once()
         message.edit_text.assert_not_awaited()
+
+    async def test_photo_section_stays_photo_with_banner(self):
+        from app.bot.handlers import edit_menu_message
+        message = SimpleNamespace(photo=[object()], edit_caption=AsyncMock(), answer=AsyncMock(), delete=AsyncMock())
+        markup = main_menu()
+        await edit_menu_message(message, "Ваши покупки", reply_markup=markup)
+        message.edit_caption.assert_awaited_once_with(caption="Ваши покупки", reply_markup=markup)
+        message.answer.assert_not_awaited()
+        message.delete.assert_not_awaited()
+
+    async def test_text_callback_restores_banner_for_all_sections(self):
+        from app.bot.handlers import edit_menu_message
+        message = SimpleNamespace(photo=None, answer_photo=AsyncMock(), delete=AsyncMock(), edit_text=AsyncMock())
+        with patch("app.bot.handlers.welcome_image_path", return_value=Path("/tmp/banner.jpg")):
+            await edit_menu_message(message, "Бонусы", reply_markup=main_menu())
+        message.answer_photo.assert_awaited_once()
+        self.assertEqual(message.answer_photo.call_args.kwargs["caption"], "Бонусы")
+        message.delete.assert_awaited_once()
+        message.edit_text.assert_not_awaited()
+
+    async def test_long_photo_sections_fit_caption_limit(self):
+        from app.bot.handlers import edit_menu_message
+        message = SimpleNamespace(photo=[object()], edit_caption=AsyncMock())
+        await edit_menu_message(message, "<b>Покупки</b> " * 150, reply_markup=main_menu())
+        caption = message.edit_caption.call_args.kwargs["caption"]
+        self.assertLessEqual(len(caption), 1024)
+        self.assertIn("Mini App", caption)
+
+    async def test_legacy_builder_not_available_to_customers(self):
+        from app.bot.handlers import main_menu, builder_handler
+        self.assertFalse(any(
+            button.callback_data == "menu:builder"
+            for row in main_menu().inline_keyboard for button in row
+        ))
+        callback = SimpleNamespace(answer=AsyncMock())
+        await builder_handler(callback)
+        callback.answer.assert_awaited_once()
 
     async def test_ready_plan_review_binds_price_and_device_count_to_confirmation(self):
         from app.bot.handlers import fixed_plan_handler
