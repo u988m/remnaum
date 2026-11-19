@@ -161,9 +161,12 @@ class YooMoneyProvider(PaymentProvider):
             raise ValueError("Invalid YooMoney payment label")
         if fields.get("currency") != "643" or fields.get("codepro") == "true" or fields.get("unaccepted") == "true":
             raise ValueError("YooMoney payment is not acceptable")
+        operation_id = fields.get("operation_id", "")
+        if not operation_id:
+            raise ValueError("Missing YooMoney operation ID")
         return VerifiedPayment(
             local_payment_id=int(label[8:]),
-            provider_payment_id=fields.get("operation_id", ""),
+            provider_payment_id=operation_id,
             amount_minor=_minor_amount(fields.get("withdraw_amount", "0")),
             currency="RUB",
         )
@@ -232,6 +235,8 @@ class CryptoPayProvider(PaymentProvider):
         if invoice.get("status") != "paid" or not str(local_id or "").isdigit():
             raise ValueError("Crypto Pay invoice is not paid or has no local reference")
         currency = str(invoice.get("fiat") or "").upper()
+        if invoice.get("currency_type") != "fiat" or not currency or not invoice.get("invoice_id"):
+            raise ValueError("Invalid Crypto Pay fiat invoice")
         return VerifiedPayment(
             local_payment_id=int(local_id),
             provider_payment_id=str(invoice.get("invoice_id", "")),

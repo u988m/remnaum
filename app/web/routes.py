@@ -49,6 +49,30 @@ async def admin_get_payment_settings(x_telegram_init_data: str | None = Header(d
     return public_payment_settings(methods, credentials)
 
 
+@router.get("/admin/api/payment-diagnostics")
+async def admin_payment_diagnostics(x_telegram_init_data: str | None = Header(default=None)):
+    """Configuration-only readiness; no token, password or network probe is exposed."""
+    await _require_telegram_admin(x_telegram_init_data)
+    methods, credentials = await get_store_payment_settings()
+    configured = public_payment_settings(methods, credentials)["configured"]
+    base = settings.public_base_url.rstrip("/")
+    paths = {
+        "yookassa": "/webhooks/payments/yookassa",
+        "yoomoney": "/webhooks/payments/yoomoney",
+        "cryptopay": "/webhooks/payments/cryptopay",
+    }
+    return {
+        "providers": {
+            name: {
+                "enabled": bool(methods.get(name)),
+                "configured": bool(configured.get(name) and (bot is not None if name == "telegram_stars" else True)),
+                "webhook_url": base + paths[name] if name in paths and base.startswith("https://") else None,
+            } for name in ("telegram_stars", "yookassa", "yoomoney", "cryptopay")
+        },
+        "verification": "configuration_only",
+    }
+
+
 @router.put("/admin/api/payment-settings")
 async def admin_update_payment_settings(
     data: PaymentSettingsUpdate,
@@ -69,7 +93,7 @@ async def public_payment_methods():
 
 
 
-from app.services.tariffs import get_store_tariff_pricing, update_store_tariff_pricing, set_tariff_draft
+from app.services.tariffs import get_store_tariff_pricing, update_store_tariff_pricing
 
 class TariffPricingUpdate(BaseModel):
     pricing: dict[str, int | str] = Field(default_factory=dict)
@@ -216,17 +240,22 @@ from app.db.models import Subscription, SubscriptionDetails, TermsAcceptance, Us
 from app.db.session import SessionLocal
 from app.services.payment_service import accept_current_terms, create_stars_payment_for_user, has_accepted_current_terms
 from app.services.subscriptions import get_user_subscription
-from app.services.tariffs import calculate_store_stars_price, get_store_tariff_pricing, set_tariff_draft
 from app.services.telegram_webapp import validate_telegram_init_data
 from app.config import settings
 from app.bot.runtime import bot
 
 
-async def _webapp_user(init_data: str):
+def _require_telegram_identity(init_data: str | None) -> dict:
+    if not init_data:
+        raise HTTPException(status_code=401, detail="Telegram authentication is required")
     try:
-        identity = validate_telegram_init_data(init_data)
+        return validate_telegram_init_data(init_data)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+async def _webapp_user(init_data: str):
+    identity = _require_telegram_identity(init_data)
     telegram_id = int(identity["id"])
     async with SessionLocal() as session:
         statement = pg_insert(User).values(
@@ -313,50 +342,12 @@ async def webapp_accept_terms(data: WebAppTermsAcceptance, x_telegram_init_data:
 
 @router.post("/api/v1/webapp/checkout")
 async def webapp_create_checkout(data: WebAppCheckout, x_telegram_init_data: str | None = Header(default=None)):
-    if not x_telegram_init_data:
-        raise HTTPException(status_code=401, detail="Telegram authentication is required")
-    identity = await _webapp_user(x_telegram_init_data)
-    if not await has_accepted_current_terms(int(identity["id"])):
-        raise HTTPException(status_code=403, detail="Accept the current terms before checkout")
-    if not await is_payment_method_enabled("telegram_stars"):
-        raise HTTPException(status_code=403, detail="Telegram Stars checkout is disabled")
-    if min(data.days, data.traffic, data.devices) < 1:
-        raise HTTPException(status_code=422, detail="Tariff values must be positive")
-    if not settings.tariff_min_days <= data.days <= settings.tariff_max_days:
-        raise HTTPException(status_code=422, detail="Duration is outside configured limits")
-    if not settings.tariff_min_traffic_gb <= data.traffic <= settings.tariff_max_traffic_gb:
-        raise HTTPException(status_code=422, detail="Traffic is outside configured limits")
-    if not settings.tariff_min_devices <= data.devices <= settings.tariff_max_devices:
-        raise HTTPException(status_code=422, detail="Device count is outside configured limits")
-    await set_tariff_draft(int(identity["id"]), identity.get("username"), data.days, data.traffic, data.devices)
-    try:
-        payment, stars = await create_stars_payment_for_user(int(identity["id"]))
-    except (ValueError, RuntimeError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if bot is None:
-        raise HTTPException(status_code=503, detail="Telegram bot is not initialized")
-    try:
-        invoice_url = await bot.create_invoice_link(
-            title=(await get_store_profile())["name"][:28] + " VPN",
-            description=f"VPN-подписка: {data.days} дней, {data.traffic} ГБ, {data.devices} устройств",
-            payload=f"remnaum:{payment.id}",
-            provider_token="",
-            currency="XTR",
-            prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="Could not create Telegram Stars invoice") from exc
-    return {"payment_id": payment.id, "stars": stars, "invoice_url": invoice_url}
-
+    _require_telegram_identity(x_telegram_init_data)
+    raise HTTPException(status_code=410, detail="Конструктор отключён. Выберите готовый тариф.")
 
 
 async def _require_telegram_admin(init_data: str | None) -> dict:
-    if not init_data:
-        raise HTTPException(status_code=401, detail="Telegram authentication is required")
-    try:
-        identity = validate_telegram_init_data(init_data)
-    except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    identity = _require_telegram_identity(init_data)
     telegram_id = int(identity["id"])
     if telegram_id not in settings.admin_id_set:
         raise HTTPException(status_code=403, detail="Administrator access denied")
@@ -376,12 +367,21 @@ async def admin_overview(x_telegram_init_data: str | None = Header(default=None)
         active = await session.scalar(select(func.count(Subscription.id)).where(Subscription.status == "active")) or 0
         succeeded = await session.scalar(select(func.count(Payment.id)).where(Payment.status == "succeeded")) or 0
         pending = await session.scalar(select(func.count(Payment.id)).where(Payment.status == "pending")) or 0
+        paid_statuses = ("paid", "succeeded")
+        revenue = await session.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(
+            Payment.currency == "RUB", Payment.status.in_(paid_statuses),
+        )) or 0
+        stars_received = await session.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(
+            Payment.currency == "XTR", Payment.status.in_(paid_statuses),
+        )) or 0
     return {
         "admin_name": identity.get("first_name", ""),
         "users": users,
         "active_subscriptions": active,
         "successful_payments": succeeded,
         "pending_payments": pending,
+        "revenue_rub_minor": int(revenue),
+        "stars_received": int(stars_received),
     }
 
 
@@ -1017,19 +1017,8 @@ async def _external_checkout(telegram_id: int, provider: str, **plan_options):
 async def webapp_external_checkout(
     data: WebAppExternalCheckout, x_telegram_init_data: str | None = Header(default=None),
 ):
-    if not x_telegram_init_data:
-        raise HTTPException(status_code=401, detail="Telegram authentication is required")
-    identity = await _webapp_user(x_telegram_init_data)
-    _validate_external_provider(data.provider)
-    telegram_id = int(identity["id"])
-    if not await has_accepted_current_terms(telegram_id):
-        raise HTTPException(status_code=403, detail="Accept the current terms before checkout")
-    if not (settings.tariff_min_days <= data.days <= settings.tariff_max_days
-            and settings.tariff_min_traffic_gb <= data.traffic <= settings.tariff_max_traffic_gb
-            and settings.tariff_min_devices <= data.devices <= settings.tariff_max_devices):
-        raise HTTPException(status_code=422, detail="Tariff values outside allowed range")
-    await set_tariff_draft(telegram_id, identity.get("username"), data.days, data.traffic, data.devices)
-    return await _external_checkout(telegram_id, data.provider)
+    _require_telegram_identity(x_telegram_init_data)
+    raise HTTPException(status_code=410, detail="Конструктор отключён. Выберите готовый тариф.")
 
 
 @router.post("/api/v1/webapp/plans/external/checkout")

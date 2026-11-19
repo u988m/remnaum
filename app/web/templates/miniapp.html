@@ -23,10 +23,10 @@
       <div class="hero">
         <div class="hero-orbit" aria-hidden="true"><span></span></div>
         <div class="hero-content">
-          <span class="eyebrow">VPN · ПО ВАШИМ ПРАВИЛАМ</span>
+          <span class="eyebrow" id="hero-eyebrow">VPN · ПРОСТО И НАДЁЖНО</span>
           <h1 id="store-tagline">Ваш VPN — ваши правила</h1>
-          <p id="welcome" class="muted">Выберите подписку и подключите свои устройства.</p>
-          <button class="primary-btn" type="button" data-go-page="shop">Выбрать тариф <span aria-hidden="true">→</span></button>
+          <p id="welcome" class="muted">Подключайтесь на своих условиях.</p>
+          <button class="primary-btn" id="hero-action" type="button" data-go-page="shop">Выбрать тариф <span aria-hidden="true">→</span></button>
         </div>
       </div>
       <button class="home-subscription" type="button" data-go-page="vpn">
@@ -36,28 +36,14 @@
       </button>
       <div class="home-links home-actions">
         <button class="quick-action" type="button" data-go-page="devices"><span class="quick-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-device"/></svg></span><strong>Устройства</strong><span aria-hidden="true">↗</span></button>
-        <button class="quick-action" type="button" data-go-page="guide"><span class="quick-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-book"/></svg></span><strong>Подключение</strong><span aria-hidden="true">↗</span></button>
-        <button class="quick-action" type="button" data-go-page="bonuses"><span class="quick-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-gift"/></svg></span><strong>Бонусы</strong><span aria-hidden="true">↗</span></button>
-        <button class="quick-action" type="button" data-go-page="support"><span class="quick-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-support"/></svg></span><strong>Поддержка</strong><span aria-hidden="true">↗</span></button>
+        <button class="quick-action" type="button" data-go-page="guide"><span class="quick-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-book"/></svg></span><strong>Как подключиться</strong><span aria-hidden="true">↗</span></button>
       </div>
     </section>
     <section class="page" id="page-shop" data-page-panel="shop" hidden>
       <h1>Тарифы</h1>
       <div id="plans-list" class="plan-list" aria-label="Готовые тарифы"></div>
       <p class="panel muted" id="plans-status" role="status">Загружаем тарифы…</p>
-      <details class="panel" id="custom-plan">
-        <summary>Собрать свой тариф</summary>
-        <div class="field-grid">
-          <label class="form-field">Срок подписки<select id="days"></select></label>
-          <label class="form-field">Трафик<select id="traffic"></select></label>
-          <label class="form-field">Устройства<select id="devices"></select></label>
-          <label class="form-field">Способ оплаты<select id="checkout-method"></select></label>
-        </div>
-        <div class="checkout-summary"><span id="price-label">Стоимость</span><strong id="stars-price">—</strong></div>
-        <label class="check"><input id="terms" type="checkbox"><span>Принимаю <a id="terms-link" target="_blank" rel="noopener">условия продажи</a></span></label>
-        <button id="buy" class="primary-btn full" type="button" disabled>Продолжить</button>
-        <p id="status" class="status" role="status"></p>
-      </details>
+
     </section>
     <section class="page" id="page-order" data-page-panel="order" hidden>
       <button class="text-btn" type="button" data-go-page="shop">← К тарифам</button>

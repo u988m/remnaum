@@ -1,5 +1,6 @@
 import logging
-from html import escape
+from html import escape, unescape
+import re
 from urllib.parse import urlsplit
 
 from aiogram import F, Router
@@ -47,14 +48,14 @@ def _admin_webapp_url() -> str:
 def main_menu(*, is_admin: bool = False) -> InlineKeyboardMarkup:
     """Short, balanced two-column navigation instead of a wall of buttons."""
     rows = [
-        [InlineKeyboardButton(text="🛒 Купить VPN", callback_data="menu:plans"),
-         InlineKeyboardButton(text="🔐 Моя подписка", callback_data="menu:subscription")],
+        [InlineKeyboardButton(text="🛒 Тарифы", callback_data="menu:plans"),
+         InlineKeyboardButton(text="🔐 Подписка", callback_data="menu:subscription")],
         [InlineKeyboardButton(text="📱 Устройства", callback_data="menu:devices"),
-         InlineKeyboardButton(text="💳 Мои покупки", callback_data="menu:purchases")],
+         InlineKeyboardButton(text="🧾 Покупки", callback_data="menu:purchases")],
         [InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile"),
          InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses")],
-        [InlineKeyboardButton(text="📚 Как подключиться", callback_data="menu:connect"),
-         InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support")],
+        [InlineKeyboardButton(text="📖 Инструкция", callback_data="menu:connect"),
+         InlineKeyboardButton(text="💬 Помощь", callback_data="menu:support")],
     ]
     if settings.webapp_url.startswith("https://"):
         rows.append([InlineKeyboardButton(
@@ -62,13 +63,13 @@ def main_menu(*, is_admin: bool = False) -> InlineKeyboardMarkup:
         )])
     if is_admin and settings.webapp_url.startswith("https://"):
         rows.append([InlineKeyboardButton(
-            text="⚙️ Управление магазином", web_app=WebAppInfo(url=_admin_webapp_url()),
+            text="⚙️ Админка", web_app=WebAppInfo(url=_admin_webapp_url()),
         )])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def back_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")
+        InlineKeyboardButton(text="← Меню", callback_data="menu:home")
     ]])
 
 
@@ -87,7 +88,7 @@ def tariff_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="+ 1 устройство", callback_data="tariff:devices:1"),
         ],
         [InlineKeyboardButton(text="💳 Перейти к оплате", callback_data="payment:choose")],
-        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
+        [InlineKeyboardButton(text="← Меню", callback_data="menu:home")],
     ])
 
 
@@ -135,22 +136,42 @@ async def send_home_menu(message: Message, telegram_id: int, profile: dict, *, i
     image = welcome_image_path()
     if image is not None:
         try:
-            await message.answer_photo(FSInputFile(image), caption=caption, reply_markup=keyboard)
+            await message.answer_photo(FSInputFile(image), caption=_menu_caption(caption), reply_markup=keyboard)
             return
         except Exception as exc:
             logger.warning("Could not send welcome photo: %s", type(exc).__name__)
     await message.answer(caption, reply_markup=keyboard)
 
 
+def _menu_caption(text: str) -> str:
+    plain = unescape(re.sub(r"<[^>]+>", "", text))
+    encoded = plain.encode("utf-16-le")
+    if len(encoded) <= 2 * 1024:
+        return text
+    suffix = "\n\n… Остальное смотрите в Mini App."
+    shortened = encoded[:2 * (1024 - len(suffix))].decode("utf-16-le", errors="ignore")
+    return escape(shortened.rstrip(), quote=False) + suffix
+
+
 async def edit_menu_message(message: Message, text: str, *, reply_markup: InlineKeyboardMarkup | None = None) -> None:
-    """Photo messages cannot be edited with edit_text; replace them safely."""
+    """Keep the banner attached when navigating the menu."""
     if getattr(message, "photo", None):
-        await message.answer(text, reply_markup=reply_markup)
-        try:
-            await message.delete()
-        except Exception as exc:
-            logger.warning("Could not remove old welcome photo: %s", type(exc).__name__)
+        await message.edit_caption(caption=_menu_caption(text), reply_markup=reply_markup)
     else:
+        image = welcome_image_path()
+        if image is not None:
+            try:
+                await message.answer_photo(
+                    FSInputFile(image), caption=_menu_caption(text), reply_markup=reply_markup,
+                )
+            except Exception as exc:
+                logger.warning("Could not open menu with banner: %s", type(exc).__name__)
+            else:
+                try:
+                    await message.delete()
+                except Exception as exc:
+                    logger.warning("Could not remove previous menu: %s", type(exc).__name__)
+                return
         await message.edit_text(text, reply_markup=reply_markup)
 
 
@@ -224,7 +245,7 @@ async def bonuses_handler(callback: CallbackQuery) -> None:
                 [InlineKeyboardButton(text="🤝 Пригласить друга", callback_data="menu:referral")],
                 [InlineKeyboardButton(text="🎟 Активировать промокод", callback_data="menu:promo")],
                 [InlineKeyboardButton(text="✨ Пробный доступ", callback_data="menu:trial")],
-                [InlineKeyboardButton(text="← Главное меню", callback_data="menu:home")],
+                [InlineKeyboardButton(text="← Меню", callback_data="menu:home")],
             ]),
         )
 
@@ -239,21 +260,18 @@ async def plans_handler(callback: CallbackQuery) -> None:
             text=f"{plan['title']} · {plan['price_rub']:g} ₽" if plan["price_rub_minor"] else f"{plan['title']} · {plan['price_stars']} ⭐",
             callback_data=f"plan:select:{plan['id']}",
         )])
-    rows.append([InlineKeyboardButton(text="🛠 Собрать свой тариф", callback_data="menu:builder")])
-    rows.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")])
+    rows.append([InlineKeyboardButton(text="← Меню", callback_data="menu:home")])
     if callback.message:
         await edit_menu_message(callback.message, 
-            "📦 <b>Выберите готовый тариф</b> или соберите свой вариант.\\n"
-            "Цены готовых планов задаёт владелец магазина.",
+            "📦 <b>Выберите тариф</b>\n\n"
+            "Срок, трафик, устройства и цену устанавливает владелец магазина.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
 
 
 @router.callback_query(F.data == "menu:builder")
 async def builder_handler(callback: CallbackQuery) -> None:
-    await callback.answer()
-    await clear_selected_plan(callback.from_user.id)
-    await show_tariff(callback)
+    await callback.answer("Тарифы задаёт администратор. Выберите готовый вариант.", show_alert=True)
 
 
 @router.callback_query(F.data.regexp(r"^plan:select:[0-9]+(?::[0-9]+)?$"))
@@ -349,102 +367,15 @@ async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("tariff:"))
 async def tariff_update_handler(callback: CallbackQuery) -> None:
-    try:
-        _, field, raw_delta = callback.data.split(":", 2)
-        quote = await update_tariff_draft(
-            telegram_id=callback.from_user.id,
-            username=callback.from_user.username,
-            field=field,
-            delta=int(raw_delta),
-        )
-    except (ValueError, TypeError):
-        await callback.answer("Не удалось изменить параметр.", show_alert=True)
-        return
-    await callback.answer("Параметр обновлён")
-    await show_tariff(callback, quote)
+    await callback.answer("Конструктор отключён. Тарифы задаёт администратор.", show_alert=True)
 
 
 @router.callback_query(F.data == "payment:choose")
-async def payment_choose_handler(callback: CallbackQuery) -> None:
-    await callback.answer()
-    methods, credentials = await get_store_payment_settings()
-    enabled = public_payment_settings(methods, credentials)["configured"]
-    if not any(methods.get(k) and enabled.get(k, False) for k in ("telegram_stars", "yookassa", "yoomoney", "cryptopay")):
-        if callback.message:
-            await edit_menu_message(callback.message, "Оплата временно отключена администратором.", reply_markup=back_menu())
-        return
-    terms_url = await get_terms_url()
-    if not terms_url:
-        if callback.message:
-            await edit_menu_message(callback.message, 
-                "Продажи пока не включены: администратору нужно опубликовать условия в разделе оформления админки.",
-                reply_markup=back_menu(),
-            )
-        return
-    if await has_accepted_current_terms(callback.from_user.id):
-        await show_payment_options(callback)
-        return
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📄 Прочитать условия", url=terms_url)],
-        [InlineKeyboardButton(text="Принимаю условия", callback_data="payment:terms:accept")],
-        [InlineKeyboardButton(text="⬅️ Назад к тарифу", callback_data="menu:plans")],
-    ])
-    if callback.message:
-        await edit_menu_message(callback.message, 
-            "Перед оплатой прочитайте и примите условия оказания услуги.",
-            reply_markup=keyboard,
-        )
-
-
-async def show_payment_options(callback: CallbackQuery) -> None:
-    quote = await get_tariff_draft(callback.from_user.id)
-    stars = await selected_stars_price(callback.from_user.id, quote)
-    if stars is None:
-        stars = await calculate_store_stars_price(quote.duration_days, quote.traffic_gb, quote.device_limit)
-    methods, credentials = await get_store_payment_settings()
-    configured = public_payment_settings(methods, credentials)["configured"]
-    rows = []
-    if methods.get("telegram_stars") and configured.get("telegram_stars", True):
-        rows.append([InlineKeyboardButton(
-            text=f"⭐ Telegram Stars — {stars} ⭐",
-            callback_data="payment:create:stars",
-        )])
-    for name, title in (
-        ("yookassa", "💳 ЮKassa"),
-        ("yoomoney", "🏦 ЮMoney"),
-        ("cryptopay", "🪙 Crypto Pay"),
-    ):
-        if methods.get(name) and configured.get(name):
-            rows.append([InlineKeyboardButton(text=title, callback_data=f"payment:create:{name}")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад к тарифу", callback_data="menu:plans")])
-    if callback.message:
-        await edit_menu_message(callback.message, 
-            f"💳 <b>Выберите оплату</b>\n\n"
-            f"Тариф: {quote.duration_days} дней, {format_traffic(quote.traffic_gb)}, {quote.device_limit} устройств.\n"
-            f"Telegram Stars: <b>{stars} ⭐</b>\n"
-            "Внешние системы откроют защищённую страницу провайдера.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
-        )
-
-
 @router.callback_query(F.data == "payment:terms:accept")
-async def payment_terms_accept_handler(callback: CallbackQuery) -> None:
-    try:
-        await accept_current_terms(callback.from_user.id)
-    except (ValueError, RuntimeError) as exc:
-        await callback.answer(str(exc), show_alert=True)
-        return
-    await callback.answer("Условия приняты")
-    await show_payment_options(callback)
-
-
-@router.callback_query(F.data.in_({"payment:create:yookassa", "payment:create:yoomoney", "payment:create:cryptopay"}))
-async def external_payment_handler(callback: CallbackQuery) -> None:
-    await callback.answer()
-    name = (callback.data or "").rsplit(":", 1)[-1]
-    if not callback.message:
-        return
-    await send_external_invoice(callback.message, callback.from_user.id, name)
+@router.callback_query(F.data.startswith("payment:create:"))
+async def legacy_checkout_disabled(callback: CallbackQuery) -> None:
+    """Reject old flexible-checkout keyboards; only admin plans can be ordered."""
+    await callback.answer("Выберите тариф из списка магазина.", show_alert=True)
 
 
 async def send_external_invoice(message: Message, telegram_id: int, name: str, **order) -> None:
@@ -469,36 +400,38 @@ async def send_external_invoice(message: Message, telegram_id: int, name: str, *
     )
 
 
-@router.callback_query(F.data == "payment:create:stars")
-async def stars_payment_create_handler(callback: CallbackQuery) -> None:
-    await callback.answer()
-    if callback.message:
-        await send_stars_invoice(callback.message, callback.from_user.id)
-
-
 async def send_stars_invoice(message: Message, telegram_id: int, **order) -> None:
     try:
-        if order and not await is_payment_method_enabled("telegram_stars"):
+        if not await is_payment_method_enabled("telegram_stars"):
             raise ValueError("Оплата в Telegram Stars отключена")
         payment, stars = await create_stars_payment_for_user(telegram_id, **order)
     except (ValueError, RuntimeError) as exc:
         await message.answer(escape(str(exc)))
         return
-    profile = await get_store_profile()
-    await message.answer_invoice(
-        title=profile["name"][:28] + " VPN",
-        description="VPN-подписка с выбранными вами параметрами.",
-        payload=f"remnaum:{payment.id}",
-        provider_token="",
-        currency="XTR",
-        prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
-    )
+    try:
+        profile = await get_store_profile()
+        await message.answer_invoice(
+            title=profile["name"][:28] + " VPN",
+            description="VPN-подписка по тарифу магазина.",
+            payload=f"remnaum:{payment.id}",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
+        )
+    except Exception:
+        logger.exception("Telegram Stars invoice delivery failed for payment %s", payment.id)
+        await message.answer(
+            "Не удалось открыть счёт Telegram Stars. Повторите попытку или обратитесь в поддержку.",
+            reply_markup=back_menu(),
+        )
 
 
 @router.pre_checkout_query()
 async def stars_pre_checkout_handler(query: PreCheckoutQuery) -> None:
     try:
         payment_id = int(query.invoice_payload.removeprefix("remnaum:"))
+        if not await is_payment_method_enabled("telegram_stars"):
+            raise ValueError("Stars checkout disabled")
         valid = await validate_stars_pre_checkout(
             telegram_id=query.from_user.id,
             payment_id=payment_id,
@@ -506,7 +439,8 @@ async def stars_pre_checkout_handler(query: PreCheckoutQuery) -> None:
             currency=query.currency,
             payload=query.invoice_payload,
         )
-    except (ValueError, TypeError):
+    except Exception:
+        logger.exception("Telegram Stars pre-checkout validation failed")
         valid = False
     await query.answer(
         ok=valid,
@@ -611,7 +545,7 @@ async def trial_menu_handler(callback: CallbackQuery) -> None:
         return
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎁 Получить пробный доступ", callback_data="trial:claim")],
-        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
+        [InlineKeyboardButton(text="← Меню", callback_data="menu:home")],
     ])
     await edit_menu_message(callback.message, 
         "🎁 <b>Пробный доступ</b>\n\n"
@@ -642,7 +576,7 @@ async def trial_claim_handler(callback: CallbackQuery) -> None:
     if isinstance(link, str) and link.startswith("https://"):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔗 Подключить VPN", url=link)],
-            [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
+            [InlineKeyboardButton(text="← Меню", callback_data="menu:home")],
         ])
     await edit_menu_message(callback.message, 
         f"✅ Доступ выдан: {result['days']} дней, {result['traffic_gb']} ГБ, "
@@ -696,7 +630,7 @@ async def subscription_handler(callback: CallbackQuery) -> None:
     if isinstance(url, str) and url.startswith("https://"):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔗 Получить ссылку подключения", url=url)],
-            [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
+            [InlineKeyboardButton(text="← Меню", callback_data="menu:home")],
         ])
     await edit_menu_message(callback.message, details, reply_markup=keyboard)
 
@@ -711,7 +645,7 @@ async def connection_help_handler(callback: CallbackQuery) -> None:
     rows = []
     if isinstance(link, str) and link.startswith("https://"):
         rows.append([InlineKeyboardButton(text="🔗 Моя ссылка подключения", url=link)])
-    rows.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")])
+    rows.append([InlineKeyboardButton(text="← Меню", callback_data="menu:home")])
     await edit_menu_message(callback.message, 
         "📖 <b>Как подключить VPN</b>\n\n"
         "1. Установите приложение-клиент, совместимое с подпиской вашей панели Remnawave.\n"
@@ -743,7 +677,7 @@ async def support_handler(callback: CallbackQuery) -> None:
     rows = []
     if button_url:
         rows.append([InlineKeyboardButton(text="💬 Написать в поддержку", url=button_url)])
-    rows.append([InlineKeyboardButton(text="← Главное меню", callback_data="menu:home")])
+    rows.append([InlineKeyboardButton(text="← Меню", callback_data="menu:home")])
     if callback.message:
         await edit_menu_message(callback.message, 
             f"💬 <b>Помощь и поддержка</b>\n\n{support}",

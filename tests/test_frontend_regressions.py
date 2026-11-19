@@ -25,10 +25,15 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mini.count('<button type="button" data-page='), 5)
         for symbol in ("i-home", "i-shop", "i-shield", "i-gift", "i-user"):
             self.assertIn('href="#' + symbol + '"', mini)
-        for page in ("devices", "guide", "bonuses", "support"):
+        for page in ("devices", "guide"):
             self.assertIn('class="quick-action" type="button" data-go-page="' + page + '"', mini)
         self.assertIn('id="admin-sidebar"', admin)
         self.assertIn('id="admin-menu-backdrop"', admin)
+        self.assertIn('id="settings-accordion"', admin)
+        self.assertIn('id="revenue-count"', admin)
+        self.assertIn('id="stars-count"', admin)
+        self.assertIn('id="dashboard-payments"', admin)
+        self.assertIn('async function overview()', admin_js)
         self.assertIn('function setAdminMenu(open)', admin_js)
         self.assertIn('class="admin-icon-sprite"', admin)
         self.assertIn('const sidebarIconNames =', admin_js)
@@ -43,7 +48,11 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('async function savePaymentProvider(provider)', admin_js)
         self.assertIn('methods:{[provider]:$("method-" + provider).checked}', admin_js)
         self.assertNotIn('id="payment-settings-save"', admin)
-        self.assertIn('fillPaymentOptions()', mini_js)
+        self.assertNotIn('id="custom-plan"', mini)
+        self.assertNotIn('id="buy"', mini)
+        self.assertNotIn('function recalc()', mini_js)
+        self.assertIn('id="hero-action"', mini)
+        self.assertIn('id="hero-eyebrow"', mini)
         self.assertNotIn('async function adminApi(', mini_js)
         self.assertNotIn('id="referral-form"', mini)
         self.assertIn('async function adminApi(', admin_js)
@@ -69,6 +78,16 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         for icon in ("i-device", "i-book", "i-support"):
             self.assertIn('id="' + icon + '"', mini)
         self.assertIn('id="copy-referral"', mini)
+
+    async def test_miniapp_javascript_has_no_missing_static_dom_ids(self):
+        mini = (await mini_app_page()).body.decode()
+        js = (STATIC / "miniapp.js").read_text(encoding="utf-8")
+        html_ids = set(re.findall(r'id="([^"]+)"', mini))
+        js_ids = set(re.findall(r'\\$\\("([^"]+)"\\)', js))
+        self.assertEqual(js_ids - html_ids, set(), "Mini App JS points to missing elements")
+        self.assertNotIn('"terms-link"', js)
+        self.assertNotIn('"checkout-method"', js)
+        self.assertIn('id="order-terms-link"', mini)
 
     async def test_storefront_and_miniapp_have_valid_javascript(self):
         if not shutil.which("node"):
