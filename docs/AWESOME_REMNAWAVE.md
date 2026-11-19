@@ -1,16 +1,46 @@
-# Proposing Remnaum to Awesome Remnawave
+# Submit Remnaum to Awesome Remnawave
 
-The official [Awesome Remnawave](https://github.com/remnawave/panel/blob/main/docs/awesome-remnawave.mdx) requires the repository to be publicly accessible and related to Remnawave.
+Official listing: https://docs.rw/awesome-remnawave/
+Contribution file: https://github.com/remnawave/panel/blob/main/docs/awesome-remnawave.mdx
 
-**Before submitting:**
-1. Change `u988m/remnaum` GitHub repository visibility to **Public** (repository owner action).
-2. Verify the open-source license, README, screenshot(s) and live test of installation and checkout.
-3. Create a WebP screenshot of the admin dashboard or Mini App, placing it under `static/awesome` in your fork of `remnawave/panel`.
-4. Fork `remnawave/panel`, edit `docs/awesome-remnawave.mdx` in the fork, and add a ProjectCard in the commerce category with an accurate description, link and image.
-5. Open a PR **to remnawave/panel main**, following that repository's contribution requirements.
+## Requirements
 
-Suggested factual project description (update after testing):
+- [x] **Open-source:** `u988m/remnaum` is a **public** repository with an MIT license.
+- [x] **Remnawave integration:** Remnaum integrates with the Remnawave API to provision and manage VPN subscriptions.
+- [ ] **Preview:** add `static/awesome/remnaum.webp` to a fork of `remnawave/panel`.
+- [ ] **Pull request:** add a `ProjectCard` to **Commerce** in `docs/awesome-remnawave.mdx` and open a PR against `remnawave/panel:main`.
 
-> Remnaum — self-hosted Remnawave VPN storefront constructor with Telegram bot, Telegram Mini App, Telegram Stars billing, fixed and configurable subscription plans, owner dashboard and assisted Docker setup with Caddy/Nginx.
+## Project card for `Commerce`
 
-Avoid calling the project fully production-ready until a real payment and live Remnawave provisioning test has completed.
+Insert this component inside the existing `<CategorySection id="commerce" ...>` section, before the existing project cards:
+
+```mdx
+    <ProjectCard
+        id="remnaum"
+        title="Remnaum"
+        description="Open-source, self-hosted VPN storefront for Remnawave with a Telegram bot, Telegram Mini App, web store and owner dashboard. Supports configurable plans and Internal Squads, API-based subscription provisioning, device management, trial access, promo codes and referrals. Payment integrations include Telegram Stars, YooKassa, YooMoney, Crypto Pay and Platega. Docker setup supports deployment alongside Remnawave or on a separate VPS."
+        author="u988m"
+        authorLink="https://github.com/u988m"
+        image="/awesome/remnaum.webp"
+        githubRepo="u988m/remnaum"
+        links={{
+            github: 'https://github.com/u988m/remnaum'
+        }}
+    />
+```
+
+## Submission
+
+1. Fork [`remnawave/panel`](https://github.com/remnawave/panel/fork) under the account `u988m`.
+2. Create a branch like `docs/add-remnaum` in the fork.
+3. Take a screenshot of the running dashboard or Mini App (avoid displaying actual customers, payment identifiers, or API tokens). Frame it at [shots.so](https://shots.so) and compress as WebP with [Squoosh](https://squoosh.app/).
+4. Commit that image as `static/awesome/remnaum.webp` and the ProjectCard above in `docs/awesome-remnawave.mdx`.
+5. Open the PR targeting **`remnawave/panel:main`**, not this repository's `main`.
+
+Existing payment integrations and installer code do not, by themselves, prove production readiness: test the full Remnawave provisioning and real provider payment flow before making performance or reliability claims.
+
+## Example PR title and summary
+
+**Title:** `docs(awesome): add Remnaum to Commerce`
+
+**Summary:** Add Remnaum, an MIT-licensed self-hosted Remnawave storefront integrating a Telegram bot, Mini App, web store, admin dashboard, subscription provisioning and payment methods. Include a compressed WebP preview in `static/awesome`.
