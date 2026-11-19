@@ -193,6 +193,79 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(runner.call_args_list[0].args[0], ["bash", "update.sh"])
         self.assertEqual(runner.call_args_list[1].args[0], ["docker", "compose", "ps"])
 
+    def test_reinstall_accepts_existing_postgres_when_credentials_match(self):
+        with patch.object(installer, "run") as runner, \
+             patch.object(installer.backups, "wait_for_postgres"), \
+             patch.object(installer, "check_installer_postgres_connection", return_value=(True, False)), \
+             patch.object(installer, "prompt") as ask, \
+             patch.object(installer.backups, "set_postgres_password") as change:
+            installer.ensure_install_postgres_connection({})
+        self.assertEqual(runner.call_count, 2)
+        ask.assert_not_called()
+        change.assert_not_called()
+
+    def test_reinstall_refuses_password_change_by_default(self):
+        with patch.object(installer, "run"), \
+             patch.object(installer.backups, "wait_for_postgres"), \
+             patch.object(installer, "check_installer_postgres_connection", return_value=(False, True)), \
+             patch.object(installer, "prompt", return_value="Н"), \
+             patch.object(installer.backups, "set_postgres_password") as change:
+            with self.assertRaisesRegex(RuntimeError, "без изменения"):
+                installer.ensure_install_postgres_connection({"POSTGRES_PASSWORD": "new-password-123"})
+        change.assert_not_called()
+
+    def test_reinstall_does_not_reset_password_for_other_errors(self):
+        with patch.object(installer, "run"), \
+             patch.object(installer.backups, "wait_for_postgres"), \
+             patch.object(installer, "check_installer_postgres_connection", return_value=(False, False)), \
+             patch.object(installer, "prompt") as ask:
+            with self.assertRaisesRegex(RuntimeError, "не принял подключение"):
+                installer.ensure_install_postgres_connection({})
+        ask.assert_not_called()
+
+    def test_reinstall_recovers_existing_volume_only_after_confirmation(self):
+        config = {
+            "POSTGRES_PASSWORD": "new-password-123",
+            "DATABASE_URL": "postgresql+asyncpg://remnaum:new-password-123@postgres:5432/remnaum",
+        }
+        with tempfile.TemporaryDirectory() as temp, \
+             patch.object(installer.backups, "DATA", Path(temp) / "data"), \
+             patch.object(installer, "run"), \
+             patch.object(installer.backups, "wait_for_postgres"), \
+             patch.object(installer, "check_installer_postgres_connection",
+                          side_effect=[(False, True), (True, False)]) as probe, \
+             patch.object(installer, "prompt", return_value="да") as ask, \
+             patch.object(installer.backups, "postgres_admin", return_value="old-verifier"), \
+             patch.object(installer.backups, "set_postgres_password") as change:
+            installer.ensure_install_postgres_connection(config)
+        self.assertEqual(probe.call_count, 2)
+        ask.assert_called_once()
+        change.assert_called_once_with("new-password-123")
+
+    def test_reinstall_rolls_back_role_verifier_when_reprobe_fails(self):
+        config = {
+            "POSTGRES_PASSWORD": "new-password-123",
+            "DATABASE_URL": "postgresql+asyncpg://remnaum:new-password-123@postgres:5432/remnaum",
+        }
+        sql = []
+        def postgres_admin(query):
+            sql.append(query)
+            return "old-verifier" if len(sql) == 1 else ""
+        with tempfile.TemporaryDirectory() as temp, \
+             patch.object(installer.backups, "DATA", Path(temp) / "data"), \
+             patch.object(installer, "run"), \
+             patch.object(installer.backups, "wait_for_postgres"), \
+             patch.object(installer, "check_installer_postgres_connection",
+                          side_effect=[(False, True), (False, True)]), \
+             patch.object(installer, "prompt", return_value="да"), \
+             patch.object(installer.backups, "postgres_admin", side_effect=postgres_admin), \
+             patch.object(installer.backups, "set_postgres_password") as change:
+            with self.assertRaisesRegex(RuntimeError, "после смены пароля"):
+                installer.ensure_install_postgres_connection(config)
+        change.assert_called_once()
+        self.assertEqual(len(sql), 2)
+        self.assertIn("ALTER ROLE remnaum PASSWORD 'old-verifier'", sql[1])
+
     def test_password_rotation_rolls_back_verifier_and_env_on_probe_failure(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

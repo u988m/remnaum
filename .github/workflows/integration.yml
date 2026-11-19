@@ -209,6 +209,26 @@ jobs:
           save_welcome_image(base64.b64encode(image.getvalue()).decode())
           assert welcome_image_path().is_file()
           PY
+      - name: Simulate reinstall over an existing PostgreSQL volume
+        run: |
+          sudo sed -i 's|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=fresh-reinstall-password-123|' .env
+          sudo sed -i 's|^DATABASE_URL=.*|DATABASE_URL=postgresql+asyncpg://remnaum:fresh-reinstall-password-123@postgres:5432/remnaum|' .env
+          # A removed source directory does not remove Docker volumes.
+          # The recovery must require explicit consent and keep old records.
+          sudo env PYTHONPATH=scripts python3 - <<'PY'
+          from unittest.mock import patch
+          from install import read_env, ensure_install_postgres_connection
+          with patch("install.prompt", return_value="да"):
+              ensure_install_postgres_connection(read_env())
+          PY
+          test "$(sudo docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM promo_redemptions;')" = "1"
+          sudo docker compose run --rm --no-deps -T --entrypoint python app -m app.db.check_connection
+          sudo docker compose up -d --no-deps --force-recreate app
+          for i in $(seq 1 30); do
+            if sudo docker compose exec -T app python -c "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/ready',timeout=3).status==200" >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          sudo docker compose exec -T app python -c "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/ready',timeout=5).status==200"
       - name: Verify encrypted full backup and restore PostgreSQL and Redis
         run: |
           sudo mkdir -p backups
