@@ -9,4 +9,4 @@ pydantic-settings>=2.5,<3
 httpx>=0.28.1,<1
 structlog>=24,<26
 cryptography>=43,<46
-Pillow>=11,<13
+Pillow>=13.0.0,<14
