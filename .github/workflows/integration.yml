@@ -70,6 +70,22 @@ jobs:
       - name: Validate Nginx configuration (standalone only)
         if: matrix.mode == 'standalone'
         run: docker compose run --rm --no-deps --entrypoint nginx nginx -t
+      - name: Verify upgrade PostgreSQL credentials against the existing volume
+        run: |
+          app="$(docker compose ps -q app)"
+          probe=(docker compose run --rm --no-deps -T --entrypoint python)
+          "${probe[@]}" app -m app.db.check_connection
+          if output=$("${probe[@]}" -e DATABASE_URL=postgresql+asyncpg://remnaum:invalid-test-password@postgres:5432/remnaum app -m app.db.check_connection 2>&1); then
+            echo "Unexpected success with an incorrect password"
+            exit 1
+          fi
+          grep -Fq 'PostgreSQL отклонил пароль из DATABASE_URL' <<< "$output"
+          if grep -Fq 'invalid-test-password' <<< "$output"; then
+            echo "PostgreSQL probe printed a password"
+            exit 1
+          fi
+          test "$(docker compose ps -q app)" = "$app"
+          "${probe[@]}" app -m app.db.check_connection
       - name: Verify health and clean data
         run: |
           for i in $(seq 1 40); do
