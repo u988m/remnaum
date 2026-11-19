@@ -2,9 +2,25 @@ import hashlib
 import hmac
 import json
 import time
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, urlsplit
 
 from app.config import settings
+
+
+def telegram_photo_url(value: object) -> str | None:
+    if not isinstance(value, str) or not value or len(value) > 2048:
+        return None
+    try:
+        url = urlsplit(value)
+        host = url.hostname or ""
+        if url.scheme == "https" and not url.username and not url.password and (
+            host in {"t.me", "telegram.org", "telegram-cdn.org"}
+            or host.endswith((".telegram.org", ".telegram-cdn.org"))
+        ):
+            return value
+    except ValueError:
+        pass
+    return None
 
 
 def validate_telegram_init_data(init_data: str, max_age_seconds: int = 86400) -> dict:

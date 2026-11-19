@@ -13,7 +13,7 @@ from app.db.models import (
 from app.db.session import SessionLocal
 from app.services.remnawave import RemnawaveClient
 from app.services.squads import fetch_catalog, require_available
-from app.services.subscriptions import _panel_identity, _unwrap, get_panel_user, matches_panel_account
+from app.services.subscriptions import _panel_identity, _unwrap, matches_panel_account, resolve_panel_user
 
 
 class CustomerNotFound(ValueError):
@@ -30,22 +30,6 @@ async def _locked_customer(session, telegram_id: int) -> User:
 async def _latest_subscription(session, user_id: int) -> Subscription | None:
     return await session.scalar(select(Subscription).where(Subscription.user_id == user_id)
                                 .order_by(Subscription.created_at.desc(), Subscription.id.desc()).limit(1))
-
-
-async def _linked_panel_user(panel: RemnawaveClient, telegram_id: int, subscription: Subscription | None) -> dict:
-    account = await get_panel_user(panel, telegram_id)
-    stored_id = subscription.panel_user_id if subscription else None
-    if stored_id and not account:
-        try:
-            account = _unwrap(await panel.get_user(stored_id))
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != 404:
-                raise
-    if account and stored_id and not matches_panel_account(stored_id, account):
-        raise RuntimeError("Учётная запись в Remnawave не совпадает с подпиской клиента.")
-    if account and account.get("telegramId") not in (None, telegram_id, str(telegram_id)):
-        raise RuntimeError("Учётная запись в Remnawave привязана к другому Telegram ID.")
-    return account
 
 
 async def _remove_panel_user(panel: RemnawaveClient, account: dict) -> None:
@@ -80,7 +64,7 @@ async def set_customer_block(telegram_id: int, blocked: bool) -> None:
         subscription = await _latest_subscription(session, user.id)
         panel = RemnawaveClient()
         if subscription or (panel.base_url and panel.token):
-            account = await _linked_panel_user(panel, telegram_id, subscription)
+            account = await resolve_panel_user(panel, telegram_id, subscription)
             if blocked and account:
                 await panel.disable_user(_panel_identity(account))
             elif account and subscription and subscription.status in {"active", "disabled"} and (
@@ -106,7 +90,7 @@ async def save_customer_subscription(
         require_available(squads, await fetch_catalog())
         panel = RemnawaveClient()
         subscription = await _latest_subscription(session, user.id)
-        account = await _linked_panel_user(panel, telegram_id, subscription)
+        account = await resolve_panel_user(panel, telegram_id, subscription)
         traffic_bytes = traffic_gb * 1024 ** 3
         if account:
             panel_id = _panel_identity(account)
@@ -154,7 +138,7 @@ async def remove_customer(telegram_id: int, *, delete_account: bool) -> None:
         subscription = await _latest_subscription(session, user.id)
         panel = RemnawaveClient()
         if subscription or (panel.base_url and panel.token):
-            account = await _linked_panel_user(panel, telegram_id, subscription)
+            account = await resolve_panel_user(panel, telegram_id, subscription)
             await _remove_panel_user(panel, account)
         await _clear_subscriptions(session, user.id)
         if not delete_account:

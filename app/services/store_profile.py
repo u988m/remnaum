@@ -7,8 +7,9 @@ from app.config import settings
 
 DEFAULT_PROFILE = {
     "name": "Remnaum",
-    "tagline": "Ваш VPN — ваши правила",
-    "description": "Выберите подходящую подписку.",
+    "tagline": "",
+    "description": "",
+    "connection_instructions": "",
     "accent_color": "#4b8bea",
     "support_contact": settings.support_contact,
     "terms_url": settings.telegram_terms_url,
@@ -19,10 +20,13 @@ def validate_profile(data: dict) -> dict:
     if set(data) - set(DEFAULT_PROFILE):
         raise ValueError("Unknown store profile field")
     next_values = DEFAULT_PROFILE | data
-    for key in ("name", "tagline", "description", "support_contact", "terms_url"):
+    for key, maximum in {"name": 80, "tagline": 300, "description": 300, "connection_instructions": 1600,
+                         "support_contact": 300, "terms_url": 300}.items():
         value = next_values[key]
-        if not isinstance(value, str) or len(value) > (80 if key == "name" else 300):
+        if not isinstance(value, str) or len(value) > maximum:
             raise ValueError(f"Invalid {key}")
+    if next_values["tagline"].strip().casefold() == "ваш vpn — ваши правила":
+        next_values["tagline"] = ""
     terms_url = next_values["terms_url"]
     if terms_url and (not terms_url.startswith("https://") or len(terms_url) > 300):
         raise ValueError("Terms URL must be a public HTTPS address")

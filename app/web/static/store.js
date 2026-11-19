@@ -85,7 +85,7 @@ async function init() {
       $("terms-url").href = catalog.terms_url;
     }
     showPlans();
-    for (const method of catalog.methods) $("provider").add(new Option(providers[method] || method, method));
+    for (const method of catalog.methods) $("provider").add(new Option(catalog.payment_labels?.[method] || providers[method] || method, method));
     if (!catalog.methods.length) {
       $("checkout").hidden = true;
       $("status").textContent = "Оплата на сайте пока недоступна.";

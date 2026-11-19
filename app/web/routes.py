@@ -1,4 +1,5 @@
 import asyncio
+from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
@@ -10,8 +11,9 @@ from pathlib import Path
 from html import escape
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
-from sqlalchemy import Date, cast, func, select
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Response
+from sqlalchemy import Date, cast, func, or_, select
+from aiogram.exceptions import TelegramAPIError
 
 from app.bot.runtime import bot, dispatcher
 from app.config import settings
@@ -23,7 +25,7 @@ from app.services.payment_service import PaymentProviderUnavailable, TermsAccept
 from app.services.tariffs import format_traffic
 from app.services.subscriptions import provision_paid_payment
 from app.services.payment_notifications import notify_external_payment_success
-from app.services.telegram_webapp import validate_telegram_init_data
+from app.services.telegram_webapp import telegram_photo_url, validate_telegram_init_data
 from app.services import customer_admin
 from app.services.users import BLOCKED_MESSAGE, BlockedCustomer, customer_is_blocked, upsert_active_customer
 
@@ -38,13 +40,19 @@ async def admin_payments_page():
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 from app.services.store_settings import (
     DEFAULT_METHODS, PROVIDER_LABELS, get_store_payment_settings, is_payment_method_enabled,
-    public_payment_settings, update_store_payment_settings,
+    get_payment_presentation, public_payment_settings, update_store_payment_settings,
 )
+
+
+class PaymentPresentationEntry(BaseModel):
+    provider: str = Field(max_length=24)
+    label: str = Field(max_length=24)
 
 
 class PaymentSettingsUpdate(BaseModel):
     methods: dict[str, bool] = Field(default_factory=dict)
     credentials: dict[str, dict[str, str]] = Field(default_factory=dict)
+    presentation: list[PaymentPresentationEntry] | None = Field(default=None, max_length=len(DEFAULT_METHODS))
 
 
 async def _configured_provider(name: str):
@@ -58,7 +66,7 @@ async def _configured_provider(name: str):
 async def admin_get_payment_settings(x_telegram_init_data: str | None = Header(default=None)):
     await _require_telegram_admin(x_telegram_init_data)
     methods, credentials = await get_store_payment_settings()
-    return public_payment_settings(methods, credentials)
+    return public_payment_settings(methods, credentials) | {"presentation": await get_payment_presentation()}
 
 
 @router.get("/admin/api/payment-diagnostics")
@@ -70,6 +78,7 @@ async def admin_payment_diagnostics(x_telegram_init_data: str | None = Header(de
     base = settings.public_base_url.rstrip("/")
     return {
         "terms_url": await get_terms_url(),
+        "presentation": await get_payment_presentation(),
         "providers": {
             name: {
                 "enabled": bool(methods.get(name)),
@@ -88,6 +97,10 @@ async def admin_update_payment_settings(
 ):
     await _require_telegram_admin(x_telegram_init_data)
     try:
+        if data.presentation is not None:
+            return await update_store_payment_settings(
+                data.methods, data.credentials, presentation=[item.model_dump() for item in data.presentation],
+            )
         return await update_store_payment_settings(data.methods, data.credentials)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -95,7 +108,11 @@ async def admin_update_payment_settings(
 
 @router.get("/api/v1/payment-methods")
 async def public_payment_methods():
-    return {"methods": await _get_public_checkout_methods(), "terms_url": await get_terms_url()}
+    methods = await _get_public_checkout_methods()
+    return {
+        "methods": methods, "terms_url": await get_terms_url(),
+        "presentation": [item for item in await get_payment_presentation() if methods.get(item["provider"])],
+    }
 
 
 
@@ -246,7 +263,8 @@ async def _webapp_user(init_data: str):
     telegram_id = int(identity["id"])
     try:
         async with SessionLocal.begin() as session:
-            await upsert_active_customer(session, telegram_id, identity.get("username"))
+            await upsert_active_customer(session, telegram_id, identity.get("username"),
+                                         photo_url=telegram_photo_url(identity.get("photo_url")), sync_photo=True)
     except BlockedCustomer as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     return identity
@@ -295,7 +313,8 @@ async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=Non
     pricing = await get_store_tariff_pricing()
     payment_methods = await _get_public_checkout_methods()
     return {
-        "user": {"id": identity["id"], "first_name": identity.get("first_name", "")},
+        "user": {"id": identity["id"], "first_name": identity.get("first_name", ""),
+                 "photo_url": telegram_photo_url(identity.get("photo_url"))},
         "profile": await public_store_profile(),
         "is_admin": int(identity["id"]) in settings.admin_id_set,
         "pricing": pricing,
@@ -479,6 +498,7 @@ async def admin_users(
     limit: int = 20,
     offset: int = 0,
     x_telegram_init_data: str | None = Header(default=None),
+    q: str = "",
 ):
     await _require_telegram_admin(x_telegram_init_data)
     if limit < 1 or limit > 100 or offset < 0:
@@ -488,12 +508,20 @@ async def admin_users(
         .group_by(Subscription.user_id)
         .subquery()
     )
+    query = q.strip()[:80].lstrip("@")
+    filters = []
+    if query:
+        matches = [User.username.icontains(query, autoescape=True), User.display_name.icontains(query, autoescape=True)]
+        if query.isdecimal() and len(query) < 17:
+            matches.append(User.telegram_id == int(query))
+        filters.append(or_(*matches))
     async with SessionLocal() as session:
-        total = await session.scalar(select(func.count(User.id))) or 0
+        total = await session.scalar(select(func.count(User.id)).where(*filters)) or 0
         result = await session.execute(
             select(User, Subscription)
             .outerjoin(latest_subscription, latest_subscription.c.user_id == User.id)
             .outerjoin(Subscription, Subscription.id == latest_subscription.c.subscription_id)
+            .where(*filters)
             .order_by(User.created_at.desc(), User.id.desc())
             .limit(limit)
             .offset(offset)
@@ -504,6 +532,7 @@ async def admin_users(
                 "telegram_id": user.telegram_id,
                 "username": user.username,
                 "display_name": user.display_name,
+                "photo_url": user.telegram_photo_url,
                 "blocked": user.blocked_at is not None,
                 "created_at": user.created_at.isoformat(),
                 "subscription_status": subscription.status if subscription else "нет подписки",
@@ -586,6 +615,7 @@ async def admin_user_detail(
         "telegram_id": user.telegram_id,
         "username": user.username,
         "display_name": user.display_name,
+        "photo_url": user.telegram_photo_url,
         "blocked": user.blocked_at is not None,
         "is_admin": telegram_id in settings.admin_id_set,
         "created_at": user.created_at.isoformat(),
@@ -607,6 +637,26 @@ async def admin_user_detail(
             "created_at": payment.created_at.isoformat(),
         } for payment in payments],
     }
+
+
+@router.get("/admin/api/users/{telegram_id}/avatar")
+async def admin_customer_avatar(telegram_id: int, x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    async with SessionLocal() as session:
+        registered = await session.scalar(select(User.id).where(User.telegram_id == telegram_id))
+    if not bot or not registered:
+        raise HTTPException(status_code=404, detail="Нет фотографии")
+    try:
+        async with asyncio.timeout(5):
+            photos = await bot.get_user_profile_photos(telegram_id, limit=1)
+            if photos.photos:
+                photo = photos.photos[0][0]
+                target = BytesIO()
+                await bot.download(photo.file_id, destination=target)
+                return Response(target.getvalue(), media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
+    except (TelegramAPIError, TimeoutError):
+        pass
+    raise HTTPException(status_code=404, detail="Нет фотографии")
 
 
 class CustomerProfileUpdate(BaseModel):
@@ -857,6 +907,7 @@ class StoreProfilePayload(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     tagline: str = Field(default="", max_length=300)
     description: str = Field(default="", max_length=300)
+    connection_instructions: str = Field(default="", max_length=1600)
     accent_color: str = Field(default="#4b8bea", pattern=r"^#[a-fA-F0-9]{6}$")
     support_contact: str = Field(default="", max_length=300)
     terms_url: str = Field(default="", max_length=300)
@@ -877,8 +928,8 @@ async def public_store_profile():
 
 @router.get("/admin/api/store-profile")
 async def admin_get_store_profile(x_telegram_init_data: str | None = Header(default=None)):
-    await _require_telegram_admin(x_telegram_init_data)
-    return await public_store_profile()
+    viewer = await _require_telegram_admin(x_telegram_init_data)
+    return (await public_store_profile()) | {"viewer": {"id": viewer.get("id"), "photo_url": telegram_photo_url(viewer.get("photo_url"))}}
 
 
 

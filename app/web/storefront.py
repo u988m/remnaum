@@ -22,7 +22,7 @@ from app.services.plans import list_plans
 from app.services.store_auth import issue_store_session, verify_store_session, verify_telegram_login
 from app.services.store_profile import get_store_profile, get_terms_url
 from app.services.users import BLOCKED_MESSAGE, BlockedCustomer, customer_is_blocked, upsert_active_customer
-from app.services.store_settings import PROVIDER_LABELS, get_store_payment_settings, public_payment_settings
+from app.services.store_settings import PROVIDER_LABELS, get_payment_presentation, get_store_payment_settings, public_payment_settings
 
 router = APIRouter()
 COOKIE_NAME = "__Host-remnaum-session"
@@ -84,11 +84,13 @@ async def store_catalog(request: Request):
     _require_store_host(request)
     methods, credentials = await get_store_payment_settings()
     configured = public_payment_settings(methods, credentials)["configured"]
+    presentation = {item["provider"]: item["label"] for item in await get_payment_presentation()}
     return {
         "profile": await get_store_profile(),
         "terms_url": await get_terms_url(),
         "plans": await list_plans(active_only=True),
-        "methods": [name for name in PROVIDER_LABELS if methods.get(name) and configured.get(name)],
+        "methods": [name for name in presentation if name in PROVIDER_LABELS and methods.get(name) and configured.get(name)],
+        "payment_labels": presentation,
     }
 
 

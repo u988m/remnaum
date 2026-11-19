@@ -24,7 +24,7 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('loadPurchases()', mini_js)
         self.assertIn('id="renew-plan"', mini)
         self.assertIn('id="repeat-plan"', mini)
-        self.assertEqual(mini.count('<button type="button" data-page='), 5)
+        self.assertEqual(mini.count('<button type="button" data-page='), 4)
         for symbol in ("i-home", "i-device", "i-help", "i-gift", "i-user"):
             self.assertIn('href="#' + symbol + '"', mini)
         self.assertEqual(mini.count('data-go-page="guide"'), 1)

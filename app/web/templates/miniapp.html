@@ -30,6 +30,7 @@
       <div class="landing-brand">
         <div class="brand-logo"><span id="landing-mark" aria-hidden="true">R</span><img id="landing-logo" alt="" hidden></div>
         <h1 id="landing-name">Remnaum</h1>
+        <p id="home-message" class="muted" hidden></p>
       </div>
       <div class="home-summary">
         <section class="panel subscription-card" id="subscription" hidden>
@@ -48,10 +49,7 @@
         <section class="panel empty-state" id="no-subscription">
           <h2>Подписки пока нет</h2><p class="muted">После оплаты здесь появится ссылка подключения.</p>
         </section>
-        <div class="home-links">
-          <button class="action" type="button" data-go-page="guide">Инструкция</button>
-          <button class="primary-btn" type="button" data-go-page="shop">Все тарифы</button>
-        </div>
+
       </div>
     </section>
     <section class="page" id="page-devices" data-page-panel="devices" hidden>
@@ -70,7 +68,8 @@
     <section class="page" id="page-guide" data-page-panel="guide" hidden>
       <h1>Как подключиться</h1>
       <section class="panel" id="connection-guide">
-        <ol class="steps">
+        <p id="custom-guide" hidden></p>
+        <ol class="steps" id="default-guide">
           <li>Установите VPN-клиент, совместимый с подпиской Remnawave.</li>
           <li>Откройте ссылку из раздела «Моя подписка» и импортируйте её в VPN-клиент.</li>
           <li>Обновите список серверов и подключитесь к нужному.</li>
@@ -86,22 +85,12 @@
     </section>
     <section class="page" id="page-bonuses" data-page-panel="bonuses" hidden>
       <h1>Бонусы</h1>
-      <section class="panel" id="promo-offer">
-        <h2>Промокод</h2>
-        <form id="promo-form" class="promo-form">
-          <input id="promo-input" maxlength="32" autocomplete="off" required aria-label="Промокод" placeholder="Введите код">
-          <button id="promo-activate" type="submit" class="action">Активировать</button>
-        </form>
-        <p class="muted" id="promo-balance">Проверяем бонусный баланс…</p>
-        <p class="status" id="promo-status" role="status"></p>
-      </section>
-      <section class="panel" id="account-referrals">
-        <h2>Пригласить друга</h2>
-        <p class="muted" id="account-referral-info">Загружаем…</p>
+      <section class="panel bonus-card" id="account-referrals">
+        <div class="bonus-heading"><span class="bonus-icon"><svg aria-hidden="true"><use href="#i-gift"/></svg></span><div><h2>Пригласить друга</h2><p class="muted" id="account-referral-info">Загружаем…</p></div></div>
         <dl class="referral-metrics" id="referral-metrics" hidden>
-          <div><dt>Приглашено</dt><dd id="referral-count">—</dd></div>
-          <div><dt>Начисления</dt><dd id="referral-earned">—</dd></div>
-          <div><dt>Дней доступно</dt><dd id="referral-days">—</dd></div>
+          <div><dt>Друзья</dt><dd id="referral-count">—</dd></div>
+          <div><dt>Награды</dt><dd id="referral-earned">—</dd></div>
+          <div><dt>Бонусные дни</dt><dd id="referral-days">—</dd></div>
         </dl>
         <a id="account-referral-link" class="ref-link" hidden></a>
         <div class="section-links">
@@ -109,6 +98,14 @@
           <a class="secondary-btn" id="share-referral" hidden>Поделиться</a>
         </div>
         <p class="status" id="referral-copy-status" role="status"></p>
+      </section>
+      <section class="panel bonus-card" id="promo-offer">
+        <div class="bonus-heading"><span class="bonus-icon"><svg aria-hidden="true"><use href="#i-ticket"/></svg></span><div><h2>Промокод</h2><p class="muted" id="promo-balance">Проверяем бонусные дни…</p></div></div>
+        <form id="promo-form" class="promo-form">
+          <input id="promo-input" maxlength="32" autocomplete="off" required aria-label="Промокод" placeholder="Введите код">
+          <button id="promo-activate" type="submit" class="action">Активировать</button>
+        </form>
+        <p class="status" id="promo-status" role="status"></p>
       </section>
       <section class="panel" id="trial-offer" hidden>
         <h2>Пробный доступ</h2>
@@ -120,14 +117,17 @@
     <section class="page" id="page-account" data-page-panel="account" hidden>
       <h1>Профиль</h1>
       <section class="panel profile-card">
-        <div class="brand-logo" id="profile-monogram" aria-hidden="true">R</div>
+        <div class="profile-avatar" aria-hidden="true"><span id="profile-monogram"></span><img id="profile-photo" alt="" referrerpolicy="no-referrer" hidden></div>
         <div><strong id="profile-name">Покупатель</strong><p class="muted">Telegram ID <span id="profile-id">—</span></p></div>
       </section>
       <button class="profile-action admin-entry" id="admin-entry" type="button" hidden>
         <strong>Админ-панель</strong><span>Управление магазином</span>
       </button>
       <div class="profile-actions">
+        <button class="profile-action" type="button" data-go-page="shop"><strong>Все тарифы</strong><span>Выбрать подписку</span></button>
         <button class="profile-action" type="button" data-go-page="purchases"><strong>Покупки</strong><span>История и статусы оплаты</span></button>
+        <button class="profile-action" type="button" data-go-page="guide"><strong>Инструкция</strong><span>Как подключить VPN</span></button>
+        <button class="profile-action" type="button" data-go-page="support"><strong><svg class="profile-icon" aria-hidden="true"><use href="#i-help"/></svg>Помощь</strong><span>Связаться с поддержкой</span></button>
       </div>
     </section>
   </div>
@@ -136,7 +136,6 @@
   <button type="button" data-page="vpn" aria-current="page"><svg aria-hidden="true"><use href="#i-home"/></svg><span>Главная</span></button>
   <button type="button" data-page="bonuses"><svg aria-hidden="true"><use href="#i-gift"/></svg><span>Бонусы</span></button>
   <button type="button" data-page="devices"><svg aria-hidden="true"><use href="#i-device"/></svg><span>Устройства</span></button>
-  <button type="button" data-page="support"><svg aria-hidden="true"><use href="#i-help"/></svg><span>Помощь</span></button>
   <button type="button" data-page="account"><svg aria-hidden="true"><use href="#i-user"/></svg><span>Профиль</span></button>
 </nav>
 <dialog class="order-dialog" id="page-order" aria-labelledby="order-title">
@@ -184,7 +183,8 @@
 <symbol id="i-back" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></symbol>
 <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
 <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
-<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5m10-4a8 8 0 0 0-13-2m12 12a8 8 0 0 1-13-2"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15.74-6.26L21 8m0-5v5h-5m5 4a9 9 0 0 1-15.74 6.26L3 16m0 5v-5h5"/></symbol>
+<symbol id="i-ticket" viewBox="0 0 24 24"><path d="M3 6h18v4a2 2 0 0 0 0 4v4H3v-4a2 2 0 0 0 0-4zM12 9v1m0 4v1"/></symbol>
 <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></symbol>
 <symbol id="i-device" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/></symbol>
 <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="m6 6 4 4m4 4 4 4m0-12-4 4m-4 4-4 4"/></symbol>

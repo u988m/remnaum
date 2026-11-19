@@ -179,8 +179,46 @@ let savingCustomer = false;
 const customerPath = id => "/admin/api/users/" + encodeURIComponent(id);
 const subscriptionLabels = {active:"Активна", disabled:"Отключена", expired:"Истекла", deleted:"Удалена", pending:"Ожидает"};
 
+let userSearch = "";
+let userListRequest = 0;
+let customerPhoto = null;
+
+function putAvatar(element, url, fallback) {
+  const initial = document.createElement("span");
+  initial.textContent = fallback.trim().charAt(0).toUpperCase();
+  element.replaceChildren(initial);
+  if (url) {
+    const photo = new Image();
+    photo.alt = "";
+    photo.referrerPolicy = "no-referrer";
+    photo.onload = () => element.contains(initial) && element.replaceChildren(photo);
+    photo.src = url;
+  }
+}
+
+async function showCustomerAvatar(data, request, name) {
+  const element = $("customer-avatar");
+  if (customerPhoto) URL.revokeObjectURL(customerPhoto);
+  customerPhoto = null;
+  putAvatar(element, data.photo_url, name);
+  if (data.photo_url) return;
+  try {
+    const response = await fetch(customerPath(data.telegram_id) + "/avatar", {
+      headers: {"X-Telegram-Init-Data": tg?.initData || ""},
+    });
+    if (!response.ok) return;
+    const photo = await response.blob();
+    if (request !== openingCustomer) return;
+    customerPhoto = URL.createObjectURL(photo);
+    putAvatar(element, customerPhoto, name);
+  } catch { /* An unavailable Telegram photo keeps the initial. */ }
+}
+
 async function loadUsers() {
-  const data = await api("/admin/api/users?limit=" + pageSize + "&offset=" + userOffset);
+  const request = ++userListRequest;
+  const params = new URLSearchParams({limit:pageSize, offset:userOffset, q:userSearch});
+  const data = await api("/admin/api/users?" + params);
+  if (request !== userListRequest) return;
   if (userOffset && !data.items.length) {
     const lastOffset = Math.max(0, Math.floor((data.total - 1) / pageSize) * pageSize);
     if (lastOffset < userOffset) {
@@ -190,8 +228,9 @@ async function loadUsers() {
   }
   $("users-table").replaceChildren();
   for (const user of data.items) {
+    const name = user.display_name || (user.username ? "@" + user.username : "—");
     row("users-table", [
-      user.telegram_id, user.display_name || (user.username ? "@" + user.username : "—"),
+      user.telegram_id, name,
       user.blocked ? "Заблокирован" : (subscriptionLabels[user.subscription_status] || user.subscription_status),
       user.expires_at ? new Date(user.expires_at).toLocaleDateString() : "—",
       new Date(user.created_at).toLocaleDateString(),
@@ -201,13 +240,23 @@ async function loadUsers() {
     button.className = "action";
     button.textContent = "Управлять";
     button.onclick = () => openTab("users", {panel: "customer", record: user.telegram_id});
+    const identity = document.createElement("div");
+    identity.className = "customer-identity";
+    const avatar = document.createElement("span");
+    avatar.className = "viewer-avatar table-avatar";
+    avatar.setAttribute("aria-hidden", "true");
+    putAvatar(avatar, user.photo_url, name.replace(/^@/, ""));
+    const label = document.createElement("span");
+    label.textContent = name;
+    identity.append(avatar, label);
+    $("users-table").lastElementChild.cells[1].replaceChildren(identity);
     const action = cell("");
     action.append(button);
     $("users-table").lastElementChild.append(action);
   }
   $("users-page").textContent = data.total
     ? (userOffset + 1) + "–" + Math.min(userOffset + data.items.length, data.total) + " из " + data.total
-    : "Клиентов пока нет";
+    : userSearch ? "Клиенты не найдены" : "Клиентов пока нет";
   $("users-prev").disabled = userOffset === 0;
   $("users-next").disabled = userOffset + pageSize >= data.total;
 }
@@ -240,7 +289,9 @@ async function showCustomer(id, {scroll = true} = {}) {
     customer = data;
     customerPlans = new Map(plans.items.map(plan => [plan.id, plan]));
     const subscription = data.subscriptions[0];
-    $("customer-title").textContent = data.display_name || (data.username ? "@" + data.username : "Клиент");
+    const name = data.display_name || (data.username ? "@" + data.username : "Клиент");
+    $("customer-title").textContent = name;
+    showCustomerAvatar(data, request, name.replace(/^@/, ""));
     $("customer-summary").textContent = "Telegram ID " + data.telegram_id + " · "
       + (data.blocked ? "Заблокирован" : "Доступ к магазину открыт");
     $("customer-name").value = data.display_name || "";
@@ -624,6 +675,7 @@ async function loadBrand(){
   const d=await adminApi("GET","/admin/api/store-profile");
   $("brand-name").value=d.name;$("brand-tagline").value=d.tagline;$("brand-description").value=d.description;
   $("brand-support").value = d.support_contact;
+  $("brand-guide").value = d.connection_instructions || "";
   $("brand-terms").value = d.terms_url || "";
   renderStoreMark(d.name, d.logo_image_url);
   renderImage("brand-photo", d.welcome_image_url);
@@ -634,7 +686,8 @@ $("brand-form").onsubmit=async e=>{
   e.preventDefault();try{
     await adminApi("PUT","/admin/api/store-profile",{
       name:$("brand-name").value,tagline:$("brand-tagline").value,
-      description:$("brand-description").value,support_contact:$("brand-support").value,terms_url:$("brand-terms").value
+      description:$("brand-description").value,connection_instructions:$("brand-guide").value,
+      support_contact:$("brand-support").value,terms_url:$("brand-terms").value
     });$("admin-shop-name").textContent=$("brand-name").value;$("status").textContent="Оформление сохранено";
   }catch(e){$("status").textContent=e.message}
 };
@@ -663,14 +716,84 @@ const providerCredentials = {
 const providerMarks = {telegram_stars:"★", yookassa:"ЮК", yoomoney:"ЮМ", cryptopay:"₿", platega:"P"};
 const savingProviders = new Set();
 let paymentSettingsRequest = 0;
+let paymentLayout = [];
+let layoutDirty = false;
+let savingLayout = false;
+
+function renderPaymentLayout() {
+  const list = $("payment-layout-list");
+  list.replaceChildren();
+  for (const [index, entry] of paymentLayout.entries()) {
+    const line = document.createElement("div");
+    line.className = "payment-layout-row";
+    const field = document.createElement("label");
+    field.textContent = providerLabels[entry.provider];
+    const input = document.createElement("input");
+    input.maxLength = 24;
+    input.value = entry.label;
+    input.disabled = savingLayout;
+    input.oninput = () => { entry.label = input.value; layoutDirty = true; $("payment-layout-save").disabled = false; };
+    field.append(input);
+    line.append(field);
+    for (const [direction, symbol, text] of [[-1, "↑", "Поднять"], [1, "↓", "Опустить"]]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "action admin-icon-action";
+      button.textContent = symbol;
+      button.setAttribute("aria-label", text + " " + providerLabels[entry.provider]);
+      const next = index + direction;
+      button.disabled = savingLayout || next < 0 || next >= paymentLayout.length;
+      button.onclick = () => {
+        const other = paymentLayout[next];
+        paymentLayout[next] = entry;
+        paymentLayout[index] = other;
+        layoutDirty = true;
+        renderPaymentLayout();
+        const moved = list.children[next];
+        const controls = Array.from(moved.querySelectorAll("button"));
+        (controls.find(control => control.textContent === symbol && !control.disabled)
+          || controls.find(control => !control.disabled))?.focus();
+      };
+      line.append(button);
+    }
+    list.append(line);
+  }
+  $("payment-layout-save").disabled = savingLayout || !layoutDirty;
+}
+
+$("payment-layout-form").onsubmit = async event => {
+  event.preventDefault();
+  if (!layoutDirty || savingLayout) return;
+  savingLayout = true;
+  renderPaymentLayout();
+  const feedback = $("payment-layout-feedback");
+  feedback.textContent = "Сохраняем…";
+  try {
+    const data = await adminApi("PUT", "/admin/api/payment-settings", {presentation:paymentLayout});
+    paymentLayout = data.presentation;
+    layoutDirty = false;
+    await loadPaymentSettings();
+    feedback.textContent = "Порядок и названия сохранены.";
+  } catch (error) {
+    feedback.textContent = error.message;
+  } finally {
+    savingLayout = false;
+    renderPaymentLayout();
+  }
+};
 
 async function loadPaymentSettings() {
   const request = ++paymentSettingsRequest;
   const data = await adminApi("GET", "/admin/api/payment-diagnostics");
   if (request !== paymentSettingsRequest) return;
+  const layout = data.presentation || Object.entries(providerLabels).map(([provider,label]) => ({provider,label}));
+  if (!layoutDirty) {
+    paymentLayout = layout.map(entry => ({...entry}));
+    renderPaymentLayout();
+  }
   const list = $("method-list");
   list.replaceChildren();
-  for (const [provider, label] of Object.entries(providerLabels)) {
+  for (const {provider, label} of layout) {
     const info = data.providers[provider] || {};
     const status = !info.configured
       ? (provider === "telegram_stars" ? "Бот не подключён" : "Нужны реквизиты")
@@ -909,6 +1032,8 @@ async function renderAdminFrame(frame) {
   $("customers-list").hidden = customerOpen;
   if (!customerOpen) {
     openingCustomer++;
+    if (customerPhoto) URL.revokeObjectURL(customerPhoto);
+    customerPhoto = null;
     customer = null;
     $("customer-detail").hidden = true;
   }
@@ -980,6 +1105,11 @@ async function start() {
     try {
       const profile = await api("/admin/api/store-profile");
       renderStoreMark(profile.name, profile.logo_image_url);
+      if (profile.viewer?.photo_url) {
+        const photo = $("admin-viewer-photo");
+        photo.onload = () => { $("admin-viewer").hidden = false; };
+        photo.src = profile.viewer.photo_url;
+      }
     } catch {
       await api("/admin/api/overview");
     }
@@ -1005,6 +1135,12 @@ document.querySelectorAll("[data-tab], [data-open-tab]").forEach(button => {
 for (const button of document.querySelectorAll("[data-back-tab]")) {
   button.onclick = () => goAdminBack(button.dataset.backTab);
 }
+$("customers-search").onsubmit = event => {
+  event.preventDefault();
+  userSearch = $("customers-query").value.trim();
+  userOffset = 0;
+  loadUsers().catch(error => { $("status").textContent = error.message; });
+};
 $("users-refresh").onclick=()=>loadUsers().catch(e=>$("status").textContent=e.message);$("payments-refresh").onclick=()=>loadPayments().catch(e=>$("status").textContent=e.message);
 $("users-prev").onclick=()=>{userOffset=Math.max(0,userOffset-pageSize);loadUsers()};$("users-next").onclick=()=>{userOffset+=pageSize;loadUsers()};
 $("payments-prev").onclick=()=>{paymentOffset=Math.max(0,paymentOffset-pageSize);loadPayments()};$("payments-next").onclick=()=>{paymentOffset+=pageSize;loadPayments()};

@@ -11,6 +11,7 @@ from app.bot import handlers, menu
 from app.db.models import TariffPlan
 from app.services.payment_providers import PaymentLink
 from app.services.plans import plan_revision
+from app.services.store_settings import payment_presentation
 
 
 class BotMenuTests(unittest.IsolatedAsyncioTestCase):
@@ -99,6 +100,7 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
                 SimpleNamespace(id=5, amount=19900), PaymentLink("platega", "id", "https://pay.example/5"),
             )) as create_external,
             patch.object(handlers, "is_payment_method_enabled", return_value=True),
+            patch.object(handlers, "get_payment_presentation", return_value=payment_presentation()),
             patch.object(handlers, "create_stars_payment_for_user", return_value=(SimpleNamespace(id=6), 99)),
         ):
             await start(1)

@@ -125,6 +125,7 @@ class CheckoutContracts(unittest.IsolatedAsyncioTestCase):
 
     async def test_admin_diagnostics_never_reveal_payment_secrets(self):
         with patch.object(routes,"_require_telegram_admin",AsyncMock(return_value={"id":1})), \
+             patch.object(routes,"get_payment_presentation",return_value=[]), \
              patch.object(routes,"get_store_payment_settings",AsyncMock(return_value=(
                  {"telegram_stars":True,"yookassa":True,"yoomoney":False,"cryptopay":False},
                  {"yookassa":{"shop_id":"shop","secret_key":"sensitive-secret"}}))), \
@@ -154,6 +155,9 @@ class CheckoutContracts(unittest.IsolatedAsyncioTestCase):
         with patch.object(handlers, "get_plan", return_value=plan), \
              patch.object(handlers, "get_terms_url", return_value=""), \
              patch.object(handlers, "has_accepted_current_terms") as accepted, \
+             patch.object(handlers, "get_payment_presentation", return_value=[
+                 {"provider":"yookassa", "label":"Карты"}, {"provider":"telegram_stars", "label":"Звёзды"},
+             ]), \
              patch.object(handlers, "welcome_image_path", return_value=None), \
              patch.object(handlers, "get_store_payment_settings", return_value=(methods, credentials)):
             await handlers.fixed_plan_checkout_handler(callback)
@@ -161,8 +165,9 @@ class CheckoutContracts(unittest.IsolatedAsyncioTestCase):
         callback.answer.assert_awaited_once_with()
         keyboard = callback.message.edit_text.await_args.kwargs["reply_markup"].inline_keyboard
         self.assertEqual([row[0].callback_data for row in keyboard], [
-            f"plan:pay:stars:4:0:{revision}", f"plan:pay:yookassa:4:0:{revision}", "plan:select:4:0",
+            f"plan:pay:yookassa:4:0:{revision}", f"plan:pay:stars:4:0:{revision}", "plan:select:4:0",
         ])
+        self.assertIn("Карты", keyboard[0][0].text)
 
     async def test_platega_callback_delivers_only_verified_settled_payments(self):
         app = FastAPI()
