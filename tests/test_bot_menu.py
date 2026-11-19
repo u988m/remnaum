@@ -84,6 +84,7 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
                   "client": "Happ", "platform": "iOS", "os_version": "18"}
         with (
             patch.object(menu, "redis", mock_redis),
+            patch.object(handlers, "list_document_kinds", return_value=set()),
             patch.object(menu, "customer_is_blocked", return_value=False) as blocked_user,
             patch.object(bot.session, "make_request", side_effect=send),
             patch.object(handlers, "get_or_create_user", return_value=False),

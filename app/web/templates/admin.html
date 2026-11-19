@@ -27,6 +27,7 @@
   <button data-tab="referrals" type="button">Рефералы</button>
   <p class="sidebar-category">Система</p>
   <button data-tab="configuration" type="button">Настройки</button>
+  <button data-tab="documents" type="button">Документы</button>
 </nav>
 </aside>
 <div class="admin-workspace">
@@ -81,6 +82,26 @@
     <button type="button" data-open-tab="brand"><strong>Оформление и поддержка</strong><span>Название, изображения и контакт магазина</span></button>
     <button type="button" data-open-tab="trial"><strong>Пробный доступ</strong><span>Срок, трафик и число устройств</span></button>
   </div>
+</section>
+<section class="section" id="documents-view" hidden>
+  <h2>Документы</h2>
+  <p class="muted">Опубликованные документы доступны в меню бота «Информация».</p>
+  <form data-document-kind="terms">
+    <fieldset disabled>
+      <legend>Пользовательское соглашение</legend>
+      <label>Текст соглашения<textarea rows="6" maxlength="20000" required></textarea></label>
+      <button class="action primary" type="submit">Опубликовать</button>
+      <p class="muted" role="status"></p>
+    </fieldset>
+  </form>
+  <form data-document-kind="privacy">
+    <fieldset disabled>
+      <legend>Политика конфиденциальности</legend>
+      <label>Текст политики<textarea rows="6" maxlength="20000" required></textarea></label>
+      <button class="action primary" type="submit">Опубликовать</button>
+      <p class="muted" role="status"></p>
+    </fieldset>
+  </form>
 </section>
 <section class="section" id="users-view" hidden>
   <div id="customers-list">
@@ -395,6 +416,7 @@
 </div></main>
 <svg class="admin-icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <symbol id="ai-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h12"/></symbol>
+  <symbol id="ai-document" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6m-6 4h6"/></symbol>
   <symbol id="ai-back" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></symbol>
   <symbol id="ai-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10h-6v-7H9v7H3z"/></symbol>
   <symbol id="ai-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15.74-6.26L21 8m0-5v5h-5m5 4a9 9 0 0 1-15.74 6.26L3 16m0 5v-5h5"/></symbol>

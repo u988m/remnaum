@@ -142,6 +142,12 @@ class StoreProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class StoreDocument(Base):
+    __tablename__ = "store_documents"
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True)
+    body: Mapped[str] = mapped_column(Text)
+
+
 class ReferralSettings(Base):
     """Owner-controlled referral rewards. Disabled until the owner opts in."""
     __tablename__ = "referral_settings"

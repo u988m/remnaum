@@ -29,6 +29,7 @@ class LegacyMigrationTests(unittest.IsolatedAsyncioTestCase):
             test_engine = create_async_engine(base.set(database=name))
             async with test_engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+                await conn.execute(text("DROP TABLE store_documents"))
                 await conn.execute(text("ALTER TABLE subscriptions DROP COLUMN paid_tariff"))
                 await conn.execute(text(
                     "ALTER TABLE tariff_plans DROP COLUMN internal_squads, "
@@ -60,7 +61,8 @@ class LegacyMigrationTests(unittest.IsolatedAsyncioTestCase):
                         lambda c: {x["name"] for x in inspect(c).get_columns("tariff_plans")}
                     )
                     self.assertEqual(user, "legacy")
-                    self.assertEqual(revision, "0005_device_aliases")
+                    self.assertEqual(revision, "0006_store_documents")
+                    self.assertEqual(await conn.scalar(text("SELECT COUNT(*) FROM store_documents")), 0)
                     legacy_plan = (await conn.execute(text(
                         "SELECT title, price_rub_minor, extra_device_price_rub_minor, badge, is_featured FROM tariff_plans"
                     ))).one()
