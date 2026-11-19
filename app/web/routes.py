@@ -183,7 +183,7 @@ async def payment_return(failed: bool = False):
     return HTMLResponse(
         "<!doctype html><html lang='ru' data-theme='monochrome'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'><title>Remnaum</title>"
-        "<link rel='stylesheet' href='/static/theme.css'><link rel='stylesheet' href='/static/store.css'></head>"
+        "<link rel='stylesheet' href='/static/theme.css'><link rel='stylesheet' href='/store-theme.css'><link rel='stylesheet' href='/static/store.css'></head>"
         f"<body><main><section class='store-panel'><h2>{heading}</h2><p>{message}</p></section></main></body></html>"
     )
 
@@ -206,7 +206,7 @@ async def yoomoney_payment_form(payment_id: int):
     return_url = escape(f"{settings.public_base_url.rstrip('/')}/payments/return", quote=True)
     html = f"""<!doctype html>
 <html lang="ru" data-theme="monochrome"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Оплата через ЮMoney</title><link rel="stylesheet" href="/static/theme.css"><link rel="stylesheet" href="/static/store.css"></head>
+<title>Оплата через ЮMoney</title><link rel="stylesheet" href="/static/theme.css"><link rel="stylesheet" href="/store-theme.css"><link rel="stylesheet" href="/static/store.css"></head>
 <body><main><section class="store-panel">
 <h2>Оплата через ЮMoney</h2><p class="price">{amount} ₽</p>
 <form class="store-pay-methods" method="post" action="https://yoomoney.ru/quickpay/confirm">
@@ -969,7 +969,7 @@ async def webapp_checkout_ready_plan(data: WebAppFixedPlanCheckout, x_telegram_i
     return {"payment_id": payment.id, "stars": stars, "invoice_url": url}
 
 
-from app.services.store_profile import get_store_profile, update_store_profile, get_terms_url
+from app.services.store_profile import COLOR_OPACITY, THEME_COLORS, get_store_profile, update_store_profile, get_terms_url
 
 
 class StoreProfilePayload(BaseModel):
@@ -1400,7 +1400,6 @@ from fastapi import Query
 from pydantic import StringConstraints
 
 from app.bot.campaigns import campaign_lock, run_campaign
-from app.db.models import UserTheme
 from app.services import support
 from app.services.bot_identity import bot_username
 from app.services.store_operations import save_operations
@@ -1504,10 +1503,6 @@ async def admin_campaign(data: CampaignPayload, background: BackgroundTasks, x_t
     return {"queued": True}
 
 
-THEME_COLORS = {
-    "bg", "surface", "surface-raised", "input", "border", "border-strong", "text",
-    "muted", "subtle", "primary", "on-primary", "overlay", "glow", "grid", "focus", "success", "danger",
-}
 HexColor = Annotated[str, StringConstraints(pattern=r"^#[0-9a-fA-F]{6}$")]
 
 
@@ -1515,27 +1510,39 @@ class ThemePayload(BaseModel):
     colors: dict[str, HexColor] = Field(max_length=len(THEME_COLORS))
 
 
+@router.get("/store-theme.css", include_in_schema=False)
+async def store_theme_css():
+    colors = (await get_store_profile())["theme_colors"]
+    rules = "".join(f"--color-{key}:{value}{COLOR_OPACITY.get(key, '')};" for key, value in colors.items())
+    return Response(f":root,[data-theme=monochrome]{{{rules}}}", media_type="text/css",
+                    headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"})
+
+
 @router.get("/api/v1/webapp/theme")
 async def webapp_theme(x_telegram_init_data: WebCredentials):
-    identity = await _webapp_user(x_telegram_init_data)
-    async with SessionLocal() as session:
-        colors = await session.scalar(select(UserTheme.colors).join(User).where(User.telegram_id == int(identity["id"])))
-    return {"colors": colors or {}}
+    await _webapp_user(x_telegram_init_data)
+    return {"colors": (await get_store_profile())["theme_colors"]}
 
 
-@router.put("/api/v1/webapp/theme")
-async def webapp_save_theme(data: ThemePayload, x_telegram_init_data: WebCredentials):
-    from sqlalchemy.dialects.postgresql import insert
+@router.put("/admin/api/theme")
+async def admin_save_theme(data: ThemePayload, x_telegram_init_data: WebCredentials):
+    await _require_telegram_admin(x_telegram_init_data)
+    try:
+        profile = await update_store_profile({"theme_colors": data.colors})
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"colors": profile["theme_colors"]}
 
-    identity = await _webapp_user(x_telegram_init_data)
-    if data.colors.keys() - THEME_COLORS:
-        raise HTTPException(422, "Неизвестный цвет темы.")
-    async with SessionLocal.begin() as session:
-        user_id = await session.scalar(select(User.id).where(User.telegram_id == int(identity["id"])))
-        await session.execute(insert(UserTheme).values(user_id=user_id, colors=data.colors).on_conflict_do_update(
-            index_elements=[UserTheme.user_id], set_={"colors": data.colors},
-        ))
-    return data
+
+class SupportSettings(BaseModel):
+    support_contact: Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)]
+
+
+@router.put("/admin/api/support-settings")
+async def admin_save_support_settings(data: SupportSettings, x_telegram_init_data: WebCredentials):
+    await _require_telegram_admin(x_telegram_init_data)
+    profile = await update_store_profile(data.model_dump())
+    return {"support_contact": profile["support_contact"]}
 
 
 TicketBody = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=3000)]
@@ -1553,36 +1560,46 @@ class TicketState(BaseModel):
     closed: bool
 
 
+TicketFilter = Literal["all", "open", "closed"]
+TicketId = Annotated[int, Field(gt=0, le=2_147_483_647)]
+
+
 @router.get("/api/v1/webapp/tickets")
-async def webapp_tickets(x_telegram_init_data: WebCredentials, offset: int = Query(default=0, ge=0)):
+async def webapp_tickets(
+    x_telegram_init_data: WebCredentials, offset: int = Query(default=0, ge=0, le=2_147_483_647),
+    state: TicketFilter = "all", search: str = Query(default="", max_length=120),
+):
     identity = await _webapp_user(x_telegram_init_data)
-    return await support.list_tickets(int(identity["id"]), offset)
+    return await support.list_tickets(int(identity["id"]), offset, state, search.strip())
 
 
 @router.post("/api/v1/webapp/tickets", status_code=201)
 async def webapp_open_ticket(data: TicketPayload, background: BackgroundTasks, x_telegram_init_data: WebCredentials):
     identity = await _webapp_user(x_telegram_init_data)
     ticket_id = await support.create_ticket(int(identity["id"]), data.subject, data.body)
-    background.add_task(support.notify_ticket, bot, ticket_id)
+    background.add_task(support.notify_ticket, bot, ticket_id, event="created")
     return {"id": ticket_id}
 
 
 @router.get("/api/v1/webapp/tickets/{ticket_id}")
-async def webapp_ticket(ticket_id: int, x_telegram_init_data: WebCredentials):
+async def webapp_ticket(ticket_id: TicketId, x_telegram_init_data: WebCredentials):
     identity = await _webapp_user(x_telegram_init_data)
     return await _ticket_detail(ticket_id, int(identity["id"]))
 
 
 @router.post("/api/v1/webapp/tickets/{ticket_id}/replies")
-async def webapp_reply(ticket_id: int, data: ReplyPayload, background: BackgroundTasks, x_telegram_init_data: WebCredentials):
+async def webapp_reply(ticket_id: TicketId, data: ReplyPayload, background: BackgroundTasks, x_telegram_init_data: WebCredentials):
     identity = await _webapp_user(x_telegram_init_data)
     return await _ticket_reply(ticket_id, data.body, background, int(identity["id"]))
 
 
 @router.get("/admin/api/tickets")
-async def admin_tickets(x_telegram_init_data: WebCredentials, offset: int = Query(default=0, ge=0)):
+async def admin_tickets(
+    x_telegram_init_data: WebCredentials, offset: int = Query(default=0, ge=0, le=2_147_483_647),
+    state: TicketFilter = "all", search: str = Query(default="", max_length=120),
+):
     await _require_telegram_admin(x_telegram_init_data)
-    return await support.list_tickets(None, offset)
+    return await support.list_tickets(None, offset, state, search.strip())
 
 
 async def _ticket_detail(ticket_id, user_id=None):
@@ -1594,30 +1611,48 @@ async def _ticket_detail(ticket_id, user_id=None):
 
 async def _ticket_reply(ticket_id, body, background, user_id=None):
     try:
-        recipient = await support.update_ticket(ticket_id, user_id, body=body)
+        result = await support.update_ticket(ticket_id, user_id, body=body)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    if recipient is None:
+    if result is None:
         raise HTTPException(404, "Тикет не найден.")
+    recipient, _ = result
     background.add_task(support.notify_ticket, bot, ticket_id, recipient if user_id is None else None)
     return {"ok": True}
 
 
 @router.get("/admin/api/tickets/{ticket_id}")
-async def admin_ticket(ticket_id: int, x_telegram_init_data: WebCredentials):
+async def admin_ticket(ticket_id: TicketId, x_telegram_init_data: WebCredentials):
     await _require_telegram_admin(x_telegram_init_data)
     return await _ticket_detail(ticket_id)
 
 
 @router.post("/admin/api/tickets/{ticket_id}/replies")
-async def admin_reply(ticket_id: int, data: ReplyPayload, background: BackgroundTasks, x_telegram_init_data: WebCredentials):
+async def admin_reply(ticket_id: TicketId, data: ReplyPayload, background: BackgroundTasks, x_telegram_init_data: WebCredentials):
     await _require_telegram_admin(x_telegram_init_data)
     return await _ticket_reply(ticket_id, data.body, background)
 
 
-@router.put("/admin/api/tickets/{ticket_id}")
-async def admin_ticket_state(ticket_id: int, data: TicketState, x_telegram_init_data: WebCredentials):
-    await _require_telegram_admin(x_telegram_init_data)
-    if await support.update_ticket(ticket_id, None, closed=data.closed) is None:
+async def _set_ticket_state(ticket_id, closed, background, user_id=None):
+    result = await support.update_ticket(ticket_id, user_id, closed=closed)
+    if result is None:
         raise HTTPException(404, "Тикет не найден.")
-    return {"ok": True}
+    recipient, changed = result
+    if changed:
+        background.add_task(support.notify_ticket, bot, ticket_id, recipient if user_id is None else None,
+                            event="closed" if closed else "reopened")
+    return {"closed": closed}
+
+
+@router.put("/api/v1/webapp/tickets/{ticket_id}")
+async def webapp_ticket_state(ticket_id: TicketId, data: TicketState, background: BackgroundTasks,
+                              x_telegram_init_data: WebCredentials):
+    identity = await _webapp_user(x_telegram_init_data)
+    return await _set_ticket_state(ticket_id, data.closed, background, int(identity["id"]))
+
+
+@router.put("/admin/api/tickets/{ticket_id}")
+async def admin_ticket_state(ticket_id: TicketId, data: TicketState, background: BackgroundTasks,
+                             x_telegram_init_data: WebCredentials):
+    await _require_telegram_admin(x_telegram_init_data)
+    return await _set_ticket_state(ticket_id, data.closed, background)

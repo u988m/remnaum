@@ -5,9 +5,10 @@ import json
 import secrets
 from html import escape
 from urllib.parse import urlencode, urlsplit
+from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -19,12 +20,14 @@ from app.db.session import SessionLocal
 from app.services.bot_identity import bot_username
 from app.services.store_auth import issue_store_session, verify_store_session, verify_telegram_login
 from app.services.store_operations import get_operations
+from app.services.support import ticket_path
 from app.services.users import BLOCKED_MESSAGE, BlockedCustomer, upsert_active_customer
 
 router = APIRouter()
 SESSION = "__Host-remnaum-web"
 FLOW = "__Host-remnaum-login"
 FLOW_TTL = 600
+LoginTicket = Annotated[int | None, Query(gt=0, le=2_147_483_647)]
 
 
 def app_origin():
@@ -82,8 +85,8 @@ async def web_credentials(request: Request, x_telegram_init_data: str | None = H
     return x_telegram_init_data or await browser_identity(request)
 
 
-def login_response(telegram_id, provider):
-    response = RedirectResponse("/", status_code=303)
+def login_response(telegram_id, provider, destination="/"):
+    response = RedirectResponse(destination, status_code=303)
     set_cookie(response, SESSION, provider + "." + issue_store_session(telegram_id, session_key(provider)), 43200)
     response.delete_cookie(FLOW, secure=True, httponly=True)
     return response
@@ -105,26 +108,29 @@ async def take_flow(request, provider, state):
 
 
 @router.get("/auth", response_class=HTMLResponse)
-async def login_page(request: Request):
+async def login_page(request: Request, admin: bool = False, ticket: LoginTicket = None):
     require_app_host(request)
     policy = await get_operations()
+    destination = ticket_path(ticket, admin=admin) if ticket else "/admin" if admin else "/"
     options = []
     nonce = None
     if policy["telegram_login"] and bot_username() and settings.telegram_bot_token:
-        nonce, state = await save_flow(request, "telegram", {})
+        nonce, state = await save_flow(request, "telegram", {"destination": destination})
         options.append(
             '<script async src="https://telegram.org/js/telegram-widget.js?22" '
             f'data-telegram-login="{escape(bot_username(), quote=True)}" data-size="large" '
             f'data-auth-url="{escape(app_origin(), quote=True)}/auth/telegram/{state}"></script>'
         )
-    if policy["google_login"]:
-        options.append('<p><a href="/auth/google">Войти через Google</a></p>')
+    if policy["google_login"] and not admin:
+        target = "/auth/google" + ("?" + urlencode({"ticket": ticket}) if ticket else "")
+        options.append(f'<p><a class="secondary-btn" href="{target}">Войти через Google</a></p>')
     if not options:
         options.append("<p>Откройте Mini App из Telegram.</p>")
     response = HTMLResponse(
         '<!doctype html><html lang="ru"><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         '<title>Вход</title><link rel="stylesheet" href="/static/theme.css">'
+        '<link rel="stylesheet" href="/store-theme.css">'
         '<main style="max-width:32rem;margin:12vh auto;padding:1.5rem"><h1>Вход</h1>'
         + "".join(options) + "</main></html>",
         headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
@@ -139,7 +145,7 @@ async def telegram_browser_login(request: Request, state: str):
     require_app_host(request)
     if not (await get_operations())["telegram_login"]:
         raise HTTPException(403, "Вход через Telegram отключён.")
-    await take_flow(request, "telegram", state)
+    flow = await take_flow(request, "telegram", state)
     try:
         identity = verify_telegram_login(dict(request.query_params), settings.telegram_bot_token)
         async with SessionLocal.begin() as session:
@@ -148,11 +154,11 @@ async def telegram_browser_login(request: Request, state: str):
         raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(401, str(exc)) from exc
-    return login_response(identity["id"], "telegram")
+    return login_response(identity["id"], "telegram", flow.get("destination", "/"))
 
 
 @router.get("/auth/google")
-async def google_login_start(request: Request, link: bool = False):
+async def google_login_start(request: Request, link: bool = False, ticket: LoginTicket = None):
     require_app_host(request)
     policy = await get_operations()
     if not policy["google_login"]:
@@ -166,6 +172,7 @@ async def google_login_start(request: Request, link: bool = False):
     verifier = secrets.token_urlsafe(48)
     nonce, state = await save_flow(request, "google", {
         "verifier": verifier, "telegram_id": telegram_id, "client_id": policy["google_client_id"],
+        "destination": ticket_path(ticket) if ticket else "/",
     })
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
     response = RedirectResponse("https://accounts.google.com/o/oauth2/v2/auth?" + urlencode({
@@ -226,7 +233,8 @@ async def google_login_finish(request: Request, state: str, code: str = ""):
                 telegram_id = user.telegram_id
     except IntegrityError as exc:
         raise HTTPException(409, "К этому профилю уже привязан аккаунт Google.") from exc
-    return login_response(telegram_id, "telegram" if flow["telegram_id"] is not None else "google")
+    provider = "telegram" if flow["telegram_id"] is not None else "google"
+    return login_response(telegram_id, provider, flow.get("destination", "/"))
 
 
 @router.post("/auth/logout")

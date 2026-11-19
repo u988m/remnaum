@@ -405,7 +405,7 @@ $("customer-delete-form").onsubmit = event => {
   mutateCustomer("DELETE", "", {confirm_telegram_id:Number(confirmation)}, "Аккаунт удалён.", true);
 };
 async function loadPayments(){const d=await api("/admin/api/payments?limit="+pageSize+"&offset="+paymentOffset);$("payments-table").replaceChildren();d.items.forEach(p=>row("payments-table",[p.id,p.telegram_id ?? "Аккаунт удалён",providerLabels[p.provider]||p.provider,formatPaymentAmount(p),paymentStatus(p.status),new Date(p.created_at).toLocaleString()]));$("payments-page").textContent="Показано "+(d.total?paymentOffset+1:0)+"–"+Math.min(paymentOffset+d.items.length,d.total)+" из "+d.total;$("payments-prev").disabled=paymentOffset===0;$("payments-next").disabled=paymentOffset+pageSize>=d.total}
-async function adminApi(method,path,body){const r=await fetch(path,{method,headers:{"X-Telegram-Init-Data":tg?.initData||"","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(typeof d.detail==="string"?d.detail:"Ошибка запроса");return d}
+async function adminApi(method,path,body){const r=await fetch(path,{method,headers:{"X-Telegram-Init-Data":tg?.initData||"","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Object.assign(Error(typeof d.detail==="string"?d.detail:"Ошибка запроса"),{status:r.status});return d}
 let squadItems = [];
 let selectedSquads = [];
 let modeSquads = null;
@@ -675,7 +675,8 @@ async function loadBotIdentity(){
 async function loadBrand(){
   const d=await adminApi("GET","/admin/api/store-profile");
   $("brand-name").value=d.name;$("brand-tagline").value=d.tagline;$("brand-description").value=d.description;
-  $("brand-support").value = d.support_contact;
+  fillPalette(d.theme_colors || {});
+  $("brand-preview-name").textContent = d.name;
   $("brand-guide").value = d.connection_instructions || "";
   $("brand-terms").value = d.terms_url || "";
   renderStoreMark(d.name, d.logo_image_url);
@@ -683,12 +684,14 @@ async function loadBrand(){
   renderImage("brand-logo", d.logo_image_url);
   loadBotIdentity();
 }
+setupPalette(colors => adminApi("PUT", "/admin/api/theme", {colors}));
+$("brand-name").oninput = event => { $("brand-preview-name").textContent = event.target.value || "Remnaum"; };
 $("brand-form").onsubmit=async e=>{
   e.preventDefault();try{
     await adminApi("PUT","/admin/api/store-profile",{
       name:$("brand-name").value,tagline:$("brand-tagline").value,
       description:$("brand-description").value,connection_instructions:$("brand-guide").value,
-      support_contact:$("brand-support").value,terms_url:$("brand-terms").value
+      terms_url:$("brand-terms").value
     });$("admin-shop-name").textContent=$("brand-name").value;$("status").textContent="Оформление сохранено";
   }catch(e){$("status").textContent=e.message}
 };
@@ -1047,7 +1050,7 @@ for (const form of documentForms) {
 
 const sidebarIconNames = {
   overview:"grid", plans:"tag", users:"users", payments:"card",
-  bonuses:"ticket", referrals:"gift", configuration:"wallet", documents:"document",
+  bonuses:"ticket", referrals:"gift", configuration:"wallet", documents:"document", brand:"palette", tickets:"support",
 };
 for(const button of document.querySelectorAll(".admin-tabs [data-tab]")){
   const icon=document.createElementNS("http://www.w3.org/2000/svg","svg");
@@ -1130,12 +1133,44 @@ $("broadcast-form").onsubmit = event => {
 $("refresh-all-menus").onclick = event =>
   launchCampaign(event.currentTarget, {action: "refresh"}, "Заменить текущее меню у всех доступных пользователей?");
 const loadAdminTickets = ticketPanel($("tickets-view"), (path, data, method) =>
-  adminApi(method || "GET", "/admin/api/tickets" + path, data), {admin: true});
+  adminApi(method || "GET", "/admin/api/tickets" + path, data), {
+  admin: true,
+  openTicket: id => openTab("tickets", {panel: "ticket", record: id, replace: activeFrame.panel === "ticket"}),
+  openHistory: () => {
+    if (activeFrame.panel === "ticket" && activeFrame.depth) goAdminBack();
+    else openTab("tickets", {replace: true});
+  },
+});
+
+const contactForm = $("support-contact-form");
+async function loadSupportContact() {
+  if (contactForm.dataset.loaded) return;
+  const profile = await api("/admin/api/store-profile");
+  $("support-contact").value = profile.support_contact || "";
+  contactForm.dataset.loaded = "true";
+}
+contactForm.onsubmit = async event => {
+  event.preventDefault();
+  event.submitter.disabled = true;
+  try {
+    const saved = await adminApi("PUT", "/admin/api/support-settings", {
+      support_contact: $("support-contact").value,
+    });
+    $("support-contact").value = saved.support_contact;
+    $("support-contact-status").textContent = "Контакт сохранён.";
+  } catch (error) {
+    $("support-contact-status").textContent = error.message;
+  } finally {
+    event.submitter.disabled = false;
+  }
+};
 
 const tabs = {
   operations: {sections: ["operations-view"], load: loadOperations},
   campaigns: {sections: ["campaigns-view"]},
-  tickets: {sections: ["tickets-view"], load: loadAdminTickets},
+  tickets: {sections: ["tickets-view"], load: frame => Promise.all([
+    loadAdminTickets(frame.record), loadSupportContact(),
+  ])},
   overview: {sections: ["overview-view"], load: overview},
   plans: {sections: ["plans-view"], load: loadPlans},
   users: {sections: ["users-view"], load: loadUsers},
@@ -1170,7 +1205,7 @@ function canonicalTab(requested) {
 function parentFor({tab, panel}) {
   if (panel) return tab;
   if (providerByTab[tab]) return "settings";
-  if (["settings", "brand", "trial", "notifications", "operations", "campaigns", "tickets"].includes(tab)) return "configuration";
+  if (["settings", "trial", "notifications", "operations", "campaigns"].includes(tab)) return "configuration";
   return null;
 }
 
@@ -1227,7 +1262,8 @@ async function renderAdminFrame(frame) {
         lastPlanFrame = frame.id;
       }
     } else {
-      await tab.load?.();
+      if (frame.tab === "tickets") await tab.load(frame);
+      else await tab.load?.();
     }
   } catch (error) {
     if (activeFrame === frame) $("status").textContent = error.message;
@@ -1244,6 +1280,8 @@ function openTab(requested, {panel = null, record = null, replace = false} = {})
   const frame = {tab, panel, record, depth: activeFrame.depth + (replace ? 0 : 1), id: ++frameSequence};
   const url = new URL(location.href);
   url.searchParams.set("tab", tab);
+  if (tab === "tickets" && panel === "ticket") url.searchParams.set("ticket", record);
+  else url.searchParams.delete("ticket");
   if (replace) history.replaceState({adminPanel: frame}, "", url);
   else history.pushState({adminPanel: frame}, "", url);
   renderAdminFrame(frame);
@@ -1288,8 +1326,11 @@ async function start() {
     $("dashboard").hidden = false;
     adminMenuOpen.hidden = false;
     document.querySelector(".admin-return-link").href = "/?section=account" + location.hash;
+    const params = new URLSearchParams(location.search);
+    const tab = canonicalTab(params.get("tab"));
+    const record = tab === "tickets" ? ticketId(params.get("ticket")) : null;
     const initial = history.state?.adminPanel || {
-      tab: canonicalTab(new URLSearchParams(location.search).get("tab")), panel: null, record: null, depth: 0, id: 0,
+      tab, panel: record ? "ticket" : null, record, depth: 0, id: 0,
     };
     frameSequence = initial.id;
     history.replaceState({adminPanel: initial}, "");
@@ -1299,7 +1340,9 @@ async function start() {
     $("loading").textContent = error.message;
     if (!tg?.initData) {
       const link = document.createElement("a");
-      link.href = "/auth";
+      const requested = new URLSearchParams(location.search);
+      const id = requested.get("tab") === "tickets" ? ticketId(requested.get("ticket")) : null;
+      link.href = "/auth?admin=true" + (id ? "&ticket=" + id : "");
       link.textContent = "Войти через Telegram";
       $("loading").append(document.createElement("br"), link);
     }

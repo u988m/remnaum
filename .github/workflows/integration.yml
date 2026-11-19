@@ -101,7 +101,7 @@ jobs:
           if [ "${{ matrix.mode }}" = panel-network ]; then
             docker compose exec -T app python -c "import socket; assert socket.gethostbyname('remnaum-api')"
           fi
-          test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT version_num FROM alembic_version;')" = "0008_store_operations"
+          test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT version_num FROM alembic_version;')" = "0009_ticket_activity"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM users;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM payments;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM subscriptions;')" = "0"
@@ -147,6 +147,8 @@ jobs:
           assert request('/admin/api/operations').status == 401
           assert request('/api/v1/webapp/tickets').status == 401
           assert request('/api/v1/webapp/theme').status == 401
+          assert request('/store-theme.css').status == 200
+          assert request('/admin/api/theme', 'PUT', payload='{"colors":{}}').status == 401
           assert request('/api/v1/webapp/notifications').status == 401
           assert request('/admin/api/store-profile/welcome-image', 'PUT', payload='{"data_base64":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}').status == 401
           assert request('/api/v1/webapp/offers').status == 401

@@ -279,6 +279,7 @@ class SupportTicket(Base):
     subject: Mapped[str] = mapped_column(String(120))
     closed: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class SupportReply(Base):
@@ -291,6 +292,8 @@ class SupportReply(Base):
 
 
 class UserTheme(Base):
+    """Legacy table retained for compatibility with existing backups."""
+
     __tablename__ = "user_themes"
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     colors: Mapped[dict] = mapped_column(JSON)

@@ -6,12 +6,16 @@ const $=id=>document.getElementById(id);
 const orderDialog = $("page-order");
 const deviceEditor = $("device-editor");
 let awaitingBack = false;
-const requestedPage = new URLSearchParams(location.search).get("section");
+const pageParams = new URLSearchParams(location.search);
+const requestedPage = pageParams.get("section");
 const rootPage = ["account", "support", "tickets"].includes(requestedPage) ? requestedPage : "vpn";
 const primaryPages = new Set(["vpn", "bonuses", "devices", "account"]);
 const orderScreens = new Map();
 const scrollPositions = new Map();
-let screen = {page: rootPage, tab: rootPage, depth: 0, id: 0};
+let screen = {
+  page: rootPage, tab: primaryPages.has(rootPage) ? rootPage : "account", depth: 0, id: 0,
+  ticket: rootPage === "tickets" ? ticketId(pageParams.get("ticket")) : null,
+};
 let screenId = 0;
 let navigationReady = false;
 
@@ -26,7 +30,7 @@ function renderScreen(next) {
   const visiblePage = order ? next.origin : next.page;
   const topbar = document.querySelector(".topbar");
   topbar.hidden = visiblePage === "vpn";
-  $("shop-back").hidden = !next.depth;
+  $("shop-back").hidden = !next.depth && visiblePage !== "tickets";
   if (deviceEditor.open && next.page !== "devices") deviceEditor.close();
   for (const panel of document.querySelectorAll("[data-page-panel]")) {
     panel.hidden = panel.dataset.pagePanel !== visiblePage;
@@ -43,9 +47,11 @@ function renderScreen(next) {
     orderDialog.close();
   }
   if (next.page === "notifications") loadNotificationPreferences();
-  if (next.page === "tickets") loadTickets();
-  if (!order && previous.page !== next.page) {
+  if (next.page === "tickets") loadTickets(next.ticket);
+  if (!order && (previous.page !== next.page || previous.ticket !== next.ticket)) {
     window.scrollTo(0, scrollPositions.get(next.id) || 0);
+  }
+  if (!order && previous.page !== next.page) {
     if (previous.origin !== next.page) {
       if (next.page === "purchases") loadPurchases();
       if (next.page === "devices") loadDevices();
@@ -55,23 +61,38 @@ function renderScreen(next) {
   }
 }
 
-function switchPage(page, order = null) {
-  if (!navigationReady || (page === screen.page && !order)) return;
+function switchPage(page, order = null, ticket = null, replace = false) {
+  if (!navigationReady || (page === screen.page && !order && ticket === (screen.ticket ?? null))) return;
   if (!orderDialog.open) scrollPositions.set(screen.id, window.scrollY);
   const next = {
-    page, id: ++screenId, depth: screen.depth + 1, tab: primaryPages.has(page) ? page : screen.tab,
+    page, ticket, id: ++screenId, depth: screen.depth + (replace ? 0 : 1), tab: primaryPages.has(page) ? page : screen.tab,
   };
   if (order) {
     next.origin = screen.page;
     orderScreens.set(next.id, order);
   }
-  history.pushState({miniShop: next}, "");
+  const url = new URL(location.href);
+  if (page === "tickets") {
+    url.searchParams.set("section", "tickets");
+    if (ticket) url.searchParams.set("ticket", ticket);
+    else url.searchParams.delete("ticket");
+  } else if (url.searchParams.get("section") === "tickets") {
+    url.searchParams.delete("ticket");
+    if (["account", "support"].includes(page)) url.searchParams.set("section", page);
+    else url.searchParams.delete("section");
+  }
+  if (replace) history.replaceState({miniShop: next}, "", url);
+  else history.pushState({miniShop: next}, "", url);
   renderScreen(next);
   tg?.HapticFeedback?.selectionChanged?.();
 }
 
 function goBack() {
-  if (!screen.depth || awaitingBack) return;
+  if (awaitingBack) return;
+  if (!screen.depth) {
+    if (screen.page === "tickets") switchPage(screen.ticket ? "tickets" : "support", null, null, true);
+    return;
+  }
   awaitingBack = true;
   history.back();
 }
@@ -123,66 +144,15 @@ async function api(path, body, method = body ? "POST" : "GET") {
   return data;
 }
 
-const loadTickets = ticketPanel($("user-tickets"), (path, data, method) =>
-  api("/api/v1/webapp/tickets" + path, data, method));
+const loadTickets = ticketPanel($("page-tickets"), (path, data, method) =>
+  api("/api/v1/webapp/tickets" + path, data, method), {
+    openTicket: id => switchPage("tickets", null, id, screen.page === "tickets" && Boolean(screen.ticket)),
+    openHistory: () => {
+      if (screen.ticket && screen.depth) goBack();
+      else switchPage("tickets", null, null, true);
+    },
+  });
 $("check-channel").onclick = () => location.reload();
-
-const colorLabels = {
-  bg: "Фон", surface: "Карточки", "surface-raised": "Выделенные карточки",
-  input: "Поля ввода", border: "Границы", "border-strong": "Активные границы",
-  text: "Текст", muted: "Вторичный текст", subtle: "Приглушённый текст",
-  primary: "Кнопки", "on-primary": "Текст на кнопках", overlay: "Затемнение",
-  glow: "Свечение", grid: "Сетка", focus: "Фокус", success: "Успешные действия", danger: "Опасные действия",
-};
-const themeRoot = document.documentElement;
-const themeInputs = new Map();
-let themeColors = {};
-const themeDefaults = {overlay: "#090909", glow: "#ffffff", grid: "#ffffff"};
-for (const [key, title] of Object.entries(colorLabels)) {
-  const label = document.createElement("label");
-  const input = document.createElement("input");
-  const original = getComputedStyle(themeRoot).getPropertyValue("--color-" + key).trim();
-  themeDefaults[key] ??= original.length === 4 ? "#" + [...original.slice(1)].map(char => char.repeat(2)).join("") : original;
-  input.type = "color";
-  input.value = themeDefaults[key];
-  input.oninput = () => {
-    themeColors[key] = input.value;
-    applyTheme(themeColors);
-  };
-  themeInputs.set(key, input);
-  label.append(title, input);
-  $("theme-colors").append(label);
-}
-
-function applyTheme(colors) {
-  for (const key of themeInputs.keys()) {
-    const value = colors[key];
-    if (value) {
-      const opacity = {overlay: "eb", glow: "1f", grid: "0d"}[key] || "";
-      themeRoot.style.setProperty("--color-" + key, value + opacity);
-    } else themeRoot.style.removeProperty("--color-" + key);
-    themeInputs.get(key).value = value || themeDefaults[key];
-  }
-}
-
-async function saveTheme(colors, button) {
-  button.disabled = true;
-  try {
-    const saved = await api("/api/v1/webapp/theme", {colors}, "PUT");
-    themeColors = saved.colors;
-    applyTheme(themeColors);
-    $("theme-status").textContent = "Тема сохранена.";
-  } catch (error) {
-    $("theme-status").textContent = error.message;
-  } finally {
-    button.disabled = false;
-  }
-}
-$("theme-form").onsubmit = event => {
-  event.preventDefault();
-  saveTheme({...themeColors}, event.submitter);
-};
-$("theme-reset").onclick = event => saveTheme({}, event.currentTarget);
 
 const notificationPreferencesForm = $("notification-preferences");
 const notificationPreferencesStatus = $("notification-preferences-status");
@@ -905,21 +875,18 @@ async function start() {
     $("loading").hidden = true;
     $("app").hidden = false;
     $("bottom-nav").hidden = false;
-    const restoredScreen = history.state?.miniShop;
+    const restoredScreen = history.state?.miniShop?.page === "theme" ? null : history.state?.miniShop;
     if (restoredScreen) screenId = restoredScreen.id;
     else history.replaceState({miniShop: screen}, "");
     history.scrollRestoration = "manual";
     navigationReady = true;
     renderScreen(restoredScreen || screen);
-    await Promise.all([
-      loadReadyPlans(),
-      api("/api/v1/webapp/theme").then(data => {
-        themeColors = data.colors;
-        applyTheme(themeColors);
-      }).catch(() => {}),
-    ]);
+    await loadReadyPlans();
   } catch (error) {
-    if (error.status === 401 && !tg?.initData) $("login-options").hidden = false;
+    if (error.status === 401 && !tg?.initData) {
+      if (screen.ticket) $("login-options").querySelector("a").href = "/auth?ticket=" + screen.ticket;
+      $("login-options").hidden = false;
+    }
     $("loading").hidden = false;
     $("loading").textContent = error.message;
   }

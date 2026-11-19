@@ -1,9 +1,15 @@
 """Single-store branded appearance and support settings."""
 import re
-from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from app.db.models import StoreProfile
 from app.db.session import SessionLocal
 from app.config import settings
+
+THEME_COLORS = frozenset({
+    "bg", "surface", "surface-raised", "input", "border", "border-strong", "text",
+    "muted", "subtle", "primary", "on-primary", "overlay", "glow", "grid", "focus", "success", "danger",
+})
+COLOR_OPACITY = {"overlay": "eb", "glow": "1f", "grid": "0d"}
 
 DEFAULT_PROFILE = {
     "name": "Remnaum",
@@ -11,6 +17,7 @@ DEFAULT_PROFILE = {
     "description": "",
     "connection_instructions": "",
     "accent_color": "#4b8bea",
+    "theme_colors": {},
     "support_contact": settings.support_contact,
     "terms_url": settings.telegram_terms_url,
 }
@@ -35,6 +42,12 @@ def validate_profile(data: dict) -> dict:
     color = next_values["accent_color"]
     if not isinstance(color, str) or not re.fullmatch(r"#[a-fA-F0-9]{6}", color):
         raise ValueError("Accent color must be #RRGGBB")
+    colors = next_values["theme_colors"]
+    if not isinstance(colors, dict) or colors.keys() - THEME_COLORS or any(
+        not isinstance(value, str) or not re.fullmatch(r"#[a-fA-F0-9]{6}", value) for value in colors.values()
+    ):
+        raise ValueError("Недопустимые цвета палитры.")
+    next_values["theme_colors"] = {key: value.lower() for key, value in colors.items()}
     return next_values
 
 
@@ -45,16 +58,11 @@ async def get_store_profile() -> dict:
 
 
 async def update_store_profile(values: dict) -> dict:
-    current = await get_store_profile()
-    updated = validate_profile(current | values)
-    async with SessionLocal() as session:
-        row = await session.get(StoreProfile, 1)
-        if row is None:
-            session.add(StoreProfile(id=1, data=updated))
-        else:
-            row.data = updated
-        await session.commit()
-    return updated
+    async with SessionLocal.begin() as session:
+        await session.execute(insert(StoreProfile).values(id=1, data={}).on_conflict_do_nothing())
+        row = await session.get(StoreProfile, 1, with_for_update=True)
+        row.data = validate_profile(row.data | values)
+        return row.data
 
 
 async def get_terms_url() -> str:
