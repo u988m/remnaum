@@ -170,6 +170,13 @@ class InstallerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             installer.perform_update({"DEPLOY_MODE": "panel"})
 
+    def test_upgrade_syncs_new_squads_after_pull_even_from_older_installer(self):
+        script = (Path(__file__).resolve().parents[1] / "update.sh").read_text()
+        self.assertLess(script.index("git_user pull --ff-only origin main"),
+                        script.index("refresh_all_remnawave_squads(read_env())"))
+        self.assertLess(script.index("refresh_all_remnawave_squads(read_env())"),
+                        script.index("docker compose up -d --build"))
+
     def test_update_runs_backup_and_pull_then_health_check(self):
         with patch.object(installer, "docker_ready", return_value=True), \
              patch.object(installer.shutil, "which", return_value="/usr/bin/git"), \
