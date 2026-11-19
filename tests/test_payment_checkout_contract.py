@@ -11,7 +11,7 @@ import httpx
 from fastapi import FastAPI
 
 from app.bot import handlers
-from app.services.payment_providers import CryptoPayProvider, YooKassaProvider, YooMoneyProvider
+from app.services.payment_providers import CryptoPayProvider, VerifiedPayment, YooKassaProvider, YooMoneyProvider
 from app.web import routes
 
 
@@ -34,7 +34,7 @@ class CheckoutContracts(unittest.IsolatedAsyncioTestCase):
                 session.assert_not_called()
 
     async def test_stars_invoice_uses_correct_currency_and_payload(self):
-        message=SimpleNamespace(answer_invoice=AsyncMock(),answer=AsyncMock())
+        message=SimpleNamespace(answer_invoice=AsyncMock(),edit_text=AsyncMock(),delete=AsyncMock())
         with patch.object(handlers,"is_payment_method_enabled",AsyncMock(return_value=True)), \
              patch.object(handlers,"create_stars_payment_for_user",
                           AsyncMock(return_value=(SimpleNamespace(id=42),19))), \
@@ -44,16 +44,18 @@ class CheckoutContracts(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((params["currency"],params["provider_token"],params["payload"]),
                          ("XTR","","remnaum:42"))
         self.assertEqual(params["prices"][0].amount,19)
+        self.assertTrue(params["reply_markup"].inline_keyboard[0][0].pay)
+        message.delete.assert_awaited_once()
 
     async def test_stars_invoice_disabled_or_telegram_error(self):
-        message=SimpleNamespace(answer_invoice=AsyncMock(),answer=AsyncMock())
+        message=SimpleNamespace(answer_invoice=AsyncMock(),edit_text=AsyncMock())
         with patch.object(handlers,"is_payment_method_enabled",AsyncMock(return_value=False)), \
              patch.object(handlers,"create_stars_payment_for_user",AsyncMock()) as create:
             await handlers.send_stars_invoice(message,123,plan_id=4)
         create.assert_not_awaited()
         message.answer_invoice.assert_not_awaited()
-        self.assertIn("отключена",message.answer.call_args.args[0])
-        message.answer.reset_mock()
+        self.assertIn("отключена",message.edit_text.call_args.args[0])
+        message.edit_text.reset_mock()
         message.answer_invoice.side_effect=RuntimeError("secret-token-value")
         with patch.object(handlers,"is_payment_method_enabled",AsyncMock(return_value=True)), \
              patch.object(handlers,"create_stars_payment_for_user",
@@ -61,7 +63,7 @@ class CheckoutContracts(unittest.IsolatedAsyncioTestCase):
              patch.object(handlers,"get_store_profile",AsyncMock(return_value={"name":"Remnaum"})):
             with self.assertLogs("app.bot.handlers",level="ERROR"):
                 await handlers.send_stars_invoice(message,123,plan_id=4)
-        self.assertNotIn("secret-token-value",message.answer.call_args.args[0])
+        self.assertNotIn("secret-token-value",message.edit_text.call_args.args[0])
 
     async def test_stars_precheckout_ack_and_disabled(self):
         q=SimpleNamespace(from_user=SimpleNamespace(id=4),invoice_payload="remnaum:7",
@@ -161,6 +163,27 @@ class CheckoutContracts(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([row[0].callback_data for row in keyboard], [
             f"plan:pay:stars:4:0:{revision}", f"plan:pay:yookassa:4:0:{revision}", "plan:select:4:0",
         ])
+
+    async def test_platega_callback_delivers_only_verified_settled_payments(self):
+        app = FastAPI()
+        app.include_router(routes.router)
+        verified = VerifiedPayment(7, "transaction", 19900, "RUB")
+        adapter = SimpleNamespace(verify_webhook=AsyncMock(side_effect=[None, verified, verified]))
+        with (
+            patch.object(routes, "_configured_provider", return_value=adapter),
+            patch.object(routes, "settle_payment", side_effect=[True, False]) as settle,
+            patch.object(routes, "provision_paid_payment", return_value=True) as provision,
+            patch.object(routes, "notify_external_payment_success") as notify,
+        ):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                path = "/webhooks/payments/platega"
+                self.assertEqual((await client.post(path, json={"status": "CANCELED"})).status_code, 200)
+                settle.assert_not_awaited()
+                for _ in range(2):
+                    self.assertEqual((await client.post(path, json={"status": "CONFIRMED"})).status_code, 200)
+            self.assertEqual(settle.await_count, 2)
+            provision.assert_awaited_once_with(7)
+            notify.assert_awaited_once_with(7)
 
     async def test_terms_are_enforced_when_published(self):
         from app.services import payment_service

@@ -1,9 +1,10 @@
 from decimal import Decimal
 import json
+import logging
 from pathlib import Path
 from html import escape
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -19,6 +20,7 @@ from app.services.subscriptions import provision_paid_payment
 from app.services.payment_notifications import notify_external_payment_success
 from app.services.telegram_webapp import validate_telegram_init_data
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.get("/admin/payments")
@@ -27,7 +29,10 @@ async def admin_payments_page():
 
 
 from pydantic import AliasChoices, BaseModel, Field, model_validator
-from app.services.store_settings import get_store_payment_settings, public_payment_settings, update_store_payment_settings, is_payment_method_enabled
+from app.services.store_settings import (
+    DEFAULT_METHODS, PROVIDER_LABELS, get_store_payment_settings, is_payment_method_enabled,
+    public_payment_settings, update_store_payment_settings,
+)
 
 
 class PaymentSettingsUpdate(BaseModel):
@@ -56,19 +61,14 @@ async def admin_payment_diagnostics(x_telegram_init_data: str | None = Header(de
     methods, credentials = await get_store_payment_settings()
     configured = public_payment_settings(methods, credentials)["configured"]
     base = settings.public_base_url.rstrip("/")
-    paths = {
-        "yookassa": "/webhooks/payments/yookassa",
-        "yoomoney": "/webhooks/payments/yoomoney",
-        "cryptopay": "/webhooks/payments/cryptopay",
-    }
     return {
         "terms_url": await get_terms_url(),
         "providers": {
             name: {
                 "enabled": bool(methods.get(name)),
                 "configured": bool(configured.get(name) and (bot is not None if name == "telegram_stars" else True)),
-                "webhook_url": base + paths[name] if name in paths and base.startswith("https://") else None,
-            } for name in ("telegram_stars", "yookassa", "yoomoney", "cryptopay")
+                "webhook_url": f"{base}/webhooks/payments/{name}" if name in PROVIDER_LABELS and base.startswith("https://") else None,
+            } for name in DEFAULT_METHODS
         },
         "verification": "configuration_only",
     }
@@ -141,10 +141,13 @@ async def public_config():
 
 
 @router.get("/payments/return", response_class=HTMLResponse)
-async def payment_return():
+async def payment_return(failed: bool = False):
+    heading = "Оплата не завершена" if failed else "Вернитесь в магазин"
+    message = ("Вы можете вернуться к заказу и выбрать способ оплаты." if failed
+               else "Статус заказа обновится после подтверждения оплаты.")
     return HTMLResponse(
         "<!doctype html><html lang='ru'><meta charset='utf-8'><title>Remnaum</title>"
-        "<body><h2>Вернитесь в Telegram</h2><p>Статус оплаты обновится автоматически после подтверждения платёжной системой.</p></body></html>"
+        f"<body><h2>{heading}</h2><p>{message}</p></body></html>"
     )
 
 
@@ -163,66 +166,45 @@ async def yoomoney_payment_form(payment_id: int):
     receiver_value = credentials["yoomoney"]["receiver"]
     receiver = escape(receiver_value, quote=True)
     label = escape(f"remnaum-{payment_id}", quote=True)
+    return_url = escape(f"{settings.public_base_url.rstrip('/')}/payments/return", quote=True)
     html = f"""<!doctype html>
-<html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Оплата Remnaum</title><body>
-<h2>Оплата Remnaum</h2><p>Сумма: <b>{amount} RUB</b></p>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Оплата через ЮMoney</title><link rel="stylesheet" href="/static/store.css"></head>
+<body><main><section class="card">
+<h2>Оплата через ЮMoney</h2><p class="price">{amount} ₽</p>
 <form method="post" action="https://yoomoney.ru/quickpay/confirm">
 <input type="hidden" name="receiver" value="{receiver}">
 <input type="hidden" name="label" value="{label}">
 <input type="hidden" name="quickpay-form" value="button">
 <input type="hidden" name="sum" value="{amount}">
-<button type="submit" name="paymentType" value="PC">Оплатить кошельком ЮMoney</button>
-<button type="submit" name="paymentType" value="AC">Оплатить банковской картой</button>
-</form></body></html>"""
+<input type="hidden" name="successURL" value="{return_url}">
+<button type="submit" name="paymentType" value="PC">Кошелёк ЮMoney</button>
+<button type="submit" name="paymentType" value="AC">Банковская карта</button>
+</form></section></main></body></html>"""
     return HTMLResponse(html)
 
 
-@router.post("/webhooks/payments/yookassa")
-async def yookassa_webhook(request: Request):
-    body = await request.body()
+async def finish_webhook_payment(payment_id: int) -> None:
     try:
-        verified = await (await _configured_provider("yookassa")).verify_webhook(body, dict(request.headers))
-        await settle_payment(verified, "yookassa")
-        provisioned = await provision_paid_payment(verified.local_payment_id)
-        if provisioned:
-            await notify_external_payment_success(verified.local_payment_id)
+        if await provision_paid_payment(payment_id):
+            await notify_external_payment_success(payment_id)
+    except Exception:
+        logger.exception("Could not finish verified payment %s; recovery will retry", payment_id)
+
+
+@router.post("/webhooks/payments/{provider}")
+async def payment_webhook(provider: str, request: Request, background_tasks: BackgroundTasks):
+    if provider not in PROVIDER_LABELS:
+        raise HTTPException(status_code=404, detail="Unknown payment provider")
+    try:
+        adapter = await _configured_provider(provider)
+        verified = await adapter.verify_webhook(await request.body(), dict(request.headers))
+        if verified is not None and await settle_payment(verified, provider):
+            background_tasks.add_task(finish_webhook_payment, verified.local_payment_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Could not verify YooKassa payment") from exc
-    return {"ok": True}
-
-
-@router.post("/webhooks/payments/yoomoney")
-async def yoomoney_webhook(request: Request):
-    body = await request.body()
-    try:
-        verified = await (await _configured_provider("yoomoney")).verify_webhook(body, dict(request.headers))
-        await settle_payment(verified, "yoomoney")
-        provisioned = await provision_paid_payment(verified.local_payment_id)
-        if provisioned:
-            await notify_external_payment_success(verified.local_payment_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Could not process YooMoney notification") from exc
-    return {"ok": True}
-
-
-@router.post("/webhooks/payments/cryptopay")
-async def cryptopay_webhook(request: Request):
-    body = await request.body()
-    try:
-        verified = await (await _configured_provider("cryptopay")).verify_webhook(body, dict(request.headers))
-        await settle_payment(verified, "cryptopay")
-        provisioned = await provision_paid_payment(verified.local_payment_id)
-        if provisioned:
-            await notify_external_payment_success(verified.local_payment_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Could not process Crypto Pay update") from exc
+        raise HTTPException(status_code=502, detail="Could not process payment notification") from exc
     return {"ok": True}
 
 
@@ -998,7 +980,7 @@ class WebAppPlanExternalCheckout(WebAppFixedPlanCheckout):
 
 
 def _validate_external_provider(name: str) -> None:
-    if name not in ("yookassa", "yoomoney", "cryptopay"):
+    if name not in PROVIDER_LABELS:
         raise HTTPException(status_code=422, detail="Unknown external provider")
 
 
@@ -1040,6 +1022,4 @@ async def _get_public_checkout_methods():
     methods, credentials = await get_store_payment_settings()
     configured = public_payment_settings(methods, credentials)["configured"]
     configured["telegram_stars"] = bot is not None
-    return {key: bool(methods.get(key) and configured.get(key)) for key in (
-        "telegram_stars", "yookassa", "yoomoney", "cryptopay"
-    )}
+    return {key: bool(methods.get(key) and configured.get(key)) for key in DEFAULT_METHODS}

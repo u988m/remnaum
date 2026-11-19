@@ -40,11 +40,12 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('id="ai-wallet"', admin)
         for section in ("referrals-view", "trial-view", "pricing-view", "payment-settings-view",
                         "payment-telegram_stars-view", "payment-yookassa-view",
-                        "payment-yoomoney-view", "payment-cryptopay-view"):
+                        "payment-yoomoney-view", "payment-cryptopay-view", "payment-platega-view"):
             self.assertIn('id="' + section + '"', admin)
-        for tab in ("referrals", "trial", "pricing", "pay-stars",
-                    "pay-yookassa", "pay-yoomoney", "pay-cryptopay"):
+        for tab in ("referrals", "trial", "pricing", "settings"):
             self.assertIn('data-tab="' + tab + '"', admin)
+        self.assertIn('data-provider-form="platega"', admin)
+        self.assertIn('"pay-platega"', admin_js)
         self.assertIn('async function savePaymentProvider(provider)', admin_js)
         self.assertIn('methods:{[provider]:toggle.checked}', admin_js)
         self.assertNotIn('id="payment-settings-save"', admin)

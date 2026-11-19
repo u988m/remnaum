@@ -21,7 +21,7 @@ try{
    card.append(name,desc,spec,price,choose);list.append(card);
  }
  const provider=$("provider");provider.replaceChildren();
- store.methods.forEach(p=>{const el=document.createElement("option");el.value=p;el.textContent=({"yookassa":"ЮKassa","yoomoney":"ЮMoney","cryptopay":"Crypto Pay"})[p]||p;provider.append(el)});
+ store.methods.forEach(p=>{const el=document.createElement("option");el.value=p;el.textContent=({"yookassa":"ЮKassa","yoomoney":"ЮMoney","cryptopay":"Crypto Pay","platega":"Platega"})[p]||p;provider.append(el)});
  try{me=await request("/api/v1/store/me");$("login").style.display="none";$("account").style.display="block";$("hello").textContent="Здравствуйте, "+(me.first_name||"покупатель")+"!"}catch(e){$("login").style.display="block"}
  if(!store.methods.length){$("status").textContent="Внешние способы оплаты пока не настроены владельцем магазина."}
 }catch(e){$("plans").textContent=e.message}}

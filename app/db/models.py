@@ -74,7 +74,9 @@ class Payment(Base):
 class StorePaymentSettings(Base):
     __tablename__ = "store_payment_settings"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
-    methods: Mapped[dict] = mapped_column(JSON, default=lambda: {"telegram_stars": True, "yookassa": False, "yoomoney": False, "cryptopay": False}, nullable=False)
+    methods: Mapped[dict] = mapped_column(JSON, default=lambda: {
+        "telegram_stars": True, "yookassa": False, "yoomoney": False, "cryptopay": False, "platega": False,
+    }, nullable=False)
     encrypted_credentials: Mapped[str] = mapped_column(Text, default="", nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

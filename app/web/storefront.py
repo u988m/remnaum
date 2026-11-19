@@ -22,11 +22,10 @@ from app.services.payment_service import (
 from app.services.plans import list_plans
 from app.services.store_auth import issue_store_session, verify_store_session, verify_telegram_login
 from app.services.store_profile import get_store_profile, get_terms_url
-from app.services.store_settings import get_store_payment_settings, public_payment_settings
+from app.services.store_settings import PROVIDER_LABELS, get_store_payment_settings, public_payment_settings
 
 router = APIRouter()
 COOKIE_NAME = "__Host-remnaum-session"
-EXTERNAL_PROVIDERS = {"yookassa", "yoomoney", "cryptopay"}
 
 
 def _require_store_host(request: Request) -> None:
@@ -91,7 +90,7 @@ async def store_catalog(request: Request):
         "profile": await get_store_profile(),
         "terms_url": await get_terms_url(),
         "plans": await list_plans(active_only=True),
-        "methods": [name for name in ("yookassa", "yoomoney", "cryptopay") if methods.get(name) and configured.get(name)],
+        "methods": [name for name in PROVIDER_LABELS if methods.get(name) and configured.get(name)],
     }
 
 
@@ -117,7 +116,7 @@ async def store_checkout(request: Request, data: StoreCheckoutPayload):
     telegram_id = _store_user(request)
     if request.headers.get("origin") != settings.public_base_url.rstrip("/"):
         raise HTTPException(status_code=403, detail="Invalid checkout origin")
-    if data.provider not in EXTERNAL_PROVIDERS:
+    if data.provider not in PROVIDER_LABELS:
         raise HTTPException(status_code=422, detail="Unsupported payment provider")
     if await get_terms_url() and not data.accepted_terms:
         raise HTTPException(status_code=403, detail="Перед оплатой примите условия продажи.")

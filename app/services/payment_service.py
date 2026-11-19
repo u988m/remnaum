@@ -15,7 +15,7 @@ from app.db.session import SessionLocal
 from app.config import settings
 from app.services.payment_providers import VerifiedPayment, get_provider
 from app.services.tariffs import TariffQuote, calculate_store_price, calculate_store_stars_price, ensure_tariff_draft
-from app.services.store_settings import get_store_payment_settings, public_payment_settings
+from app.services.store_settings import PROVIDER_LABELS, get_store_payment_settings, public_payment_settings
 from app.services.plans import PlanQuote, quote_plan, selected_plan_for_user
 from app.services.squads import fetch_catalog, mode_squads, require_available
 from app.services.remnawave import RemnawaveClient
@@ -111,7 +111,7 @@ async def create_payment_for_user(
     plan_id: int | None = None, extra_devices: int = 0, revision: str | None = None,
 ) -> tuple[Payment, Any]:
     methods, credentials = await get_store_payment_settings()
-    if provider_name not in {"yookassa", "yoomoney", "cryptopay"} or not methods.get(provider_name):
+    if provider_name not in PROVIDER_LABELS or not methods.get(provider_name):
         raise ValueError("Выбранный способ оплаты отключён администратором")
     await require_checkout_terms(telegram_id)
     if not public_payment_settings(methods, credentials)["configured"][provider_name]:
@@ -153,6 +153,7 @@ async def create_payment_for_user(
             amount_minor=amount,
             currency=currency,
             description=f"Remnaum VPN subscription #{payment_id}",
+            telegram_id=telegram_id,
         )
         url = urlsplit(link.url)
         if url.scheme != "https" or not url.hostname:

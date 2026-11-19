@@ -10,13 +10,16 @@ from app.config import settings
 from app.db.models import StorePaymentSettings
 from app.db.session import SessionLocal
 
-DEFAULT_METHODS = {"telegram_stars": True, "yookassa": False, "yoomoney": False, "cryptopay": False}
+DEFAULT_METHODS = {
+    "telegram_stars": True, "yookassa": False, "yoomoney": False, "cryptopay": False, "platega": False,
+}
 REQUIRED_CREDENTIALS = {
     "yookassa": ("shop_id", "secret_key"),
     "yoomoney": ("receiver", "notification_secret"),
     "cryptopay": ("api_token",),
+    "platega": ("merchant_id", "secret_key"),
 }
-PROVIDER_LABELS = {"yookassa": "ЮKassa", "yoomoney": "ЮMoney", "cryptopay": "Crypto Pay"}
+PROVIDER_LABELS = {"yookassa": "ЮKassa", "yoomoney": "ЮMoney", "cryptopay": "Crypto Pay", "platega": "Platega"}
 
 
 def _cipher() -> Fernet:

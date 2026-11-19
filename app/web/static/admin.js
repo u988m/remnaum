@@ -16,17 +16,17 @@ async function overview(){
     if(!payments.items.length){list.textContent="Платежей пока нет.";return}
     for(const payment of payments.items){
       const card=document.createElement("div");card.className="overview-payment";
-      const title=document.createElement("strong");title.textContent="#"+payment.id+" · "+payment.provider;
+      const title=document.createElement("strong");title.textContent="#"+payment.id+" · "+(providerLabels[payment.provider] || payment.provider);
       const summary=document.createElement("span");
-      summary.textContent=(payment.currency==="XTR"?payment.amount+" ⭐":(payment.amount/100).toFixed(2)+" "+payment.currency)+" · "+payment.status;
+      summary.textContent=formatPaymentAmount(payment)+" · "+paymentStatus(payment.status);
       card.append(title,summary);list.append(card);
     }
   } catch { $("dashboard-payments").textContent="Не удалось загрузить последние платежи."; }
 }
 async function loadUsers(){const d=await api("/admin/api/users?limit="+pageSize+"&offset="+userOffset);$("users-table").replaceChildren();d.items.forEach(u=>{row("users-table",[u.telegram_id,u.username?"@"+u.username:"—",u.subscription_status,u.expires_at?new Date(u.expires_at).toLocaleDateString():"—",new Date(u.created_at).toLocaleDateString()]);const tr=$("users-table").lastElementChild;const button=document.createElement("button");button.className="action";button.textContent="Подробнее";button.onclick=()=>showCustomer(u.telegram_id);tr.appendChild(cell(button.textContent));tr.lastElementChild.replaceChildren(button)});$("users-page").textContent="Показано "+(d.total?userOffset+1:0)+"–"+Math.min(userOffset+d.items.length,d.total)+" из "+d.total;$("users-prev").disabled=userOffset===0;$("users-next").disabled=userOffset+pageSize>=d.total}
-async function showCustomer(id){$("status").textContent="";try{const d=await api("/admin/api/users/"+encodeURIComponent(id));$("customer-title").textContent="Клиент "+d.telegram_id;$("customer-summary").textContent=(d.username?"@"+d.username+" · ":"")+"Зарегистрирован: "+new Date(d.created_at).toLocaleString();$("customer-subscriptions").replaceChildren();$("customer-payments").replaceChildren();d.subscriptions.forEach(x=>row("customer-subscriptions",[x.id,x.status,x.expires_at?new Date(x.expires_at).toLocaleString():"—",new Date(x.created_at).toLocaleString()]));d.payments.forEach(x=>row("customer-payments",[x.id,x.provider,x.amount+" "+x.currency,x.status,new Date(x.created_at).toLocaleString()]));$("customer-detail").hidden=false;$("customer-detail").scrollIntoView({behavior:"smooth",block:"nearest"})}catch(e){$("status").textContent=e.message}}
+async function showCustomer(id){$("status").textContent="";try{const d=await api("/admin/api/users/"+encodeURIComponent(id));$("customer-title").textContent="Клиент "+d.telegram_id;$("customer-summary").textContent=(d.username?"@"+d.username+" · ":"")+"Зарегистрирован: "+new Date(d.created_at).toLocaleString();$("customer-subscriptions").replaceChildren();$("customer-payments").replaceChildren();d.subscriptions.forEach(x=>row("customer-subscriptions",[x.id,x.status,x.expires_at?new Date(x.expires_at).toLocaleString():"—",new Date(x.created_at).toLocaleString()]));d.payments.forEach(x=>row("customer-payments",[x.id,providerLabels[x.provider]||x.provider,formatPaymentAmount(x),paymentStatus(x.status),new Date(x.created_at).toLocaleString()]));$("customer-detail").hidden=false;$("customer-detail").scrollIntoView({behavior:"smooth",block:"nearest"})}catch(e){$("status").textContent=e.message}}
 $("customer-close").onclick=()=>{$("customer-detail").hidden=true};
-async function loadPayments(){const d=await api("/admin/api/payments?limit="+pageSize+"&offset="+paymentOffset);$("payments-table").replaceChildren();d.items.forEach(p=>row("payments-table",[p.id,p.telegram_id,p.provider,p.amount+" "+p.currency,p.status,new Date(p.created_at).toLocaleString()]));$("payments-page").textContent="Показано "+(d.total?paymentOffset+1:0)+"–"+Math.min(paymentOffset+d.items.length,d.total)+" из "+d.total;$("payments-prev").disabled=paymentOffset===0;$("payments-next").disabled=paymentOffset+pageSize>=d.total}
+async function loadPayments(){const d=await api("/admin/api/payments?limit="+pageSize+"&offset="+paymentOffset);$("payments-table").replaceChildren();d.items.forEach(p=>row("payments-table",[p.id,p.telegram_id,providerLabels[p.provider]||p.provider,formatPaymentAmount(p),paymentStatus(p.status),new Date(p.created_at).toLocaleString()]));$("payments-page").textContent="Показано "+(d.total?paymentOffset+1:0)+"–"+Math.min(paymentOffset+d.items.length,d.total)+" из "+d.total;$("payments-prev").disabled=paymentOffset===0;$("payments-next").disabled=paymentOffset+pageSize>=d.total}
 async function adminApi(method,path,body){const r=await fetch(path,{method,headers:{"X-Telegram-Init-Data":tg?.initData||"","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(typeof d.detail==="string"?d.detail:"Ошибка запроса");return d}
 let squadItems = [];
 let selectedSquads = [];
@@ -307,72 +307,95 @@ $("brand-form").onsubmit=async e=>{
   }catch(e){$("status").textContent=e.message}
 };
 const providerLabels = {
-  telegram_stars: "Telegram Stars", yookassa: "YooKassa",
-  yoomoney: "YooMoney", cryptopay: "Crypto Pay",
+  telegram_stars: "Telegram Stars", yookassa: "ЮKassa", yoomoney: "ЮMoney",
+  cryptopay: "Crypto Pay", platega: "Platega",
 };
+function formatPaymentAmount({amount, currency}) {
+  if (currency === "XTR") return amount.toLocaleString("ru-RU") + " ⭐";
+  if (currency === "RUB") return (amount / 100).toLocaleString("ru-RU", {style:"currency", currency});
+  return (amount / 100).toLocaleString("ru-RU") + " " + currency;
+}
+function paymentStatus(status) {
+  return {pending:"Ждёт оплаты", paid:"Оплачен", succeeded:"Подписка выдана", failed:"Ошибка", cancelled:"Отменён"}[status] || status;
+}
 const providerTabs = {
-  telegram_stars: "pay-stars", yookassa: "pay-yookassa",
-  yoomoney: "pay-yoomoney", cryptopay: "pay-cryptopay",
+  telegram_stars: "pay-stars", yookassa: "pay-yookassa", yoomoney: "pay-yoomoney",
+  cryptopay: "pay-cryptopay", platega: "pay-platega",
 };
 const providerCredentials = {
   yookassa: {shop_id:"pay-yookassa-id", secret_key:"pay-yookassa-secret"},
   yoomoney: {receiver:"pay-yoomoney-receiver", notification_secret:"pay-yoomoney-secret"},
   cryptopay: {api_token:"pay-crypto-token"},
+  platega: {merchant_id:"pay-platega-id", secret_key:"pay-platega-secret"},
 };
+const savingProviders = new Set();
+let paymentSettingsRequest = 0;
+
 async function loadPaymentSettings() {
-  const d = await adminApi("GET", "/admin/api/payment-settings");
-  const grid = $("method-list");
-  grid.replaceChildren();
+  const request = ++paymentSettingsRequest;
+  const data = await adminApi("GET", "/admin/api/payment-diagnostics");
+  if (request !== paymentSettingsRequest) return;
+  const list = $("method-list");
+  list.replaceChildren();
   for (const [provider, label] of Object.entries(providerLabels)) {
-    const enabled = Boolean(d.methods?.[provider]);
-    const configured = Boolean(d.configured?.[provider]);
-    const status = enabled ? (configured ? "Включён" : "Нужны реквизиты") : "Выключен";
-    $("method-" + provider).checked = enabled;
-    $("provider-" + provider + "-state").textContent =
-      configured ? (enabled ? "Подключён и включён" : "Настроен, но выключен") : "Не настроен";
+    const info = data.providers[provider] || {};
+    const status = !info.configured
+      ? (provider === "telegram_stars" ? "Бот не подключён" : "Нужны реквизиты")
+      : info.enabled ? "Включено" : "Выключено";
+    if (!savingProviders.has(provider)) {
+      const toggle = $("method-" + provider);
+      toggle.checked = Boolean(info.enabled);
+      toggle.disabled = false;
+      document.querySelector(`[data-save-provider="${provider}"]`).disabled = false;
+    }
+    $("provider-" + provider + "-state").textContent = status;
+    const webhook = $("provider-" + provider + "-webhook");
+    if (webhook) {
+      webhook.value = info.webhook_url || "";
+      document.querySelector(`[data-copy-webhook="${provider}"]`).disabled = !webhook.value;
+    }
     const button = document.createElement("button");
     button.type = "button";
     button.className = "provider-tile";
     button.dataset.openTab = providerTabs[provider];
-    const nameElement = document.createElement("strong");
-    nameElement.textContent = label;
-    const statusElement = document.createElement("span");
-    statusElement.textContent = status;
+    const title = document.createElement("strong");
+    title.textContent = label;
+    const indicator = document.createElement("span");
+    indicator.className = "provider-indicator";
+    indicator.dataset.enabled = Boolean(info.enabled && info.configured);
+    indicator.textContent = status;
     const arrow = document.createElement("span");
     arrow.setAttribute("aria-hidden", "true");
-    arrow.textContent = "→";
-    button.append(nameElement, statusElement, arrow);
+    arrow.className = "provider-chevron";
+    arrow.textContent = "›";
+    button.append(title, indicator, arrow);
     button.addEventListener("click", () => openTab(providerTabs[provider]));
-    grid.appendChild(button);
+    list.appendChild(button);
   }
-}
-async function loadPaymentDiagnostics() {
-  try {
-    const d=await api("/admin/api/payment-diagnostics");
-    for (const [name,info] of Object.entries(d.providers||{})) {
-      const state=$("provider-"+name+"-state");
-      if (state) state.textContent = !info.enabled ? "Выключен" : info.configured ? "Включён"
-        : name === "telegram_stars" ? "Бот не подключён" : "Реквизиты недоступны";
-      const webhook=$("provider-"+name+"-webhook");
-      if (webhook) webhook.value=info.webhook_url||"";
-    }
-    $("payment-terms-state").textContent = d.terms_url ? "Покупатели принимают условия перед оплатой."
-      : "Ссылка не указана. Оплата доступна без подтверждения условий.";
-    $("payment-diagnostics-status").textContent="Настройки обновлены. Статус платежа смотрите в истории.";
-  } catch(error) {
-    $("payment-diagnostics-status").textContent=error.message;
-  }
+  $("payment-terms-state").textContent = data.terms_url ? "Опубликованы" : "Ссылка не указана";
 }
 $("payment-diagnostics-refresh").onclick=async()=>{
-  try { await loadPaymentSettings(); await loadPaymentDiagnostics(); }
-  catch (error) { $("payment-diagnostics-status").textContent = error.message; }
+  const button = $("payment-diagnostics-refresh");
+  const status = $("payment-diagnostics-status");
+  button.disabled = true;
+  status.textContent = "";
+  try { await loadPaymentSettings(); }
+  catch (error) { status.textContent = error.message; }
+  finally { button.disabled = false; }
 };
 document.querySelectorAll("[data-copy-webhook]").forEach(button=>{
   button.addEventListener("click",async()=>{
-    const url=$("provider-"+button.dataset.copyWebhook+"-webhook")?.value;
-    if(!url){$("status").textContent="Укажите HTTPS-адрес для вебхуков.";return}
-    try { await navigator.clipboard.writeText(url); $("status").textContent="Webhook URL скопирован."; }
-    catch { $("status").textContent="Выделите URL и скопируйте вручную."; }
+    const provider = button.dataset.copyWebhook;
+    const input = $("provider-" + provider + "-webhook");
+    const feedback = $("provider-" + provider + "-feedback");
+    try {
+      await navigator.clipboard.writeText(input.value);
+      feedback.textContent = "URL скопирован.";
+    } catch {
+      input.focus();
+      input.select();
+      feedback.textContent = "Скопируйте выделенный URL.";
+    }
   });
 });
 async function savePaymentProvider(provider) {
@@ -381,6 +404,8 @@ async function savePaymentProvider(provider) {
   const feedback = $("provider-" + provider + "-feedback");
   const fields = Object.entries(providerCredentials[provider] || {});
   const toggle = $("method-" + provider);
+  if (savingProviders.has(provider) || button.disabled) return;
+  savingProviders.add(provider);
   button.disabled = true;
   toggle.disabled = true;
   feedback.textContent = "Сохраняем…";
@@ -402,16 +427,20 @@ async function savePaymentProvider(provider) {
     }
     toggle.checked = Boolean(saved.methods[provider]);
     feedback.textContent = toggle.checked ? "Способ оплаты включён." : "Способ оплаты выключен.";
-    await loadPaymentDiagnostics();
+    await loadPaymentSettings().catch(() => {});
   } catch(error) {
     feedback.textContent = error.message;
   } finally {
+    savingProviders.delete(provider);
     toggle.disabled = false;
     button.disabled = false;
   }
 }
-document.querySelectorAll("[data-save-provider]").forEach(button=>{
-  button.addEventListener("click",()=>savePaymentProvider(button.dataset.saveProvider));
+document.querySelectorAll("[data-provider-form]").forEach(form=>{
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    savePaymentProvider(form.dataset.providerForm);
+  });
 });
 const pricingKeys=["rub_per_day_minor","rub_per_gb_minor","rub_per_device_minor","stars_per_day","stars_per_gb","stars_per_device","currency"];
 async function loadPricing(){
@@ -469,8 +498,7 @@ $("referral-form").onsubmit=async e=>{
 const sidebarIconNames = {
   overview:"grid", plans:"tag", users:"users", payments:"card",
   bonuses:"ticket", referrals:"gift", brand:"palette", trial:"clock",
-  pricing:"calc", settings:"wallet", "pay-stars":"star",
-  "pay-yookassa":"card", "pay-yoomoney":"coins", "pay-cryptopay":"crypto",
+  pricing:"calc", settings:"wallet",
 };
 for(const button of document.querySelectorAll(".admin-tabs [data-tab]")){
   const icon=document.createElementNS("http://www.w3.org/2000/svg","svg");
@@ -504,33 +532,47 @@ const tabs = {
   brand: {sections: ["brand-view"], load: loadBrand},
   trial: {sections: ["trial-view"], load: loadTrialSettings},
   pricing: {sections: ["pricing-view"], load: loadPricing},
-  settings: {sections: ["payment-settings-view"], load: async()=>{await loadPaymentSettings();await loadPaymentDiagnostics();}},
-  "pay-stars": {sections: ["payment-telegram_stars-view"], load: async()=>{await loadPaymentSettings();await loadPaymentDiagnostics();}},
-  "pay-yookassa": {sections: ["payment-yookassa-view"], load: async()=>{await loadPaymentSettings();await loadPaymentDiagnostics();}},
-  "pay-yoomoney": {sections: ["payment-yoomoney-view"], load: async()=>{await loadPaymentSettings();await loadPaymentDiagnostics();}},
-  "pay-cryptopay": {sections: ["payment-cryptopay-view"], load: async()=>{await loadPaymentSettings();await loadPaymentDiagnostics();}},
+  settings: {sections: ["payment-settings-view"], load: loadPaymentSettings},
 };
-
-async function openTab(requested) {
-  const folder=$("settings-accordion");
-  if (requested==="settings" || requested==="trial" || requested==="pricing" || requested?.startsWith("pay-")) folder.open=true;
-  const legacy = {promos: "bonuses", tariffs: "pricing", payment_methods: "settings"};
-  const key = Object.hasOwn(legacy, requested) ? legacy[requested] : requested;
-  const tab = Object.hasOwn(tabs, key) ? tabs[key] : tabs.overview;
-  $("status").textContent = "";
-  for (const [name, item] of Object.entries(tabs)) {
-    for (const section of item.sections) $(section).hidden = tab !== item;
-    const button = document.querySelector(`nav [data-tab="${name}"]`);
-    if (tab === item) {
-      button.setAttribute("aria-current", "page");
-      $("admin-mobile-title").textContent=button.textContent.trim();
-      if(window.matchMedia("(min-width: 851px)").matches)button.scrollIntoView({block: "nearest", inline: "nearest"});
-    } else button.removeAttribute("aria-current");
-  }
-  if(adminSidebar.classList.contains("is-open"))setAdminMenu(false);
-  try { await tab.load?.(); }
-  catch (error) { $("status").textContent = error.message; }
+const providerByTab = Object.fromEntries(Object.entries(providerTabs).map(([name, tab]) => [tab, name]));
+for (const [tab, provider] of Object.entries(providerByTab)) {
+  tabs[tab] = {sections: [`payment-${provider}-view`], load: loadPaymentSettings};
 }
+
+let activeTab = null;
+async function openTab(requested, {updateHistory = true} = {}) {
+  const legacy = {promos: "bonuses", tariffs: "pricing", payment_methods: "settings"};
+  let key = Object.hasOwn(legacy, requested) ? legacy[requested] : requested;
+  if (!Object.hasOwn(tabs, key)) key = "overview";
+  const tab = tabs[key];
+  const provider = providerByTab[key];
+  const parentTab = provider ? "settings" : key;
+  if (["settings", "trial", "pricing"].includes(parentTab)) $("settings-accordion").open = true;
+
+  $("status").textContent = "";
+  for (const item of Object.values(tabs)) {
+    for (const section of item.sections) $(section).hidden = tab !== item;
+  }
+  for (const button of document.querySelectorAll("nav [data-tab]")) {
+    if (button.dataset.tab === parentTab) {
+      button.setAttribute("aria-current", "page");
+    } else {
+      button.removeAttribute("aria-current");
+    }
+  }
+  if (adminSidebar.classList.contains("is-open")) setAdminMenu(false);
+  if (key !== activeTab && activeTab !== null) window.scrollTo(0, 0);
+  if (updateHistory && key !== activeTab) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", key);
+    history.pushState(null, "", url);
+  }
+  activeTab = key;
+  try { await tab.load?.(); }
+  catch (error) { if (activeTab === key) $("status").textContent = error.message; }
+}
+function tabFromLocation() { return new URLSearchParams(window.location.search).get("tab") || "overview"; }
+window.addEventListener("popstate", () => openTab(tabFromLocation(), {updateHistory:false}));
 
 async function start() {
   try {
@@ -539,8 +581,8 @@ async function start() {
     $("welcome").textContent = d.admin_name ? "Здравствуйте, " + d.admin_name : "Состояние магазина";
     $("loading").hidden = true;
     $("dashboard").hidden = false;
-    const initial = new URLSearchParams(window.location.search).get("tab") || "overview";
-    await openTab(initial);
+    const initial = tabFromLocation();
+    await openTab(initial, {updateHistory:false});
     if (initial !== "brand") {
       try {
         const profile = await api("/admin/api/store-profile");

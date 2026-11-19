@@ -2,10 +2,10 @@
 import logging
 from sqlalchemy import select
 
+from app.bot.handlers import show_payment_result
 from app.bot.runtime import bot
 from app.db.models import Payment, User
 from app.db.session import SessionLocal
-from app.services.subscriptions import get_user_subscription
 
 log = logging.getLogger(__name__)
 
@@ -23,15 +23,9 @@ async def notify_external_payment_success(payment_id: int) -> None:
     if not row:
         return
     _, telegram_id = row
-    subscription = await get_user_subscription(telegram_id)
-    link = subscription.get("subscription_url") if subscription else None
-    message = (
-        f"✅ Оплата заказа №{payment_id} подтверждена!\n"
-        "VPN-подписка активирована. Откройте раздел «Подписка» "
-        "или Mini App, чтобы подключить устройства."
-    )
+    message = f"<b>Заказ №{payment_id} оплачен</b>\nПодписка готова к подключению."
     try:
-        await bot.send_message(telegram_id, message)
+        await show_payment_result(bot, telegram_id, message)
     except Exception:
         # E.g. customer logged in on the web but has not started the bot.
         log.info("Could not deliver payment confirmation to Telegram account %s", telegram_id)
