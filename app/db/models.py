@@ -148,6 +148,25 @@ class StoreDocument(Base):
     body: Mapped[str] = mapped_column(Text)
 
 
+class StoreNotificationSettings(Base):
+    __tablename__ = "store_notification_settings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    data: Mapped[dict] = mapped_column(JSON)
+
+
+class UserNotificationPreferences(Base):
+    __tablename__ = "user_notification_preferences"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    data: Mapped[dict] = mapped_column(JSON)
+
+
+class SubscriptionNotification(Base):
+    __tablename__ = "subscription_notifications"
+    subscription_id: Mapped[int] = mapped_column(ForeignKey("subscriptions.id", ondelete="CASCADE"), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(24), primary_key=True)
+    period: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+
 class ReferralSettings(Base):
     """Owner-controlled referral rewards. Disabled until the owner opts in."""
     __tablename__ = "referral_settings"

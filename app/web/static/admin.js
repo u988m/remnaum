@@ -931,6 +931,79 @@ $("referral-form").onsubmit=async e=>{
     $("status").textContent="Реферальная программа сохранена";
   }catch(err){$("status").textContent=err.message}
 };
+const notificationRulesForm = $("notification-rules-form");
+const notificationRuleFields = {
+  subscription: {title: "Срок подписки", leadLabel: "Напоминать за сколько часов до окончания", max: 720},
+  trial: {title: "Пробный доступ", leadLabel: "Напоминать за сколько часов до окончания", max: 720},
+  traffic: {title: "Трафик", leadLabel: "Напоминать при остатке трафика, %", max: 99},
+};
+for (const [kind, {title, leadLabel, max}] of Object.entries(notificationRuleFields)) {
+  const fields = $("notification-rule-template").content.firstElementChild.cloneNode(true);
+  fields.dataset.rule = kind;
+  fields.querySelector("legend").textContent = title;
+  fields.querySelector("[data-lead-label]").textContent = leadLabel;
+  fields.querySelector('[name="lead"]').max = max;
+  $("notification-rules").append(fields);
+}
+const notificationRuleGroups = [...notificationRulesForm.querySelectorAll("fieldset")];
+const notificationRulesStatus = $("notification-rules-status");
+let notificationRulesRequest;
+
+function loadNotificationRules() {
+  if (!notificationRulesRequest) {
+    notificationRulesStatus.textContent = "Загружаем настройки…";
+    notificationRulesRequest = adminApi("GET", "/admin/api/notifications").then(rules => {
+      for (const group of notificationRuleGroups) {
+        const rule = rules[group.dataset.rule];
+        group.querySelector('[name="lead"]').value = rule.lead;
+        group.querySelector('[name="reminderEnabled"]').checked = rule.reminder.enabled;
+        group.querySelector('[name="reminderText"]').value = rule.reminder.text;
+        group.querySelector('[name="expiredEnabled"]').checked = rule.expired.enabled;
+        group.querySelector('[name="expiredText"]').value = rule.expired.text;
+      }
+      notificationRulesForm.hidden = false;
+      notificationRulesStatus.textContent = "";
+    }).catch(error => {
+      notificationRulesStatus.textContent = error.message;
+      notificationRulesRequest = undefined;
+    });
+  }
+  return notificationRulesRequest;
+}
+
+notificationRulesForm.onsubmit = async event => {
+  event.preventDefault();
+  const submit = notificationRulesForm.querySelector("button");
+  if (submit.disabled) return;
+  const rules = Object.fromEntries(notificationRuleGroups.map(group => [group.dataset.rule, {
+    lead: Number(group.querySelector('[name="lead"]').value),
+    reminder: {
+      enabled: group.querySelector('[name="reminderEnabled"]').checked,
+      text: group.querySelector('[name="reminderText"]').value.trim(),
+    },
+    expired: {
+      enabled: group.querySelector('[name="expiredEnabled"]').checked,
+      text: group.querySelector('[name="expiredText"]').value.trim(),
+    },
+  }]));
+  if (Object.values(rules).some(rule => !rule.reminder.text || !rule.expired.text)) {
+    notificationRulesStatus.textContent = "Введите тексты всех сообщений.";
+    return;
+  }
+  submit.disabled = true;
+  for (const group of notificationRuleGroups) group.disabled = true;
+  notificationRulesStatus.textContent = "Сохраняем…";
+  try {
+    await adminApi("PUT", "/admin/api/notifications", rules);
+    notificationRulesStatus.textContent = "Настройки уведомлений сохранены.";
+  } catch (error) {
+    notificationRulesStatus.textContent = error.message;
+  } finally {
+    submit.disabled = false;
+    for (const group of notificationRuleGroups) group.disabled = false;
+  }
+};
+
 const documentForms = document.querySelectorAll("[data-document-kind]");
 let documentsRequest;
 
@@ -1012,6 +1085,7 @@ const tabs = {
   referrals: {sections: ["referrals-view"], load: loadReferrals},
   brand: {sections: ["brand-view"], load: loadBrand},
   trial: {sections: ["trial-view"], load: loadTrialSettings},
+  notifications: {sections: ["notifications-view"], load: loadNotificationRules},
   configuration: {sections: ["configuration-view"]},
   documents: {sections: ["documents-view"], load: loadDocuments},
   settings: {sections: ["payment-settings-view"], load: loadPaymentSettings},
@@ -1037,7 +1111,7 @@ function canonicalTab(requested) {
 function parentFor({tab, panel}) {
   if (panel) return tab;
   if (providerByTab[tab]) return "settings";
-  if (["settings", "brand", "trial"].includes(tab)) return "configuration";
+  if (["settings", "brand", "trial", "notifications"].includes(tab)) return "configuration";
   return null;
 }
 

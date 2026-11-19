@@ -81,7 +81,28 @@
     <button type="button" data-open-tab="settings"><strong>Платёжные системы</strong><span>Способы оплаты и реквизиты</span></button>
     <button type="button" data-open-tab="brand"><strong>Оформление и поддержка</strong><span>Название, изображения и контакт магазина</span></button>
     <button type="button" data-open-tab="trial"><strong>Пробный доступ</strong><span>Срок, трафик и число устройств</span></button>
+    <button type="button" data-open-tab="notifications"><strong>Уведомления</strong><span>Подписка, триал и трафик</span></button>
   </div>
+</section>
+<section class="section" id="notifications-view" hidden>
+  <button class="provider-back" type="button" data-back-tab="configuration">← Назад</button>
+  <h2>Уведомления</h2>
+  <p class="muted">Бот отправляет эти сообщения в Telegram. Пользователь может выбрать, какие из них получать.</p>
+  <form id="notification-rules-form" hidden>
+    <div id="notification-rules"></div>
+    <button class="action primary" type="submit">Сохранить</button>
+  </form>
+  <p class="status" id="notification-rules-status" role="status"></p>
+  <template id="notification-rule-template">
+    <fieldset>
+      <legend></legend>
+      <label><span data-lead-label></span><input name="lead" type="number" min="1" required></label>
+      <label><input name="reminderEnabled" type="checkbox" role="switch"> Отправлять напоминание</label>
+      <label>Текст напоминания<textarea name="reminderText" rows="2" maxlength="1000" required></textarea></label>
+      <label><input name="expiredEnabled" type="checkbox" role="switch"> Сообщать об окончании</label>
+      <label>Текст уведомления об окончании<textarea name="expiredText" rows="2" maxlength="1000" required></textarea></label>
+    </fieldset>
+  </template>
 </section>
 <section class="section" id="documents-view" hidden>
   <h2>Документы</h2>
