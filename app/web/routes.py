@@ -93,7 +93,7 @@ async def public_payment_methods():
 
 
 
-from app.services.tariffs import get_store_tariff_pricing, update_store_tariff_pricing, set_tariff_draft
+from app.services.tariffs import get_store_tariff_pricing, update_store_tariff_pricing
 
 class TariffPricingUpdate(BaseModel):
     pricing: dict[str, int | str] = Field(default_factory=dict)
@@ -240,17 +240,22 @@ from app.db.models import Subscription, SubscriptionDetails, TermsAcceptance, Us
 from app.db.session import SessionLocal
 from app.services.payment_service import accept_current_terms, create_stars_payment_for_user, has_accepted_current_terms
 from app.services.subscriptions import get_user_subscription
-from app.services.tariffs import calculate_store_stars_price, get_store_tariff_pricing, set_tariff_draft
 from app.services.telegram_webapp import validate_telegram_init_data
 from app.config import settings
 from app.bot.runtime import bot
 
 
-async def _webapp_user(init_data: str):
+def _require_telegram_identity(init_data: str | None) -> dict:
+    if not init_data:
+        raise HTTPException(status_code=401, detail="Telegram authentication is required")
     try:
-        identity = validate_telegram_init_data(init_data)
+        return validate_telegram_init_data(init_data)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+async def _webapp_user(init_data: str):
+    identity = _require_telegram_identity(init_data)
     telegram_id = int(identity["id"])
     async with SessionLocal() as session:
         statement = pg_insert(User).values(
@@ -337,17 +342,12 @@ async def webapp_accept_terms(data: WebAppTermsAcceptance, x_telegram_init_data:
 
 @router.post("/api/v1/webapp/checkout")
 async def webapp_create_checkout(data: WebAppCheckout, x_telegram_init_data: str | None = Header(default=None)):
-    await _webapp_user(x_telegram_init_data or "")
+    _require_telegram_identity(x_telegram_init_data)
     raise HTTPException(status_code=410, detail="Конструктор отключён. Выберите готовый тариф.")
 
 
 async def _require_telegram_admin(init_data: str | None) -> dict:
-    if not init_data:
-        raise HTTPException(status_code=401, detail="Telegram authentication is required")
-    try:
-        identity = validate_telegram_init_data(init_data)
-    except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    identity = _require_telegram_identity(init_data)
     telegram_id = int(identity["id"])
     if telegram_id not in settings.admin_id_set:
         raise HTTPException(status_code=403, detail="Administrator access denied")
@@ -1017,7 +1017,7 @@ async def _external_checkout(telegram_id: int, provider: str, **plan_options):
 async def webapp_external_checkout(
     data: WebAppExternalCheckout, x_telegram_init_data: str | None = Header(default=None),
 ):
-    await _webapp_user(x_telegram_init_data or "")
+    _require_telegram_identity(x_telegram_init_data)
     raise HTTPException(status_code=410, detail="Конструктор отключён. Выберите готовый тариф.")
 
 

@@ -8,7 +8,7 @@ from urllib.parse import quote, urlencode
 from unittest.mock import AsyncMock, patch
 
 import httpx
-from fastapi import HTTPException
+from fastapi import FastAPI
 
 from app.bot import handlers
 from app.services.payment_providers import CryptoPayProvider, YooKassaProvider, YooMoneyProvider
@@ -16,17 +16,22 @@ from app.web import routes
 
 
 class CheckoutContracts(unittest.IsolatedAsyncioTestCase):
-    async def test_customer_custom_plan_checkout_is_gone(self):
-        with patch.object(routes, "_webapp_user", AsyncMock(return_value={"id":42})):
-            calls = (
-                (routes.webapp_create_checkout, routes.WebAppCheckout(days=30, traffic=40, devices=1)),
-                (routes.webapp_external_checkout, routes.WebAppExternalCheckout(
-                    days=30, traffic=40, devices=1, provider="yookassa")),
-            )
-            for fn, payload in calls:
-                with self.subTest(fn=fn.__name__), self.assertRaises(HTTPException) as exc:
-                    await fn(payload, x_telegram_init_data="authorized")
-                self.assertEqual(exc.exception.status_code, 410)
+    async def test_retired_checkout_authenticates_without_opening_a_database_session(self):
+        app = FastAPI()
+        app.include_router(routes.router)
+        payload = {"days": 30, "traffic": 50, "devices": 1, "provider": "yookassa"}
+
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            with patch.object(routes, "SessionLocal") as session, \
+                 patch.object(routes, "validate_telegram_init_data", return_value={"id": 123}) as validate:
+                for suffix in ("checkout", "external/checkout"):
+                    path = f"/api/v1/webapp/{suffix}"
+                    with self.subTest(path=path):
+                        self.assertEqual((await client.post(path, json=payload)).status_code, 401)
+                        response = await client.post(path, json=payload, headers={"X-Telegram-Init-Data": "valid"})
+                        self.assertEqual(response.status_code, 410)
+                self.assertEqual(validate.call_count, 2)
+                session.assert_not_called()
 
     async def test_stars_invoice_uses_correct_currency_and_payload(self):
         message=SimpleNamespace(answer_invoice=AsyncMock(),answer=AsyncMock())

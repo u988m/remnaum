@@ -84,6 +84,21 @@ class PremiumMenuTests(unittest.TestCase):
 
 
 class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_welcome_caption_fits_with_emoji(self):
+        from html import unescape
+        from app.bot.handlers import send_home_menu
+
+        message = SimpleNamespace(answer_photo=AsyncMock(), answer=AsyncMock())
+        with patch("app.bot.handlers.home_text", AsyncMock(return_value="<b>" + "😀&amp;" * 400 + "</b>")), \
+             patch("app.bot.handlers.welcome_image_path", return_value=Path("/tmp/welcome.jpg")):
+            await send_home_menu(message, 123, {}, is_admin=False)
+
+        message.answer_photo.assert_awaited_once()
+        message.answer.assert_not_awaited()
+        caption = message.answer_photo.call_args.kwargs["caption"]
+        self.assertLessEqual(len(unescape(caption).encode("utf-16-le")), 2048)
+        self.assertTrue(caption.endswith("Остальное смотрите в Mini App."))
+
     async def test_start_sends_one_combined_photo_caption_and_keyboard(self):
         from app.bot.handlers import start_handler
         message = SimpleNamespace(

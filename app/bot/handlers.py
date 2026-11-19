@@ -136,29 +136,33 @@ async def send_home_menu(message: Message, telegram_id: int, profile: dict, *, i
     image = welcome_image_path()
     if image is not None:
         try:
-            await message.answer_photo(FSInputFile(image), caption=caption, reply_markup=keyboard)
+            await message.answer_photo(FSInputFile(image), caption=_menu_caption(caption), reply_markup=keyboard)
             return
         except Exception as exc:
             logger.warning("Could not send welcome photo: %s", type(exc).__name__)
     await message.answer(caption, reply_markup=keyboard)
 
 
+def _menu_caption(text: str) -> str:
+    plain = unescape(re.sub(r"<[^>]+>", "", text))
+    encoded = plain.encode("utf-16-le")
+    if len(encoded) <= 2 * 1024:
+        return text
+    suffix = "\n\n… Остальное смотрите в Mini App."
+    shortened = encoded[:2 * (1024 - len(suffix))].decode("utf-16-le", errors="ignore")
+    return escape(shortened.rstrip(), quote=False) + suffix
+
+
 async def edit_menu_message(message: Message, text: str, *, reply_markup: InlineKeyboardMarkup | None = None) -> None:
-    """Photo messages cannot be edited with edit_text; replace them safely."""
-    # Telegram photo captions must be at most 1024 characters (even with HTML).
-    # All button sections keep the configured banner attached to the same message.
-    caption = text
-    if len(caption) > 1024:
-        plain = unescape(re.sub(r"<[^>]+>", "", caption))
-        caption = escape(plain[:940].rstrip()) + "\n\n… Остальное смотрите в Mini App."
+    """Keep the banner attached when navigating the menu."""
     if getattr(message, "photo", None):
-        await message.edit_caption(caption=caption, reply_markup=reply_markup)
+        await message.edit_caption(caption=_menu_caption(text), reply_markup=reply_markup)
     else:
         image = welcome_image_path()
         if image is not None:
             try:
                 await message.answer_photo(
-                    FSInputFile(image), caption=caption, reply_markup=reply_markup,
+                    FSInputFile(image), caption=_menu_caption(text), reply_markup=reply_markup,
                 )
             except Exception as exc:
                 logger.warning("Could not open menu with banner: %s", type(exc).__name__)
@@ -394,13 +398,6 @@ async def send_external_invoice(message: Message, telegram_id: int, name: str, *
             [InlineKeyboardButton(text="🧾 Мои покупки", callback_data="menu:purchases")],
         ]),
     )
-
-
-@router.callback_query(F.data == "payment:create:stars")
-async def stars_payment_create_handler(callback: CallbackQuery) -> None:
-    await callback.answer()
-    if callback.message:
-        await send_stars_invoice(callback.message, callback.from_user.id)
 
 
 async def send_stars_invoice(message: Message, telegram_id: int, **order) -> None:
