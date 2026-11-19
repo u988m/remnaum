@@ -50,7 +50,11 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         for html in (mini, admin):
             self.assertIn('href="/static/theme.css"', html)
             self.assertIn('data-theme="monochrome"', html)
-        self.assertIn('id="hero-image"', mini)
+        self.assertNotIn('id="hero-image"', mini)
+        self.assertNotIn('profile?.welcome_image_url', mini_js)
+        self.assertIn('overflow:hidden; text-overflow:ellipsis;', (STATIC / "miniapp.css").read_text(encoding="utf-8"))
+        for icon in ("i-device", "i-book", "i-support"):
+            self.assertIn('id="' + icon + '"', mini)
         self.assertIn('id="copy-referral"', mini)
 
     async def test_storefront_and_miniapp_have_valid_javascript(self):

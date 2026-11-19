@@ -23,23 +23,22 @@
       <div class="hero">
         <div class="hero-orbit" aria-hidden="true"><span></span></div>
         <div class="hero-content">
-          <span class="eyebrow">ВАШ VPN · БЕЗ ЛИШНЕГО</span>
+          <span class="eyebrow">VPN · ПО ВАШИМ ПРАВИЛАМ</span>
           <h1 id="store-tagline">Ваш VPN — ваши правила</h1>
           <p id="welcome" class="muted">Выберите подписку и подключите свои устройства.</p>
           <button class="primary-btn" type="button" data-go-page="shop">Выбрать тариф <span aria-hidden="true">→</span></button>
         </div>
-        <img id="hero-image" alt="Обложка магазина" hidden>
       </div>
       <button class="home-subscription" type="button" data-go-page="vpn">
-        <span class="home-icon" aria-hidden="true">✧</span>
+        <span class="home-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-shield"/></svg></span>
         <span class="home-subscription-copy"><span class="eyebrow">ТЕКУЩИЙ ДОСТУП</span><strong>Моя подписка</strong><small id="home-subscription-status">Подписки пока нет</small></span>
         <span class="home-arrow" aria-hidden="true">→</span>
       </button>
       <div class="home-links home-actions">
-        <button class="quick-action" type="button" data-go-page="devices"><span class="quick-glyph">▯</span><strong>Устройства</strong><span aria-hidden="true">↗</span></button>
-        <button class="quick-action" type="button" data-go-page="guide"><span class="quick-glyph">☷</span><strong>Подключение</strong><span aria-hidden="true">↗</span></button>
-        <button class="quick-action" type="button" data-go-page="bonuses"><span class="quick-glyph">✧</span><strong>Бонусы</strong><span aria-hidden="true">↗</span></button>
-        <button class="quick-action" type="button" data-go-page="support"><span class="quick-glyph">◎</span><strong>Поддержка</strong><span aria-hidden="true">↗</span></button>
+        <button class="quick-action" type="button" data-go-page="devices"><span class="quick-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-device"/></svg></span><strong>Устройства</strong><span aria-hidden="true">↗</span></button>
+        <button class="quick-action" type="button" data-go-page="guide"><span class="quick-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-book"/></svg></span><strong>Подключение</strong><span aria-hidden="true">↗</span></button>
+        <button class="quick-action" type="button" data-go-page="bonuses"><span class="quick-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-gift"/></svg></span><strong>Бонусы</strong><span aria-hidden="true">↗</span></button>
+        <button class="quick-action" type="button" data-go-page="support"><span class="quick-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-support"/></svg></span><strong>Поддержка</strong><span aria-hidden="true">↗</span></button>
       </div>
     </section>
     <section class="page" id="page-shop" data-page-panel="shop" hidden>
@@ -192,6 +191,9 @@
 <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z"/><path d="m9 12 2 2 4-4"/></symbol>
 <symbol id="i-gift" viewBox="0 0 24 24"><rect x="3" y="9" width="18" height="12" rx="2"/><path d="M12 9v12M3 13h18M12 9c-7 0-7-7-3-7 2 0 3 3 3 7Zm0 0c7 0 7-7 3-7-2 0-3 3-3 7Z"/></symbol>
 <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-5 3-8 8-8s8 3 8 8"/></symbol>
+<symbol id="i-device" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><path d="M12 6c-3-2-6-2-10-1v15c4-1 7-1 10 1 3-2 6-2 10-1V5c-4-1-7-1-10 1ZM12 6v15"/></symbol>
+<symbol id="i-support" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><path d="m5 5 4 4m6 6 4 4m0-14-4 4m-6 6-4 4"/></symbol>
 </svg>
 <script src="/static/miniapp.js" defer></script>
 </body>
