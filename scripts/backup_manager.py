@@ -13,6 +13,7 @@ import getpass
 import fcntl
 import hashlib
 import hmac
+import http.client
 import io
 import json
 import os
@@ -258,7 +259,7 @@ def create_backup(*, scheduled: bool = False, send: bool | None = None, protecte
         if deliver:
             try:
                 send_to_telegram(out, settings["chat_id"])
-            except (ValueError, OSError) as exc:
+            except (ValueError, OSError, RuntimeError) as exc:
                 print("Не удалось отправить архив в Telegram; локальная копия сохранена.")
         return out
 
@@ -291,15 +292,25 @@ def send_to_telegram(archive: Path, chat_id: str) -> None:
         "Content-Type: application/octet-stream\r\n\r\n"
     ).encode()
     suffix = f"\r\n--{boundary}--\r\n".encode()
-    # Only encrypted bytes are ever uploaded. The recovery key remains on the host.
-    request = Request(
-        f"https://api.telegram.org/bot{token}/sendDocument",
-        data=prefix + archive.read_bytes() + suffix,
-        headers={"Content-Type": "multipart/form-data; boundary=" + boundary},
-        method="POST",
-    )
-    with urlopen(request, timeout=100) as response:
-        result = json.load(response)
+    # Send one bounded chunk at a time. The host installer uses Python stdlib only.
+    # Only encrypted bytes are uploaded; the recovery key never leaves the host.
+    connection = http.client.HTTPSConnection("api.telegram.org", timeout=100)
+    try:
+        connection.putrequest("POST", f"/bot{token}/sendDocument")
+        connection.putheader("Content-Type", "multipart/form-data; boundary=" + boundary)
+        connection.putheader("Content-Length", str(len(prefix) + archive.stat().st_size + len(suffix)))
+        connection.endheaders()
+        connection.send(prefix)
+        with archive.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                connection.send(chunk)
+        connection.send(suffix)
+        response = connection.getresponse()
+        if response.status != 200:
+            raise RuntimeError(f"Telegram rejected backup upload (HTTP {response.status})")
+        result = json.loads(response.read(64 * 1024))
+    finally:
+        connection.close()
     if not result.get("ok"):
         raise RuntimeError("Telegram отклонил зашифрованный архив")
     print("✓ Зашифрованный архив отправлен в Telegram")
