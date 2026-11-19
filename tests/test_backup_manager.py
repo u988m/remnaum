@@ -126,7 +126,7 @@ class BackupTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "database.dump"):
                     backup.restore_backup(archive, supplied_key=KEY, target_root=target)
                 self.assertFalse(any(call.args[0][0] == "docker" for call in command.call_args_list))
-            self.assertEqual(list(target.iterdir()), [])
+            self.assertFalse(target.exists())
 
     def test_new_key_is_not_included_in_archive(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -146,22 +146,98 @@ class BackupTests(unittest.TestCase):
                 self.assertIn("install/data/backup-settings.json", names)
                 self.assertNotIn("install/data/backup.key", names)
 
-    def test_reject_tar_traversal_and_symlinks(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            for name, member_type in [("../outside", tarfile.REGTYPE), ("install/linked", tarfile.SYMTYPE)]:
-                stream = io.BytesIO()
-                with tarfile.open(fileobj=stream, mode="w") as archive:
-                    item = tarfile.TarInfo(name)
-                    item.type = member_type
-                    item.linkname = "/etc/passwd" if member_type == tarfile.SYMTYPE else ""
-                    item.size = 0
-                    archive.addfile(item, io.BytesIO())
-                stream.seek(0)
-                with tarfile.open(fileobj=stream, mode="r") as archive:
-                    with self.assertRaises(ValueError):
-                        backup._safe_extract(archive, root / "target")
-                self.assertFalse((root / "outside").exists())
+    def assert_rejected_before_extract(self, entries, message, limits=None):
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode="w") as tar:
+            for name, member_type, data in entries:
+                member = tarfile.TarInfo(name)
+                member.type = member_type
+                member.size = len(data)
+                tar.addfile(member, io.BytesIO(data))
+        stream.seek(0)
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, limits or {}):
+            target = Path(folder) / "target"
+            with self.assertRaisesRegex(ValueError, message):
+                with tarfile.open(fileobj=stream, mode="r", tarinfo=backup.RestoreTarInfo) as tar:
+                    backup._safe_extract(tar, target)
+            self.assertEqual(list(Path(folder).iterdir()), [])
+
+    def test_reject_tar_traversal_absolute_paths_links_and_special_files(self):
+        unsafe = [
+            ("install/../outside", tarfile.REGTYPE), ("/outside", tarfile.REGTYPE),
+            ("install/symlink", tarfile.SYMTYPE), ("install/hardlink", tarfile.LNKTYPE),
+            ("install/character", tarfile.CHRTYPE), ("install/fifo", tarfile.FIFOTYPE),
+        ]
+        for name, kind in unsafe:
+            with self.subTest(name=name):
+                self.assert_rejected_before_extract([(name, kind, b"")], "Небезопасное содержимое")
+
+    def test_reject_duplicate_paths_after_normalization(self):
+        self.assert_rejected_before_extract([
+            ("install/folder/file", tarfile.REGTYPE, b"one"),
+            ("install//folder/./file", tarfile.REGTYPE, b"two"),
+        ], "Дублирующийся путь")
+
+    def test_reject_directory_file_conflict_in_either_order(self):
+        entries = [
+            ("install/folder/file", tarfile.REGTYPE, b"one"),
+            ("install/folder", tarfile.REGTYPE, b"two"),
+        ]
+        for order in (entries, entries[::-1]):
+            self.assert_rejected_before_extract(order, "Конфликт файла и каталога")
+
+    def test_reject_archive_limits_before_unpacking(self):
+        entries = [
+            ("install/folder/a", tarfile.REGTYPE, b"one"),
+            ("install/folder/b", tarfile.REGTYPE, b"two"),
+        ]
+        cases = [
+            ("REMNAUM_RESTORE_MAX_FILE_BYTES", "2", "размера файла"),
+            ("REMNAUM_RESTORE_MAX_TOTAL_BYTES", "5", "общего объёма"),
+            ("REMNAUM_RESTORE_MAX_PATHS", "3", "файлов и каталогов"),
+        ]
+        for name, value, error in cases:
+            with self.subTest(limit=name):
+                self.assert_rejected_before_extract(entries, error, {name: value})
+
+    def test_reject_oversized_extended_header(self):
+        self.assert_rejected_before_extract([
+            ("extended", tarfile.XHDTYPE, b"x" * (64 * 1024 + 1)),
+            ("install/a", tarfile.REGTYPE, b"one"),
+        ], "лимит расширенных заголовков")
+
+    def test_reject_links_in_restore_destination(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            external = root / "external"
+            external.write_text("keep me")
+            for create_link in (os.symlink, os.link):
+                linked = root / "config"
+                create_link(external, linked)
+                with self.assertRaisesRegex(ValueError, "Небезопасный путь"):
+                    backup._check_restore_destination(root, {
+                        Path("install/config"): tarfile.TarInfo("install/config")
+                    })
+                linked.unlink()
+                self.assertEqual(external.read_text(), "keep me")
+
+    def test_extract_nested_file_with_implicit_directories_and_pax_metadata(self):
+        stream = io.BytesIO()
+        path = "install/data/" + "я" * 75 + ".txt"
+        content = b"hello"
+        with tarfile.open(fileobj=stream, mode="w:gz", format=tarfile.PAX_FORMAT) as archive:
+            member = tarfile.TarInfo(path)
+            member.size = len(content)
+            archive.addfile(member, io.BytesIO(content))
+            directory = tarfile.TarInfo("install/data")
+            directory.type = tarfile.DIRTYPE
+            archive.addfile(directory)
+        stream.seek(0)
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "target"
+            with tarfile.open(fileobj=stream, mode="r:gz", tarinfo=backup.RestoreTarInfo) as archive:
+                backup._safe_extract(archive, target)
+            self.assertEqual((target / path).read_bytes(), content)
 
     def test_backup_directory_rotation(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(backup, "BACKUPS", Path(temp)):
