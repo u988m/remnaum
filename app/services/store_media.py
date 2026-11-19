@@ -9,6 +9,7 @@ import base64
 import binascii
 import io
 import os
+from tempfile import NamedTemporaryFile
 from pathlib import Path
 
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -19,8 +20,18 @@ MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_PIXELS = 16_000_000
 
 
+def image_path(kind: str) -> Path | None:
+    path = WELCOME_IMAGE if kind == "welcome" else DATA_DIR / "logo.jpg"
+    return path if path.is_file() and not path.is_symlink() else None
+
+
 def welcome_image_path() -> Path | None:
-    return WELCOME_IMAGE if WELCOME_IMAGE.is_file() and not WELCOME_IMAGE.is_symlink() else None
+    return image_path("welcome")
+
+
+def logo_image_url() -> str | None:
+    path = image_path("logo")
+    return f"/api/v1/store-profile/logo-image?v={path.stat().st_mtime_ns}" if path else None
 
 
 def welcome_image_url() -> str | None:
@@ -29,6 +40,16 @@ def welcome_image_url() -> str | None:
 
 
 def save_welcome_image(data_base64: str) -> str:
+    _save_image(data_base64, WELCOME_IMAGE, (200, 120), (1600, 1200))
+    return welcome_image_url() or "/api/v1/store-profile/welcome-image"
+
+
+def save_logo_image(data_base64: str) -> str:
+    _save_image(data_base64, DATA_DIR / "logo.jpg", (64, 64), (512, 512))
+    return logo_image_url() or "/api/v1/store-profile/logo-image"
+
+
+def _save_image(data_base64: str, destination: Path, minimum: tuple[int, int], maximum: tuple[int, int]) -> None:
     if not isinstance(data_base64, str):
         raise ValueError("Неверный формат изображения")
     raw = data_base64.partition(",")[2] if data_base64.startswith("data:image/") else data_base64
@@ -44,12 +65,12 @@ def save_welcome_image(data_base64: str) -> str:
         with Image.open(io.BytesIO(payload)) as original:
             if original.format not in ("JPEG", "PNG", "WEBP"):
                 raise ValueError("Поддерживаются JPG, PNG и WebP")
-            if original.width < 200 or original.height < 120 or original.width * original.height > MAX_PIXELS:
-                raise ValueError("Изображение должно быть от 200×120 до 16 мегапикселей")
+            if original.width < minimum[0] or original.height < minimum[1] or original.width * original.height > MAX_PIXELS:
+                raise ValueError(f"Минимальный размер — {minimum[0]}×{minimum[1]}, максимум — 16 мегапикселей")
             image = ImageOps.exif_transpose(original)
-            image.thumbnail((1600, 1200), Image.Resampling.LANCZOS)
+            image.thumbnail(maximum, Image.Resampling.LANCZOS)
             if image.mode != "RGB":
-                canvas = Image.new("RGB", image.size, (9, 18, 34))
+                canvas = Image.new("RGB", image.size, (18, 18, 18))
                 if "A" in image.getbands():
                     canvas.paste(image, mask=image.getchannel("A"))
                 else:
@@ -62,20 +83,22 @@ def save_welcome_image(data_base64: str) -> str:
     if DATA_DIR.is_symlink():
         raise ValueError("Некорректное расположение изображения")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    path = WELCOME_IMAGE.with_name(".welcome-upload.tmp")
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "wb") as stream:
+    with NamedTemporaryFile(dir=DATA_DIR, prefix=".branding-", delete=False) as stream:
+        temporary = Path(stream.name)
+        try:
             stream.write(output.getvalue())
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(path, WELCOME_IMAGE)
-        os.chmod(WELCOME_IMAGE, 0o600)
-    finally:
-        path.unlink(missing_ok=True)
-    return welcome_image_url() or "/api/v1/store-profile/welcome-image"
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def delete_welcome_image() -> None:
     if welcome_image_path():
         WELCOME_IMAGE.unlink()
+
+
+def delete_logo_image() -> None:
+    if path := image_path("logo"):
+        path.unlink(missing_ok=True)

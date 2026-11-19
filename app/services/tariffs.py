@@ -108,6 +108,12 @@ async def calculate_store_stars_price(duration_days: int, traffic_gb: int, devic
     return amount
 
 
+def format_traffic(traffic_gb: int | None) -> str:
+    if traffic_gb is None:
+        return "—"
+    return "Безлимит" if traffic_gb == 0 else f"{traffic_gb} ГБ"
+
+
 def format_price(amount_minor: int, currency: str | None = None) -> str:
     code = currency or settings.tariff_currency
     return f"{amount_minor / 100:.2f} {code}"
@@ -190,6 +196,8 @@ async def get_tariff_draft(telegram_id: int) -> TariffQuote:
             amount = await calculate_store_price(days, traffic, devices)
         else:
             days, traffic, devices = draft.duration_days, draft.traffic_gb, draft.device_limit
+            if await session.get(SelectedPlan, draft.user_id):
+                return TariffQuote(days, traffic, devices, draft.amount_minor, "RUB")
             amount = await calculate_store_price(days, traffic, devices)
         pricing = await get_store_tariff_pricing()
         return TariffQuote(days, traffic, devices, amount, pricing["currency"])
@@ -207,6 +215,8 @@ async def ensure_tariff_draft(telegram_id: int) -> TariffQuote:
             draft = TariffDraft(user_id=user.id, duration_days=days, traffic_gb=traffic, device_limit=devices, amount_minor=amount)
             session.add(draft)
             await session.commit()
+        elif await session.get(SelectedPlan, user.id):
+            return TariffQuote(draft.duration_days, draft.traffic_gb, draft.device_limit, draft.amount_minor, "RUB")
         else:
             amount = await calculate_store_price(draft.duration_days, draft.traffic_gb, draft.device_limit)
         pricing = await get_store_tariff_pricing()

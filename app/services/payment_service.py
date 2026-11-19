@@ -7,13 +7,13 @@ import httpx
 
 from sqlalchemy import select
 
-from app.db.models import Subscription, Payment, TariffDraft, TermsAcceptance, User
+from app.db.models import Subscription, Payment, TariffDraft, TariffPlan, TermsAcceptance, User
 from app.db.session import SessionLocal
 from app.config import settings
 from app.services.payment_providers import VerifiedPayment, get_provider
-from app.services.tariffs import calculate_store_stars_price, ensure_tariff_draft
+from app.services.tariffs import TariffQuote, calculate_store_price, calculate_store_stars_price, ensure_tariff_draft
 from app.services.store_settings import get_store_payment_settings
-from app.services.plans import selected_plan_for_user
+from app.services.plans import PlanQuote, quote_plan, selected_plan_for_user
 from app.services.squads import fetch_catalog, mode_squads, require_available
 from app.services.remnawave import RemnawaveClient
 from app.services.subscriptions import (
@@ -52,37 +52,63 @@ async def validate_checkout_access(session, user_id, telegram_id, tariff_key, se
     return False
 
 
-async def create_payment_for_user(telegram_id: int, provider_name: str, expected_plan_id: int | None = None) -> tuple[Payment, Any]:
+async def _payment_quote(
+    session, user_id: int, draft_quote: TariffQuote | None, plan_id: int | None,
+    extra_devices: int, revision: str | None,
+) -> tuple[TariffPlan | None, TariffQuote]:
+    if plan_id is not None:
+        plan = await session.get(TariffPlan, plan_id)
+        return plan, quote_plan(plan, extra_devices, revision)
+
+    plan = await selected_plan_for_user(session, user_id)
+    draft = await session.scalar(select(TariffDraft).where(TariffDraft.user_id == user_id))
+    if draft is None or draft_quote is None:
+        raise ValueError("Настройте тариф перед оплатой")
+    if plan is not None:
+        quote = quote_plan(plan)
+        if (draft.duration_days, draft.traffic_gb, draft.device_limit, draft.amount_minor) != (
+            quote.duration_days, quote.traffic_gb, quote.device_limit, quote.amount_minor
+        ):
+            raise ValueError("Условия тарифа изменились. Выберите тариф заново.")
+        return plan, quote
+    amount = await calculate_store_price(draft.duration_days, draft.traffic_gb, draft.device_limit)
+    return None, TariffQuote(draft.duration_days, draft.traffic_gb, draft.device_limit, amount, draft_quote.currency)
+
+
+def _order_snapshot(quote: TariffQuote, plan: TariffPlan | None, squads: list[str], preserve: bool) -> dict:
+    order = {
+        "tariff": {
+            "duration_days": quote.duration_days,
+            "traffic_gb": quote.traffic_gb,
+            "device_limit": quote.device_limit,
+            "internal_squads": squads,
+            "preserve_squads": preserve,
+        },
+        "plan_id": plan.id if plan is not None else None,
+    }
+    if isinstance(quote, PlanQuote):
+        order["tariff"].update(name=quote.name, devices_included=quote.devices_included, extra_devices=quote.extra_devices)
+    return order
+
+
+async def create_payment_for_user(
+    telegram_id: int, provider_name: str, *,
+    plan_id: int | None = None, extra_devices: int = 0, revision: str | None = None,
+) -> tuple[Payment, Any]:
     methods, credentials = await get_store_payment_settings()
     if provider_name not in {"yookassa", "yoomoney", "cryptopay"} or not methods.get(provider_name):
         raise ValueError("Выбранный способ оплаты отключён администратором")
     if not await get_terms_url() or not await has_accepted_current_terms(telegram_id):
         raise ValueError("Перед покупкой примите опубликованные условия продажи")
-    quote = await ensure_tariff_draft(telegram_id)
+    draft_quote = await ensure_tariff_draft(telegram_id) if plan_id is None else None
     if not settings.remnawave_base_url or not settings.remnawave_api_token:
         raise RuntimeError("Remnawave is not configured; payment checkout is disabled")
     async with SessionLocal() as session:
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
         if user is None:
             raise ValueError("Telegram user is not registered")
-        draft = await session.scalar(
-            select(TariffDraft).where(TariffDraft.user_id == user.id)
-        )
-        if draft is None:
-            raise ValueError("Configure your tariff before paying")
-        plan = await selected_plan_for_user(session, user.id)
-        if expected_plan_id is not None and (plan is None or plan.id != expected_plan_id):
-            raise ValueError("Выбранный тариф изменился. Откройте тариф ещё раз.")
-        if plan is not None:
-            if not plan.is_active or (
-                draft.duration_days, draft.traffic_gb, draft.device_limit
-            ) != (plan.duration_days, plan.traffic_gb, plan.device_limit):
-                raise ValueError("Selected plan has changed; select it again")
-            if quote.currency.upper() != "RUB":
-                raise ValueError("Fixed RUB plans require TARIFF_CURRENCY=RUB for external checkout")
-            amount_minor = plan.price_rub_minor
-        else:
-            amount_minor = quote.amount_minor
+        plan, quote = await _payment_quote(session, user.id, draft_quote, plan_id, extra_devices, revision)
+        amount_minor = quote.amount_minor
         if amount_minor <= 0:
             raise ValueError("Tariff amount must be greater than zero")
 
@@ -95,16 +121,7 @@ async def create_payment_for_user(telegram_id: int, provider_name: str, expected
             amount=amount_minor,
             currency=quote.currency,
             status="pending",
-            payload=json.dumps({
-                "tariff": {
-                    "duration_days": draft.duration_days,
-                    "traffic_gb": draft.traffic_gb,
-                    "device_limit": draft.device_limit,
-                    "internal_squads": selected_squads,
-                    "preserve_squads": preserve,
-                },
-                "plan_id": plan.id if plan is not None else None,
-            }),
+            payload=json.dumps(_order_snapshot(quote, plan, selected_squads, preserve)),
         )
         session.add(payment)
         await session.commit()
@@ -209,8 +226,10 @@ async def accept_current_terms(telegram_id: int) -> None:
             await session.commit()
 
 
-async def create_stars_payment_for_user(telegram_id: int, expected_plan_id: int | None = None) -> tuple[Payment, int]:
-    await ensure_tariff_draft(telegram_id)
+async def create_stars_payment_for_user(
+    telegram_id: int, *, plan_id: int | None = None, extra_devices: int = 0, revision: str | None = None,
+) -> tuple[Payment, int]:
+    draft_quote = await ensure_tariff_draft(telegram_id) if plan_id is None else None
     if not await get_terms_url():
         raise RuntimeError("Publish the terms URL in the admin branding settings before enabling sales")
     if not await has_accepted_current_terms(telegram_id):
@@ -222,20 +241,13 @@ async def create_stars_payment_for_user(telegram_id: int, expected_plan_id: int 
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
         if user is None:
             raise ValueError("Telegram user is not registered")
-        draft = await session.scalar(select(TariffDraft).where(TariffDraft.user_id == user.id))
-        if draft is None:
-            raise ValueError("Configure your tariff before paying")
-        plan = await selected_plan_for_user(session, user.id)
-        if expected_plan_id is not None and (plan is None or plan.id != expected_plan_id):
-            raise ValueError("Выбранный тариф изменился. Откройте тариф ещё раз.")
-        if plan is not None:
-            if not plan.is_active or (
-                draft.duration_days, draft.traffic_gb, draft.device_limit
-            ) != (plan.duration_days, plan.traffic_gb, plan.device_limit):
-                raise ValueError("Selected plan has changed; select it again")
-            stars = plan.price_stars
+        plan, quote = await _payment_quote(session, user.id, draft_quote, plan_id, extra_devices, revision)
+        if isinstance(quote, PlanQuote):
+            if quote.stars is None:
+                raise ValueError("Для этих устройств оплата в Telegram Stars недоступна")
+            stars = quote.stars
         else:
-            stars = await calculate_store_stars_price(draft.duration_days, draft.traffic_gb, draft.device_limit)
+            stars = await calculate_store_stars_price(quote.duration_days, quote.traffic_gb, quote.device_limit)
         selected_squads, preserve = await checkout_squads(session, user, plan)
         payment = Payment(
             user_id=user.id,
@@ -243,15 +255,7 @@ async def create_stars_payment_for_user(telegram_id: int, expected_plan_id: int 
             amount=stars,
             currency="XTR",
             status="pending",
-            payload=json.dumps({
-                "tariff": {
-                    "duration_days": draft.duration_days,
-                    "traffic_gb": draft.traffic_gb,
-                    "device_limit": draft.device_limit,
-                    "internal_squads": selected_squads,
-                    "preserve_squads": preserve,
-                },
-                "plan_id": plan.id if plan is not None else None,
+            payload=json.dumps(_order_snapshot(quote, plan, selected_squads, preserve) | {
                 "terms_version": settings.telegram_terms_version,
             }),
         )

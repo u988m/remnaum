@@ -15,6 +15,7 @@ from app.config import settings
 from app.db.base import Base
 from app.db.models import Payment, Subscription, TariffPlan, TermsAcceptance, User
 from app.db.session import initialize_schema
+from app.services.payment_providers import PaymentLink, VerifiedPayment
 from app.services import payment_service, plans, squads, subscriptions, tariffs, trials
 
 A, B = str(uuid4()), str(uuid4())
@@ -143,6 +144,61 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved[premium["id"]]["internal_squads"], [A, B])
         with self.assertRaises(ValueError):
             await plans.save_plan(PLAN | {"internal_squads": [B]})
+
+    async def test_unlimited_plan_charges_addons_and_provisions_the_confirmed_snapshot(self):
+        async with self.engine.begin() as conn:
+            await initialize_schema(conn)
+        await self.sync((A, "A"))
+        config = PLAN | {
+            "traffic_gb": 0, "device_limit": 2, "price_rub_minor": 19990,
+            "extra_device_price_rub_minor": 4905, "extra_device_price_stars": 5,
+            "badge": "Популярный", "is_featured": True, "internal_squads": [A],
+        }
+        plan = await plans.save_plan(config)
+        async with self.sessions.begin() as session:
+            session.add(User(telegram_id=31))
+        provider = AsyncMock()
+        provider.create_payment.return_value = PaymentLink("yookassa", "external-1", "https://payment.example")
+        order = {"plan_id": plan["id"], "extra_devices": 2, "revision": plan["revision"]}
+        with patch.object(payment_service, "get_terms_url", return_value="terms"), \
+             patch.object(payment_service, "has_accepted_current_terms", return_value=True), \
+             patch.object(payment_service, "get_store_payment_settings", return_value=({"yookassa": True}, {})), \
+             patch.object(payment_service, "get_provider", return_value=provider):
+            with self.assertRaisesRegex(ValueError, "количество"):
+                await payment_service.create_stars_payment_for_user(31, **(order | {"extra_devices": -1}))
+            payment, _ = await payment_service.create_payment_for_user(31, "yookassa", **order)
+            stars_payment, stars = await payment_service.create_stars_payment_for_user(31, **order)
+            self.assertEqual(payment.amount, 29800)
+            self.assertEqual(provider.create_payment.call_args.kwargs["amount_minor"], 29800)
+            self.assertEqual((stars_payment.amount, stars), (20, 20))
+
+            await plans.save_plan(config | {
+                "traffic_gb": 50, "price_rub_minor": 50000, "extra_device_price_stars": None,
+            }, plan["id"])
+            with self.assertRaisesRegex(ValueError, "изменились"):
+                await payment_service.create_payment_for_user(31, "yookassa", **order)
+            with self.assertRaisesRegex(ValueError, "Stars недоступна"):
+                await payment_service.create_stars_payment_for_user(31, plan_id=plan["id"], extra_devices=2)
+            current, = await plans.list_plans()
+            self.assertEqual(current["extra_device_price_rub"], 49.05)
+
+        order = json.loads(payment.payload)
+        self.assertEqual(order["tariff"]["traffic_gb"], 0)
+        self.assertEqual(order["tariff"]["device_limit"], 4)
+        self.assertEqual(order["tariff"]["extra_devices"], 2)
+        self.assertTrue(await payment_service.settle_payment(
+            VerifiedPayment(payment.id, "external-1", 29800, "RUB"), "yookassa"
+        ))
+
+        self.panel.create_user.return_value = self.panel.get_user.return_value = {"response": {"id": 18}}
+        with patch.object(subscriptions, "RemnawaveClient", return_value=self.panel):
+            self.assertTrue(await subscriptions.provision_paid_payment(payment.id))
+            self.assertFalse(await subscriptions.provision_paid_payment(payment.id))
+        self.assertEqual(self.panel.create_user.call_args.kwargs["traffic_limit_bytes"], 0)
+        self.assertEqual(self.panel.create_user.call_args.kwargs["hwid_device_limit"], 4)
+        self.assertEqual(self.panel.create_user.call_args.kwargs["active_internal_squads"], [A])
+        subscription = await subscriptions.get_user_subscription(31)
+        self.assertEqual((subscription["traffic_gb"], subscription["device_limit"]), (0, 4))
 
     async def test_trial_to_flexible_paid_access(self):
         async with self.engine.begin() as conn:

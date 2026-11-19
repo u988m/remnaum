@@ -107,6 +107,10 @@ class TariffPlan(Base):
     device_limit: Mapped[int] = mapped_column(Integer, nullable=False)
     price_rub_minor: Mapped[int] = mapped_column(Integer, nullable=False)
     price_stars: Mapped[int] = mapped_column(Integer, nullable=False)
+    extra_device_price_rub_minor: Mapped[int | None] = mapped_column(Integer)
+    extra_device_price_stars: Mapped[int | None] = mapped_column(Integer)
+    badge: Mapped[str] = mapped_column(String(32), nullable=False, server_default="")
+    is_featured: Mapped[bool] = mapped_column(nullable=False, server_default="false")
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 

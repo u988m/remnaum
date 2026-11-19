@@ -1,4 +1,4 @@
-const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();const $=id=>document.getElementById(id);let userOffset=0,paymentOffset=0;const pageSize=20;
+const tg=window.Telegram?.WebApp;tg?.ready?.();tg?.expand?.();const $=id=>document.getElementById(id);let userOffset=0,paymentOffset=0;const pageSize=20;
 async function api(path){const r=await fetch(path,{headers:{"X-Telegram-Init-Data":tg?.initData||""}});const d=await r.json();if(!r.ok)throw Error(d.detail||"Ошибка запроса");return d}
 function cell(value){const td=document.createElement("td");td.textContent=value??"—";return td}
 function row(target,values){const tr=document.createElement("tr");values.forEach(v=>tr.appendChild(cell(v)));$(target).appendChild(tr)}
@@ -63,7 +63,6 @@ async function loadSquads(refresh = false) {
 }
 $("squads-search").oninput = renderSquads;
 $("squads-refresh").onclick = () => loadSquads(true);
-let cachedPlans=[];
 function renderModePolicies() {
   if (!modeSquads) return;
   const container = $("mode-policies");
@@ -119,41 +118,103 @@ async function loadPlans(){
     modeSquads = {flexible: new Set(policies.flexible), trial: new Set(policies.trial)};
   }
   await loadSquads();
-  const d=await adminApi("GET","/admin/api/plans");cachedPlans=d.items;$("plans-table").replaceChildren();
-  d.items.forEach(p=>{
-    row("plans-table",[p.title,p.duration_days+" д / "+p.traffic_gb+" ГБ / "+p.device_limit+" уст.",(p.price_rub_minor/100).toFixed(2),p.price_stars,p.is_active?"Активен":"Скрыт"]);
-    const td=cell("");const button=document.createElement("button");button.className="action";button.textContent="Изменить";
-    button.onclick=()=>fillPlan(p);td.appendChild(button);$("plans-table").lastElementChild.appendChild(td);
-  });
+  const {items} = await adminApi("GET", "/admin/api/plans");
+  const table = $("plans-table");
+  table.replaceChildren();
+  if (!items.length) {
+    const tr = document.createElement("tr");
+    const empty = cell("Тарифов пока нет");
+    empty.colSpan = 6;
+    tr.append(empty);
+    table.append(tr);
+  }
+  for (const plan of items) {
+    const badge = plan.badge || (plan.is_featured ? "Популярный" : "");
+    row("plans-table", [
+      badge ? plan.name + " · " + badge : plan.name,
+      `${plan.days} дн. · ${plan.traffic_gb === 0 ? "Безлимит" : plan.traffic_gb + " ГБ"} · устройств: ${plan.devices_included}`,
+      (plan.price_rub_minor / 100).toFixed(2) + " ₽", plan.price_stars + " ⭐",
+      plan.is_active ? "Активен" : "Скрыт",
+    ]);
+    const td = cell("");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "action";
+    button.textContent = "Изменить";
+    button.onclick = () => fillPlan(plan);
+    td.append(button);
+    table.lastElementChild.append(td);
+  }
 }
-function fillPlan(p){
-  selectedSquads = p.internal_squads; $("squads-search").value = ""; renderSquads();
-  $("plan-id").value=p.id;$("plan-title").value=p.title;$("plan-description").value=p.description||"";
-  $("plan-days").value=p.duration_days;$("plan-traffic").value=p.traffic_gb;$("plan-devices").value=p.device_limit;
-  $("plan-rub").value=p.price_rub_minor;$("plan-stars").value=p.price_stars;
-  $("plan-order").value=p.sort_order;$("plan-active").checked=p.is_active;
+
+function fillPlan(plan = null) {
+  $("plan-form").reset();
+  $("plan-form-title").textContent = plan ? "Редактировать тариф" : "Новый тариф";
+  $("plan-status").textContent = "";
+  $("squads-search").value = "";
+  selectedSquads = plan ? plan.internal_squads : [];
+  renderSquads();
+  if (plan) {
+    const fields = {
+      id: plan.id, title: plan.name, description: plan.description, days: plan.days,
+      traffic: plan.traffic_gb, devices: plan.devices_included, rub: plan.price_rub_minor / 100,
+      stars: plan.price_stars, order: plan.sort_order, badge: plan.badge,
+      "extra-rub": plan.extra_device_price_rub_minor == null ? "" : plan.extra_device_price_rub_minor / 100,
+      "extra-stars": plan.extra_device_price_stars ?? "",
+    };
+    for (const [field, value] of Object.entries(fields)) $("plan-" + field).value = value ?? "";
+    $("plan-active").checked = plan.is_active;
+    $("plan-featured").checked = plan.is_featured;
+  }
+  $("plan-form").hidden = false;
+  $("plan-title").focus();
 }
-$("plan-new").onclick=()=>{$("plan-form").reset();$("plan-id").value=""; selectedSquads = []; renderSquads();};
-$("plans-refresh").onclick=()=>loadPlans().catch(e=>$("status").textContent=e.message);
-$("plan-form").onsubmit=async e=>{
-  e.preventDefault();try{
-    const payload={internal_squads:selectedSquads,title:$("plan-title").value,description:$("plan-description").value,
-      duration_days:+$("plan-days").value,traffic_gb:+$("plan-traffic").value,device_limit:+$("plan-devices").value,
-      price_rub_minor:+$("plan-rub").value,price_stars:+$("plan-stars").value,
-      sort_order:+$("plan-order").value,is_active:$("plan-active").checked};
-    const id=$("plan-id").value;
-    const saved = await adminApi(id?"PUT":"POST",id?"/admin/api/plans/"+id:"/admin/api/plans",payload);
+$("plan-new").onclick = () => fillPlan();
+$("plan-cancel").onclick = () => { $("plan-form").hidden = true; };
+$("plans-refresh").onclick = () => loadPlans().catch(e => { $("status").textContent = e.message; });
+$("plan-form").onsubmit = async event => {
+  event.preventDefault();
+  const button = event.submitter;
+  if (button) button.disabled = true;
+  try {
+    const id = $("plan-id").value;
+    const payload = {
+      name: $("plan-title").value.trim(), description: $("plan-description").value,
+      days: +$("plan-days").value, traffic_gb: +$("plan-traffic").value, devices_included: +$("plan-devices").value,
+      price_rub: $("plan-rub").value, price_stars: +$("plan-stars").value,
+      extra_device_price_rub: $("plan-extra-rub").value || null,
+      extra_device_price_stars: $("plan-extra-stars").value === "" ? null : +$("plan-extra-stars").value,
+      sort_order: +$("plan-order").value, is_active: $("plan-active").checked,
+      badge: $("plan-badge").value, is_featured: $("plan-featured").checked, internal_squads: selectedSquads,
+    };
+    const saved = await adminApi(id ? "PUT" : "POST", "/admin/api/plans" + (id ? "/" + id : ""), payload);
     fillPlan(saved);
-    $("status").textContent="Тариф сохранён";await loadPlans();
-  }catch(e){$("status").textContent=e.message}
+    $("plan-status").textContent = "Тариф сохранён";
+    await loadPlans();
+  } catch (error) {
+    $("plan-status").textContent = error.message;
+  } finally {
+    if (button) button.disabled = false;
+  }
 };
-let currentPhotoPreviewUrl=null;
-function renderWelcomePhoto(url){
-  const image=$("brand-photo-preview");
-  const placeholder=$("brand-photo-placeholder");
-  if(url){image.src=url;image.hidden=false;placeholder.hidden=true}
-  else{image.removeAttribute("src");image.hidden=true;placeholder.hidden=false}
+
+function renderImage(prefix, url) {
+  const image = $(prefix + "-preview");
+  image.hidden = !url;
+  $(prefix + "-placeholder").hidden = Boolean(url);
+  if (url) image.src = url;
+  else image.removeAttribute("src");
 }
+
+function renderStoreMark(name, logo) {
+  $("admin-shop-name").textContent = name;
+  $("admin-shop-mark").textContent = name.trim().charAt(0).toUpperCase() || "R";
+  $("admin-shop-mark").hidden = Boolean(logo);
+  $("admin-shop-logo").hidden = !logo;
+  if (logo) $("admin-shop-logo").src = logo;
+  else $("admin-shop-logo").removeAttribute("src");
+}
+
 function readImageAsDataUrl(file){
   return new Promise((resolve,reject)=>{
     const reader=new FileReader();
@@ -162,38 +223,45 @@ function readImageAsDataUrl(file){
     reader.readAsDataURL(file);
   });
 }
-$("brand-photo").addEventListener("change",()=>{
-  const file=$("brand-photo").files?.[0];
-  if(currentPhotoPreviewUrl)URL.revokeObjectURL(currentPhotoPreviewUrl);
-  if(file){currentPhotoPreviewUrl=URL.createObjectURL(file);renderWelcomePhoto(currentPhotoPreviewUrl)}
-});
-$("brand-photo-upload").onclick=async()=>{
-  const file=$("brand-photo").files?.[0];
-  if(!file){$("brand-photo-status").textContent="Сначала выберите изображение";return}
-  if(!["image/jpeg","image/png","image/webp"].includes(file.type)||file.size>5*1024*1024){
-    $("brand-photo-status").textContent="Допустимы JPG, PNG или WebP до 5 МБ";return
+function setupImageUpload(prefix, inputId, kind) {
+  const input = $(inputId);
+  const upload = $(prefix + "-upload");
+  const remove = $(prefix + "-remove");
+  const status = $(prefix + "-status");
+  const path = "/admin/api/store-profile/" + kind;
+  let previewUrl = null;
+  input.onchange = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    const file = input.files?.[0];
+    if (!file) return;
+    previewUrl = URL.createObjectURL(file);
+    renderImage(prefix, previewUrl);
+  };
+  async function update(method) {
+    upload.disabled = remove.disabled = true;
+    try {
+      const file = input.files?.[0];
+      if (method === "PUT" && !file) throw Error("Сначала выберите изображение");
+      if (method === "PUT" && file.size > 5 * 1024 * 1024) throw Error("Максимальный размер изображения — 5 МБ");
+      const body = method === "PUT" ? {data_base64: await readImageAsDataUrl(file)} : undefined;
+      const {url} = await adminApi(method, path, body);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = null;
+      input.value = "";
+      renderImage(prefix, url);
+      if (kind === "logo-image") renderStoreMark($("admin-shop-name").textContent, url);
+      status.textContent = url ? "Изображение опубликовано" : "Изображение удалено";
+    } catch (error) {
+      status.textContent = error.message;
+    } finally {
+      upload.disabled = remove.disabled = false;
+    }
   }
-  $("brand-photo-upload").disabled=true;
-  $("brand-photo-status").textContent="Обрабатываем изображение…";
-  try{
-    const data_base64=await readImageAsDataUrl(file);
-    const result=await adminApi("PUT","/admin/api/store-profile/welcome-image",{data_base64});
-    $("brand-photo-status").textContent="Обложка опубликована в боте и Mini App";
-    $("brand-photo").value="";
-    renderWelcomePhoto(result.url);
-  }catch(e){$("brand-photo-status").textContent=e.message}
-  $("brand-photo-upload").disabled=false;
-};
-$("brand-photo-remove").onclick=async()=>{
-  $("brand-photo-remove").disabled=true;
-  try{
-    await adminApi("DELETE","/admin/api/store-profile/welcome-image");
-    $("brand-photo").value="";
-    renderWelcomePhoto(null);
-    $("brand-photo-status").textContent="Обложка удалена";
-  }catch(e){$("brand-photo-status").textContent=e.message}
-  $("brand-photo-remove").disabled=false;
-};
+  upload.onclick = () => update("PUT");
+  remove.onclick = () => update("DELETE");
+}
+setupImageUpload("brand-photo", "brand-photo", "welcome-image");
+setupImageUpload("brand-logo", "brand-logo-file", "logo-image");
 async function loadBotIdentity(){
   try{
     const info=await adminApi("GET","/admin/api/bot-identity");
@@ -203,17 +271,18 @@ async function loadBotIdentity(){
 async function loadBrand(){
   const d=await adminApi("GET","/admin/api/store-profile");
   $("brand-name").value=d.name;$("brand-tagline").value=d.tagline;$("brand-description").value=d.description;
-  $("brand-support").value=d.support_contact;$("brand-terms").value=d.terms_url||"";$("brand-color").value=d.accent_color;
-  $("admin-shop-name").textContent=d.name;
-  renderWelcomePhoto(d.welcome_image_url);
+  $("brand-support").value = d.support_contact;
+  $("brand-terms").value = d.terms_url || "";
+  renderStoreMark(d.name, d.logo_image_url);
+  renderImage("brand-photo", d.welcome_image_url);
+  renderImage("brand-logo", d.logo_image_url);
   loadBotIdentity();
 }
 $("brand-form").onsubmit=async e=>{
   e.preventDefault();try{
     await adminApi("PUT","/admin/api/store-profile",{
       name:$("brand-name").value,tagline:$("brand-tagline").value,
-      description:$("brand-description").value,support_contact:$("brand-support").value,terms_url:$("brand-terms").value,
-      accent_color:$("brand-color").value
+      description:$("brand-description").value,support_contact:$("brand-support").value,terms_url:$("brand-terms").value
     });$("admin-shop-name").textContent=$("brand-name").value;$("status").textContent="Оформление сохранено";
   }catch(e){$("status").textContent=e.message}
 };
@@ -291,8 +360,63 @@ $("referral-form").onsubmit=async e=>{
     $("status").textContent="Реферальная программа сохранена";
   }catch(err){$("status").textContent=err.message}
 };
-async function start(){try{if(!tg?.initData)throw Error("Откройте панель через Telegram Mini App");const d=await api("/admin/api/overview");$("loading").hidden=true;$("dashboard").hidden=false;$("welcome").textContent="Здравствуйте, "+(d.admin_name||"администратор");$("users-count").textContent=d.users;$("active-count").textContent=d.active_subscriptions;$("paid-count").textContent=d.successful_payments;$("pending-count").textContent=d.pending_payments;await loadUsers();await loadBrand();const tab=new URLSearchParams(window.location.search).get("tab");if(tab){document.querySelector(`nav button[data-tab="${tab}"]`)?.click()}}catch(e){$("loading").textContent=e.message}}
-document.querySelectorAll("nav button[data-tab]").forEach(b=>b.addEventListener("click",async()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");const tab=b.dataset.tab;$("users-view").hidden=tab!=="users";$("payments-view").hidden=tab!=="payments";$("plans-view").hidden=tab!=="plans";$("brand-view").hidden=tab!=="brand";$("referrals-view").hidden=tab!=="referrals";$("trial-view").hidden=tab!=="trial";$("promos-view").hidden=tab!=="promos";$("payment-settings-view").hidden=tab!=="settings";$("pricing-view").hidden=tab!=="tariffs";try{if(tab==="payments")await loadPayments();if(tab==="plans")await loadPlans();if(tab==="brand")await loadBrand();if(tab==="referrals")await loadReferrals();if(tab==="trial")await loadTrialSettings();if(tab==="promos")await loadPromos();if(tab==="settings")await loadPaymentSettings();if(tab==="tariffs")await loadPricing()}catch(e){$("status").textContent=e.message}}));
+const tabs = {
+  overview: {sections: ["overview-view"]},
+  plans: {sections: ["plans-view"], load: loadPlans},
+  users: {sections: ["users-view"], load: loadUsers},
+  payments: {sections: ["payments-view"], load: loadPayments},
+  bonuses: {sections: ["promos-view", "referrals-view"], load: () => Promise.all([loadPromos(), loadReferrals()])},
+  brand: {sections: ["brand-view"], load: loadBrand},
+  settings: {
+    sections: ["payment-settings-view", "pricing-view", "trial-view"],
+    load: () => Promise.all([loadPaymentSettings(), loadPricing(), loadTrialSettings()]),
+  },
+};
+
+async function openTab(requested) {
+  const legacy = {promos: "bonuses", referrals: "bonuses", trial: "settings", tariffs: "settings"};
+  const key = Object.hasOwn(legacy, requested) ? legacy[requested] : requested;
+  const tab = Object.hasOwn(tabs, key) ? tabs[key] : tabs.overview;
+  $("status").textContent = "";
+  for (const [name, item] of Object.entries(tabs)) {
+    for (const section of item.sections) $(section).hidden = tab !== item;
+    const button = document.querySelector(`nav [data-tab="${name}"]`);
+    if (tab === item) {
+      button.setAttribute("aria-current", "page");
+      button.scrollIntoView({block: "nearest", inline: "nearest"});
+    } else button.removeAttribute("aria-current");
+  }
+  try { await tab.load?.(); }
+  catch (error) { $("status").textContent = error.message; }
+}
+
+async function start() {
+  try {
+    if (!tg?.initData) throw Error("Откройте панель через Telegram Mini App");
+    const d = await api("/admin/api/overview");
+    $("welcome").textContent = d.admin_name ? "Здравствуйте, " + d.admin_name : "Состояние магазина";
+    $("users-count").textContent = d.users;
+    $("active-count").textContent = d.active_subscriptions;
+    $("paid-count").textContent = d.successful_payments;
+    $("pending-count").textContent = d.pending_payments;
+    $("loading").hidden = true;
+    $("dashboard").hidden = false;
+    const initial = new URLSearchParams(window.location.search).get("tab") || "overview";
+    await openTab(initial);
+    if (initial !== "brand") {
+      try {
+        const profile = await api("/admin/api/store-profile");
+        renderStoreMark(profile.name, profile.logo_image_url);
+      } catch { /* Keep the default wordmark if the profile is unavailable. */ }
+    }
+  } catch (error) {
+    $("loading").textContent = error.message;
+  }
+}
+
+document.querySelectorAll("[data-tab], [data-open-tab]").forEach(button => {
+  button.addEventListener("click", () => openTab(button.dataset.tab || button.dataset.openTab));
+});
 $("users-refresh").onclick=()=>loadUsers().catch(e=>$("status").textContent=e.message);$("payments-refresh").onclick=()=>loadPayments().catch(e=>$("status").textContent=e.message);
 $("users-prev").onclick=()=>{userOffset=Math.max(0,userOffset-pageSize);loadUsers()};$("users-next").onclick=()=>{userOffset+=pageSize;loadUsers()};
 $("payments-prev").onclick=()=>{paymentOffset=Math.max(0,paymentOffset-pageSize);loadPayments()};$("payments-next").onclick=()=>{paymentOffset+=pageSize;loadPayments()};

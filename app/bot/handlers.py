@@ -7,7 +7,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message, PreCheckoutQuery, WebAppInfo, FSInputFile
 
 from app.config import settings
-from app.services.tariffs import TariffQuote, get_tariff_draft, update_tariff_draft, calculate_store_stars_price
+from app.services.tariffs import TariffQuote, format_traffic, get_tariff_draft, update_tariff_draft, calculate_store_stars_price
 from app.services.payment_service import (
     accept_current_terms,
     create_stars_payment_for_user,
@@ -26,7 +26,7 @@ from app.services.store_profile import get_store_profile
 from app.services.store_media import welcome_image_path
 from app.services.bot_identity import bot_username
 from app.services.referrals import parse_referral_start, register_referral, referral_count, referral_code, reward_balance, get_referral_settings
-from app.services.plans import list_plans, choose_plan, selected_stars_price, clear_selected_plan
+from app.services.plans import clear_selected_plan, get_plan, list_plans, max_extra_devices, plan_revision, quote_plan, selected_stars_price
 from app.services.trials import get_trial_settings, trial_eligible, claim_trial
 from app.services.promos import redeem_promo, promo_balance
 from app.db.models import Payment, User
@@ -47,18 +47,18 @@ def _admin_webapp_url() -> str:
 def main_menu(*, is_admin: bool = False) -> InlineKeyboardMarkup:
     """Short, balanced two-column navigation instead of a wall of buttons."""
     rows = [
-        [InlineKeyboardButton(text="◈ Купить VPN", callback_data="menu:plans"),
-         InlineKeyboardButton(text="🔐 Подписка", callback_data="menu:subscription")],
+        [InlineKeyboardButton(text="🛒 Купить VPN", callback_data="menu:plans"),
+         InlineKeyboardButton(text="🔐 Моя подписка", callback_data="menu:subscription")],
         [InlineKeyboardButton(text="📱 Устройства", callback_data="menu:devices"),
-         InlineKeyboardButton(text="🧾 Покупки", callback_data="menu:purchases")],
+         InlineKeyboardButton(text="💳 Мои покупки", callback_data="menu:purchases")],
         [InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile"),
          InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses")],
-        [InlineKeyboardButton(text="📖 Подключиться", callback_data="menu:connect"),
+        [InlineKeyboardButton(text="📚 Как подключиться", callback_data="menu:connect"),
          InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support")],
     ]
     if settings.webapp_url.startswith("https://"):
         rows.append([InlineKeyboardButton(
-            text="✦ Открыть Mini App", web_app=WebAppInfo(url=settings.webapp_url),
+            text="✨ Открыть Mini App", web_app=WebAppInfo(url=settings.webapp_url),
         )])
     if is_admin and settings.webapp_url.startswith("https://"):
         rows.append([InlineKeyboardButton(
@@ -109,6 +109,21 @@ async def show_tariff(callback: CallbackQuery, quote: TariffQuote | None = None)
         await callback.message.edit_text(await tariff_text(selected), reply_markup=tariff_keyboard())
 
 
+SUBSCRIPTION_STATUS = {
+    "active": "Активна", "disabled": "Отключена", "expired": "Истекла", "deleted": "Удалена",
+}
+
+
+async def home_text(telegram_id: int, profile: dict) -> str:
+    lines = [f"<b>{escape(profile['name'])}</b>", escape(profile["tagline"] or "Ваш VPN — ваши правила")]
+    if description := profile.get("description"):
+        lines.extend(("", escape(description)))
+    if subscription := await get_user_subscription(telegram_id):
+        status = SUBSCRIPTION_STATUS.get(subscription["status"], subscription["status"])
+        lines.extend(("", f"Подписка · <b>{escape(status)}</b>"))
+    return "\n".join(lines)
+
+
 @router.message(CommandStart())
 async def start_handler(message: Message) -> None:
     if message.from_user is None:
@@ -128,9 +143,7 @@ async def start_handler(message: Message) -> None:
         except Exception as exc:
             logger.warning("Could not send welcome photo: %s", type(exc).__name__)
     await message.answer(
-        f"<b>{escape(profile['name'])}</b>\n"
-        f"{escape(profile['description']) or 'Выберите подходящую подписку.'}\n\n"
-        "Выберите раздел — всё самое важное под рукой.",
+        await home_text(message.from_user.id, profile),
         reply_markup=main_menu(is_admin=message.from_user.id in settings.admin_id_set),
     )
 
@@ -162,7 +175,7 @@ async def home_handler(callback: CallbackQuery) -> None:
     if callback.message:
         profile = await get_store_profile()
         await callback.message.edit_text(
-            f"<b>{escape(profile['name'])}</b>\n{escape(profile['tagline'])}\n\nВыберите раздел:",
+            await home_text(callback.from_user.id, profile),
             reply_markup=main_menu(is_admin=callback.from_user.id in settings.admin_id_set),
         )
 
@@ -190,7 +203,7 @@ async def plans_handler(callback: CallbackQuery) -> None:
     rows = []
     for plan in plans[:20]:
         rows.append([InlineKeyboardButton(
-            text=f"📦 {plan['title']} · {plan['price_stars']} ⭐",
+            text=f"{plan['title']} · {plan['price_rub']:g} ₽" if plan["price_rub_minor"] else f"{plan['title']} · {plan['price_stars']} ⭐",
             callback_data=f"plan:select:{plan['id']}",
         )])
     rows.append([InlineKeyboardButton(text="🛠 Собрать свой тариф", callback_data="menu:builder")])
@@ -210,29 +223,95 @@ async def builder_handler(callback: CallbackQuery) -> None:
     await show_tariff(callback)
 
 
-@router.callback_query(F.data.startswith("plan:select:"))
+@router.callback_query(F.data.regexp(r"^plan:select:[0-9]+(?::[0-9]+)?$"))
 async def fixed_plan_handler(callback: CallbackQuery) -> None:
+    parts = callback.data.split(":")
+    plan_id = int(parts[2])
+    extra_devices = int(parts[3]) if len(parts) == 4 else 0
+    plan = await get_plan(plan_id)
     try:
-        plan_id = int(callback.data.rsplit(":", 1)[1])
-        quote = await choose_plan(callback.from_user.id, plan_id)
-        stars = await selected_stars_price(callback.from_user.id, quote)
-    except (ValueError, TypeError) as exc:
+        quote = quote_plan(plan, extra_devices)
+    except ValueError as exc:
         await callback.answer(str(exc), show_alert=True)
         return
-    await callback.answer("Тариф выбран")
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Перейти к оплате", callback_data="payment:choose")],
-        [InlineKeyboardButton(text="⬅️ Другие тарифы", callback_data="menu:plans")],
+    await callback.answer()
+    controls = []
+    if extra_devices:
+        controls.append(InlineKeyboardButton(text="− Устройство", callback_data=f"plan:select:{plan_id}:{extra_devices - 1}"))
+    if extra_devices < max_extra_devices(plan):
+        controls.append(InlineKeyboardButton(text="+ Устройство", callback_data=f"plan:select:{plan_id}:{extra_devices + 1}"))
+    details = [
+        f"<b>{escape(quote.name)}</b>",
+        f"{quote.duration_days} дней · {format_traffic(quote.traffic_gb)}",
+        "",
+        f"Устройств включено: {quote.devices_included}",
+        f"Устройств добавлено: {quote.extra_devices}",
+    ]
+    addon_price = f"{quote.unit_minor / 100:.2f} ₽" if quote.unit_minor is not None else "недоступно"
+    details.append(f"Доп. устройство: {addon_price}")
+    price = f"{quote.amount_minor / 100:.2f} ₽" if quote.amount_minor else ""
+    if quote.stars is not None:
+        price = " / ".join(filter(None, (price, f"{quote.stars} ⭐")))
+    details.append(f"\nИтого: <b>{price}</b>")
+    key = f"{plan_id}:{extra_devices}:{plan_revision(plan)}"
+    rows = [controls] if controls else []
+    rows.extend([
+        [InlineKeyboardButton(text="Подтвердить заказ", callback_data=f"plan:confirm:{key}")],
+        [InlineKeyboardButton(text="← К тарифам", callback_data="menu:plans")],
     ])
     if callback.message:
-        await callback.message.edit_text(
-            "✅ <b>Готовый тариф выбран</b>\\n\\n"
-            f"Срок: {quote.duration_days} дней\\n"
-            f"Трафик: {quote.traffic_gb} ГБ\\n"
-            f"Устройств: {quote.device_limit}\\n"
-            f"Стоимость: {quote.amount_minor / 100:.2f} RUB / {stars} ⭐",
-            reply_markup=keyboard,
-        )
+        await callback.message.edit_text("\n".join(details), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+@router.callback_query(F.data.regexp(
+    r"^plan:(?:confirm|accept|pay:(?:stars|yookassa|yoomoney|cryptopay)):[0-9]+:[0-9]+:[0-9a-f]{20}$"
+))
+async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
+    action, plan_id, extras, revision = callback.data[5:].rsplit(":", 3)
+    order = {"plan_id": int(plan_id), "extra_devices": int(extras), "revision": revision}
+    try:
+        quote = quote_plan(await get_plan(order["plan_id"]), order["extra_devices"], revision)
+        terms = await get_terms_url()
+        if not terms:
+            raise ValueError("Магазин пока не опубликовал условия продажи.")
+        if action == "accept":
+            await accept_current_terms(callback.from_user.id)
+        accepted = await has_accepted_current_terms(callback.from_user.id)
+    except (ValueError, RuntimeError) as exc:
+        await callback.answer(str(exc), show_alert=True)
+        return
+    await callback.answer()
+    if not callback.message:
+        return
+    key = f"{plan_id}:{extras}:{revision}"
+    rows = []
+    if not accepted:
+        rows.extend([
+            [InlineKeyboardButton(text="Прочитать условия продажи", url=terms)],
+            [InlineKeyboardButton(text="Принимаю условия", callback_data=f"plan:accept:{key}")],
+        ])
+        text = "Перед оплатой примите условия продажи."
+    elif action.startswith("pay:"):
+        provider = action.split(":", 1)[1]
+        if provider == "stars":
+            await send_stars_invoice(callback.message, callback.from_user.id, **order)
+        else:
+            await send_external_invoice(callback.message, callback.from_user.id, provider, **order)
+        return
+    else:
+        methods, credentials = await get_store_payment_settings()
+        configured = public_payment_settings(methods, credentials)["configured"]
+        if quote.stars is not None and methods.get("telegram_stars") and configured.get("telegram_stars"):
+            rows.append([InlineKeyboardButton(text=f"Telegram Stars · {quote.stars} ⭐", callback_data=f"plan:pay:stars:{key}")])
+        if quote.amount_minor > 0:
+            for provider, title in (("yookassa", "ЮKassa"), ("yoomoney", "ЮMoney"), ("cryptopay", "Crypto Pay")):
+                if methods.get(provider) and configured.get(provider):
+                    rows.append([InlineKeyboardButton(
+                        text=f"{title} · {quote.amount_minor / 100:.2f} ₽", callback_data=f"plan:pay:{provider}:{key}",
+                    )])
+        text = f"<b>{escape(quote.name)}</b>\nВыберите способ оплаты." if rows else "Для этого заказа нет доступных способов оплаты."
+    rows.append([InlineKeyboardButton(text="← К заказу", callback_data=f"plan:select:{plan_id}:{extras}")])
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
 @router.callback_query(F.data.startswith("tariff:"))
@@ -308,7 +387,7 @@ async def show_payment_options(callback: CallbackQuery) -> None:
     if callback.message:
         await callback.message.edit_text(
             f"💳 <b>Выберите оплату</b>\n\n"
-            f"Тариф: {quote.duration_days} дней, {quote.traffic_gb} ГБ, {quote.device_limit} устройств.\n"
+            f"Тариф: {quote.duration_days} дней, {format_traffic(quote.traffic_gb)}, {quote.device_limit} устройств.\n"
             f"Telegram Stars: <b>{stars} ⭐</b>\n"
             "Внешние системы откроют защищённую страницу провайдера.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
@@ -332,18 +411,21 @@ async def external_payment_handler(callback: CallbackQuery) -> None:
     name = (callback.data or "").rsplit(":", 1)[-1]
     if not callback.message:
         return
+    await send_external_invoice(callback.message, callback.from_user.id, name)
+
+
+async def send_external_invoice(message: Message, telegram_id: int, name: str, **order) -> None:
     try:
-        payment, link = await create_payment_for_user(callback.from_user.id, name)
-        from urllib.parse import urlsplit
+        payment, link = await create_payment_for_user(telegram_id, name, **order)
         if urlsplit(link.url).scheme != "https":
             raise RuntimeError("Провайдер вернул недопустимую платёжную ссылку")
     except Exception:
-        await callback.message.answer(
+        await message.answer(
             "Не удалось создать платёж. Проверьте тариф или выберите другой способ.",
             reply_markup=back_menu(),
         )
         return
-    await callback.message.answer(
+    await message.answer(
         f"💳 <b>Заказ №{payment.id}</b>\n\n"
         "Нажмите кнопку ниже, оплатите и вернитесь в бот. "
         "После подтверждения провайдером подписка будет выдана автоматически.",
@@ -357,22 +439,27 @@ async def external_payment_handler(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "payment:create:stars")
 async def stars_payment_create_handler(callback: CallbackQuery) -> None:
     await callback.answer()
-    try:
-        payment, stars = await create_stars_payment_for_user(callback.from_user.id)
-    except (ValueError, RuntimeError) as exc:
-        if callback.message:
-            await callback.message.answer(escape(str(exc)))
-        return
     if callback.message:
-        profile = await get_store_profile()
-        await callback.message.answer_invoice(
-            title=profile["name"][:28] + " VPN",
-            description="VPN-подписка с выбранными вами параметрами.",
-            payload=f"remnaum:{payment.id}",
-            provider_token="",
-            currency="XTR",
-            prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
-        )
+        await send_stars_invoice(callback.message, callback.from_user.id)
+
+
+async def send_stars_invoice(message: Message, telegram_id: int, **order) -> None:
+    try:
+        if order and not await is_payment_method_enabled("telegram_stars"):
+            raise ValueError("Оплата в Telegram Stars отключена")
+        payment, stars = await create_stars_payment_for_user(telegram_id, **order)
+    except (ValueError, RuntimeError) as exc:
+        await message.answer(escape(str(exc)))
+        return
+    profile = await get_store_profile()
+    await message.answer_invoice(
+        title=profile["name"][:28] + " VPN",
+        description="VPN-подписка с выбранными вами параметрами.",
+        payload=f"remnaum:{payment.id}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
+    )
 
 
 @router.pre_checkout_query()
@@ -566,9 +653,9 @@ async def subscription_handler(callback: CallbackQuery) -> None:
     expires_text = expires_at.strftime("%d.%m.%Y %H:%M UTC") if expires_at else "не указано"
     details = (
         "🔐 <b>Моя подписка</b>\n\n"
-        f"Статус: <b>{escape(subscription['status'])}</b>\n"
+        f"Статус: <b>{escape(SUBSCRIPTION_STATUS.get(subscription['status'], subscription['status']))}</b>\n"
         f"Действует до: <b>{expires_text}</b>\n"
-        f"Трафик: <b>{subscription['traffic_gb'] or '—'} ГБ</b>\n"
+        f"Трафик: <b>{format_traffic(subscription['traffic_gb'])}</b>\n"
         f"Устройства: <b>{subscription['device_limit'] or '—'}</b>"
     )
     url = subscription.get("subscription_url")
@@ -614,9 +701,12 @@ async def support_handler(callback: CallbackQuery) -> None:
     if contact.startswith("@") and len(contact) > 1 and contact[1:].replace("_", "").isalnum():
         button_url = "https://t.me/" + contact[1:]
     elif contact.startswith("https://"):
-        parsed = urlsplit(contact)
-        if parsed.hostname and not parsed.username and not parsed.password and parsed.hostname.lower() in ("t.me", "telegram.me"):
-            button_url = contact
+        try:
+            parsed = urlsplit(contact)
+            if parsed.hostname and not parsed.username and not parsed.password:
+                button_url = contact
+        except ValueError:
+            pass
     rows = []
     if button_url:
         rows.append([InlineKeyboardButton(text="💬 Написать в поддержку", url=button_url)])

@@ -85,9 +85,9 @@ async def provision_paid_payment(payment_id: int) -> bool:
         tariff_key = str(order["plan_id"] or "flexible") if "plan_id" in order else None
         snapshot = order.get("tariff") or {}
         days = int(snapshot.get("duration_days", 0))
-        traffic_gb = int(snapshot.get("traffic_gb", 0))
+        traffic_gb = int(snapshot.get("traffic_gb", -1))
         device_limit = int(snapshot.get("device_limit", 0))
-        if min(days, traffic_gb, device_limit) < 1:
+        if min(days, device_limit) < 1 or traffic_gb < 0:
             raise RuntimeError("Payment does not contain a valid tariff snapshot")
         pending_rewards = await pending_rewards_for_payment(session, user.id)
         promo_credits = await pending_promo_redemptions(session, user.id)

@@ -1,3 +1,5 @@
+from decimal import Decimal
+import json
 from pathlib import Path
 from html import escape
 
@@ -12,6 +14,7 @@ from app.db.models import Payment, Subscription, User
 from app.db.session import SessionLocal
 from app.services.payment_providers import get_provider
 from app.services.payment_service import settle_payment
+from app.services.tariffs import format_traffic
 from app.services.subscriptions import provision_paid_payment
 from app.services.payment_notifications import notify_external_payment_success
 from app.services.telegram_webapp import validate_telegram_init_data
@@ -23,7 +26,7 @@ async def admin_payments_page():
     return RedirectResponse("/admin?tab=settings", status_code=307)
 
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 from app.services.store_settings import get_store_payment_settings, public_payment_settings, update_store_payment_settings, is_payment_method_enabled
 
 
@@ -510,7 +513,7 @@ async def remnawave_webhook(request: Request, x_remnawave_signature: str | None 
 # Fixed plans share the existing Telegram-authenticated admin dashboard.
 from app.services.squads import get_catalog, refresh_catalog, mode_squads
 from app.db.models import SquadPolicy, InternalSquadCatalog
-from app.services.plans import list_plans, save_plan, choose_plan
+from app.services.plans import list_plans, save_plan
 
 
 @router.get("/admin/api/squad-policies")
@@ -549,15 +552,42 @@ async def admin_refresh_internal_squads(x_telegram_init_data: str | None = Heade
 
 class PlanPayload(BaseModel):
     internal_squads: list[str] | None = None
-    title: str = Field(min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=80, validation_alias=AliasChoices("title", "name"))
     description: str = Field(default="", max_length=2000)
-    duration_days: int = Field(ge=1, le=365)
-    traffic_gb: int = Field(ge=1, le=1000000)
-    device_limit: int = Field(ge=1, le=1000)
+    duration_days: int = Field(ge=1, le=365, validation_alias=AliasChoices("duration_days", "days"))
+    traffic_gb: int = Field(ge=0, le=1000000)
+    device_limit: int = Field(ge=1, le=1000, validation_alias=AliasChoices("device_limit", "devices_included"))
     price_rub_minor: int = Field(ge=0, le=100000000)
+    extra_device_price_rub_minor: int | None = Field(default=None, ge=0, le=100000000)
+    extra_device_price_stars: int | None = Field(default=None, ge=0, le=1000000)
+    badge: str = Field(default="", max_length=32)
+    is_featured: bool = False
     price_stars: int = Field(ge=1, le=1000000)
     is_active: bool = True
     sort_order: int = Field(default=0, ge=0, le=10000)
+
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_rubles(cls, data):
+        if not isinstance(data, dict):
+            return data
+        data = data.copy()
+        for field in ("price_rub", "extra_device_price_rub"):
+            if field not in data or field + "_minor" in data:
+                continue
+            value = data[field]
+            if value is None and field == "extra_device_price_rub":
+                data[field + "_minor"] = None
+                continue
+            try:
+                minor = Decimal(str(value)) * 100
+                if not minor.is_finite() or not 0 <= minor <= 100_000_000 or minor != minor.to_integral_value():
+                    raise ValueError
+            except (ArithmeticError, ValueError):
+                raise ValueError(f"Недопустимая сумма в рублях: {field}") from None
+            data[field + "_minor"] = int(minor)
+        return data
 
 
 @router.get("/api/v1/plans")
@@ -590,13 +620,15 @@ async def admin_update_fixed_plan(
     if plan_id < 1:
         raise HTTPException(status_code=422, detail="Invalid plan ID")
     try:
-        return await save_plan(data.model_dump(), plan_id=plan_id)
+        return await save_plan(data.model_dump(exclude_unset=True), plan_id=plan_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 class WebAppFixedPlanCheckout(BaseModel):
     plan_id: int = Field(ge=1)
+    extra_devices: int = Field(default=0, ge=0, le=1000, strict=True)
+    revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{20}$")
 
 
 @router.post("/api/v1/webapp/plans/checkout")
@@ -610,8 +642,8 @@ async def webapp_checkout_ready_plan(data: WebAppFixedPlanCheckout, x_telegram_i
     if not await is_payment_method_enabled("telegram_stars"):
         raise HTTPException(status_code=403, detail="Telegram Stars checkout is disabled")
     try:
-        quote = await choose_plan(telegram_id, data.plan_id)
-        payment, stars = await create_stars_payment_for_user(telegram_id, expected_plan_id=data.plan_id)
+        payment, stars = await create_stars_payment_for_user(telegram_id, **data.model_dump())
+        tariff = json.loads(payment.payload)["tariff"]
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if bot is None:
@@ -619,7 +651,8 @@ async def webapp_checkout_ready_plan(data: WebAppFixedPlanCheckout, x_telegram_i
     try:
         url = await bot.create_invoice_link(
             title=(await get_store_profile())["name"][:28] + " VPN",
-            description=f"VPN: {quote.duration_days} дней, {quote.traffic_gb} ГБ, {quote.device_limit} устройств",
+            description=(f"VPN на {tariff['duration_days']} дней · {format_traffic(tariff['traffic_gb'])}"
+                         f" · устройств: {tariff['device_limit']}"),
             payload=f"remnaum:{payment.id}", provider_token="", currency="XTR",
             prices=[LabeledPrice(label="VPN-подписка", amount=stars)],
         )
@@ -640,17 +673,23 @@ class StoreProfilePayload(BaseModel):
     terms_url: str = Field(default="", max_length=300)
 
 
-from app.services.store_media import welcome_image_url, welcome_image_path, save_welcome_image, delete_welcome_image
+from app.services.store_media import (
+    delete_logo_image, delete_welcome_image, image_path, logo_image_url, save_logo_image,
+    save_welcome_image, welcome_image_path, welcome_image_url,
+)
 
 @router.get("/api/v1/store-profile")
 async def public_store_profile():
-    return {**await get_store_profile(), "welcome_image_url": welcome_image_url()}
+    profile = {**await get_store_profile(), "welcome_image_url": welcome_image_url()}
+    if logo := logo_image_url():
+        profile["logo_image_url"] = logo
+    return profile
 
 
 @router.get("/admin/api/store-profile")
 async def admin_get_store_profile(x_telegram_init_data: str | None = Header(default=None)):
     await _require_telegram_admin(x_telegram_init_data)
-    return {**await get_store_profile(), "welcome_image_url": welcome_image_url()}
+    return await public_store_profile()
 
 
 
@@ -689,6 +728,35 @@ async def admin_delete_welcome_image(x_telegram_init_data: str | None = Header(d
     return {"url": None}
 
 
+@router.get("/api/v1/store-profile/logo-image")
+async def public_logo_image():
+    logo = image_path("logo")
+    if logo is None:
+        raise HTTPException(status_code=404, detail="Логотип не установлен")
+    return FileResponse(
+        logo, media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.put("/admin/api/store-profile/logo-image")
+async def admin_upload_logo_image(
+    data: WelcomeImagePayload, x_telegram_init_data: str | None = Header(default=None),
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    try:
+        return {"url": save_logo_image(data.data_base64)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.delete("/admin/api/store-profile/logo-image")
+async def admin_remove_logo_image(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    delete_logo_image()
+    return {"url": None}
+
+
 @router.get("/admin/api/bot-identity")
 async def admin_bot_identity(x_telegram_init_data: str | None = Header(default=None)):
     await _require_telegram_admin(x_telegram_init_data)
@@ -707,7 +775,7 @@ async def admin_put_store_profile(
 ):
     await _require_telegram_admin(x_telegram_init_data)
     try:
-        return await update_store_profile(data.model_dump())
+        return await update_store_profile(data.model_dump(exclude_unset=True))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -935,9 +1003,9 @@ def _validate_external_provider(name: str) -> None:
         raise HTTPException(status_code=422, detail="Unknown external provider")
 
 
-async def _external_checkout(telegram_id: int, provider: str, expected_plan_id: int | None = None):
+async def _external_checkout(telegram_id: int, provider: str, **plan_options):
     try:
-        payment, link = await create_payment_for_user(telegram_id, provider, expected_plan_id=expected_plan_id)
+        payment, link = await create_payment_for_user(telegram_id, provider, **plan_options)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if urlsplit(link.url).scheme != "https":
@@ -975,11 +1043,7 @@ async def webapp_external_plan_checkout(
     telegram_id = int(identity["id"])
     if not await has_accepted_current_terms(telegram_id):
         raise HTTPException(status_code=403, detail="Accept the current terms before checkout")
-    try:
-        await choose_plan(telegram_id, data.plan_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return await _external_checkout(telegram_id, data.provider, expected_plan_id=data.plan_id)
+    return await _external_checkout(telegram_id, data.provider, **data.model_dump(exclude={"provider"}))
 
 
 async def _get_public_checkout_methods():
