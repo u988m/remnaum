@@ -23,6 +23,7 @@
       <div class="hero">
         <div class="hero-orbit" aria-hidden="true"><span></span></div>
         <div class="hero-content">
+          <span class="eyebrow">ВАШ VPN · БЕЗ ЛИШНЕГО</span>
           <h1 id="store-tagline">Ваш VPN — ваши правила</h1>
           <p id="welcome" class="muted">Выберите подписку и подключите свои устройства.</p>
           <button class="primary-btn" type="button" data-go-page="shop">Выбрать тариф <span aria-hidden="true">→</span></button>
@@ -30,13 +31,15 @@
         <img id="hero-image" alt="Обложка магазина" hidden>
       </div>
       <button class="home-subscription" type="button" data-go-page="vpn">
-        <span class="home-icon" aria-hidden="true">→</span>
-        <span><strong>Моя подписка</strong><small id="home-subscription-status">Подписки пока нет</small></span>
+        <span class="home-icon" aria-hidden="true">✧</span>
+        <span class="home-subscription-copy"><span class="eyebrow">ТЕКУЩИЙ ДОСТУП</span><strong>Моя подписка</strong><small id="home-subscription-status">Подписки пока нет</small></span>
         <span class="home-arrow" aria-hidden="true">→</span>
       </button>
-      <div class="home-links">
-        <button class="secondary-btn" type="button" data-go-page="devices">Устройства</button>
-        <button class="secondary-btn" type="button" data-go-page="guide">Как подключиться</button>
+      <div class="home-links home-actions">
+        <button class="quick-action" type="button" data-go-page="devices"><span class="quick-glyph">▯</span><strong>Устройства</strong><span aria-hidden="true">↗</span></button>
+        <button class="quick-action" type="button" data-go-page="guide"><span class="quick-glyph">☷</span><strong>Подключение</strong><span aria-hidden="true">↗</span></button>
+        <button class="quick-action" type="button" data-go-page="bonuses"><span class="quick-glyph">✧</span><strong>Бонусы</strong><span aria-hidden="true">↗</span></button>
+        <button class="quick-action" type="button" data-go-page="support"><span class="quick-glyph">◎</span><strong>Поддержка</strong><span aria-hidden="true">↗</span></button>
       </div>
     </section>
     <section class="page" id="page-shop" data-page-panel="shop" hidden>
@@ -177,12 +180,19 @@
   </div>
 </main>
 <nav class="bottom-nav" id="bottom-nav" aria-label="Разделы магазина" hidden>
-  <button type="button" data-page="home" aria-current="page"><span aria-hidden="true">⌂</span>Главная</button>
-  <button type="button" data-page="shop"><span aria-hidden="true">▤</span>Тарифы</button>
-  <button type="button" data-page="vpn"><span aria-hidden="true">◇</span>Подписка</button>
-  <button type="button" data-page="bonuses"><span aria-hidden="true">✦</span>Бонусы</button>
-  <button type="button" data-page="account"><span aria-hidden="true">◎</span>Профиль</button>
+  <button type="button" data-page="home" aria-current="page" aria-label="Главная"><svg><use href="#i-home"/></svg><span>Главная</span></button>
+  <button type="button" data-page="shop" aria-label="Тарифы"><svg><use href="#i-shop"/></svg><span>Тарифы</span></button>
+  <button type="button" data-page="vpn" aria-label="Подписка"><svg><use href="#i-shield"/></svg><span>VPN</span></button>
+  <button type="button" data-page="bonuses" aria-label="Бонусы"><svg><use href="#i-gift"/></svg><span>Бонусы</span></button>
+  <button type="button" data-page="account" aria-label="Профиль"><svg><use href="#i-user"/></svg><span>Профиль</span></button>
 </nav>
+<svg class="svg-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+<symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></symbol>
+<symbol id="i-shop" viewBox="0 0 24 24"><path d="M4 9V4h16v5M3 9h18v12H3zM9 21v-8h6v8"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="i-gift" viewBox="0 0 24 24"><rect x="3" y="9" width="18" height="12" rx="2"/><path d="M12 9v12M3 13h18M12 9c-7 0-7-7-3-7 2 0 3 3 3 7Zm0 0c7 0 7-7 3-7-2 0-3 3-3 7Z"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-5 3-8 8-8s8 3 8 8"/></symbol>
+</svg>
 <script src="/static/miniapp.js" defer></script>
 </body>
 </html>

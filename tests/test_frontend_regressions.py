@@ -22,6 +22,14 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         admin_js = (STATIC / "admin.js").read_text(encoding="utf-8")
         self.assertIn('loadReadyPlans()', mini_js)
         self.assertIn('loadAccountPanels()', mini_js)
+        self.assertEqual(mini.count('<button type="button" data-page='), 5)
+        for symbol in ("i-home", "i-shop", "i-shield", "i-gift", "i-user"):
+            self.assertIn('href="#' + symbol + '"', mini)
+        for page in ("devices", "guide", "bonuses", "support"):
+            self.assertIn('class="quick-action" type="button" data-go-page="' + page + '"', mini)
+        self.assertIn('id="admin-sidebar"', admin)
+        self.assertIn('id="admin-menu-backdrop"', admin)
+        self.assertIn('function setAdminMenu(open)', admin_js)
         self.assertIn('fillPaymentOptions()', mini_js)
         self.assertNotIn('async function adminApi(', mini_js)
         self.assertNotIn('id="referral-form"', mini)
