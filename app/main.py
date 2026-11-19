@@ -10,6 +10,7 @@ from app.bot.runtime import bot, dispatcher, setup_bot
 from app.config import settings
 from app.db.session import engine, initialize_schema
 from app.services.squads import refresh_catalog
+from app.services.payment_recovery import run_payment_recovery_forever
 from app.services.legacy_settings import migrate_legacy_payment_settings
 from app.web.routes import router as api_router
 from app.web.storefront import router as store_router
@@ -62,10 +63,11 @@ async def lifespan(_: FastAPI):
         elif not settings.telegram_use_webhook:
             polling_task = asyncio.create_task(dispatcher.start_polling(bot))
     sync_task = asyncio.create_task(_sync_squads_periodically())
+    payment_recovery_task = asyncio.create_task(run_payment_recovery_forever())
     try:
         yield
     finally:
-        for task in (polling_task, webhook_task, sync_task):
+        for task in (polling_task, webhook_task, sync_task, payment_recovery_task):
             if task:
                 task.cancel()
                 try:
