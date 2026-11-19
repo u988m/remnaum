@@ -25,7 +25,14 @@ bash backup.sh
 echo "Получаем последнюю версию..."
 git_user fetch --tags origin
 git_user pull --ff-only origin main
-echo "Пересобираем и запускаем контейнеры..."
+echo "Собираем новый образ приложения..."
 docker compose config --quiet
-docker compose up -d --build
+docker compose build app
+echo "Проверяем пароль и доступ к PostgreSQL..."
+if ! docker compose run --rm --no-deps -T --entrypoint python app -m app.db.check_connection; then
+  echo "Обновление остановлено до замены контейнеров. Резервная копия сохранена." >&2
+  exit 1
+fi
+echo "Запускаем контейнеры..."
+docker compose up -d
 echo "Обновление выполнено; Docker volumes сохранены."
