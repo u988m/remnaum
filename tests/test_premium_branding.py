@@ -84,7 +84,7 @@ class PremiumMenuTests(unittest.TestCase):
 
 
 class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_start_sends_owner_photo_above_the_button_menu(self):
+    async def test_start_sends_one_combined_photo_caption_and_keyboard(self):
         from app.bot.handlers import start_handler
         message = SimpleNamespace(
             from_user=SimpleNamespace(id=12345, username="customer"),
@@ -102,12 +102,39 @@ class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
             branding.return_value = profile
             await start_handler(message)
         message.answer_photo.assert_awaited_once()
-        message.answer.assert_awaited_once()
+        message.answer.assert_not_awaited()
         photo_caption = message.answer_photo.call_args.kwargs["caption"]
         self.assertIn("Личный VPN", photo_caption)
-        self.assertIn("Активна", message.answer.call_args.args[0])
-        markup = message.answer.call_args.kwargs["reply_markup"]
+        self.assertIn("Активна", photo_caption)
+        markup = message.answer_photo.call_args.kwargs["reply_markup"]
         self.assertEqual(len(markup.inline_keyboard[0]), 2)
+
+    async def test_photo_menu_callback_opens_section_without_edit_text(self):
+        from app.bot.handlers import edit_menu_message
+        message = SimpleNamespace(photo=[object()], answer=AsyncMock(), delete=AsyncMock(), edit_text=AsyncMock())
+        markup = main_menu(is_admin=False)
+        await edit_menu_message(message, "Доступные тарифы", reply_markup=markup)
+        message.answer.assert_awaited_once_with("Доступные тарифы", reply_markup=markup)
+        message.delete.assert_awaited_once()
+        message.edit_text.assert_not_awaited()
+
+    async def test_text_menu_callback_edits_existing_message(self):
+        from app.bot.handlers import edit_menu_message
+        message = SimpleNamespace(edit_text=AsyncMock())
+        await edit_menu_message(message, "Тарифы", reply_markup=main_menu())
+        message.edit_text.assert_awaited_once()
+
+    async def test_back_home_reuses_photo_caption(self):
+        from app.bot.handlers import home_handler
+        message = SimpleNamespace(photo=[object()], edit_caption=AsyncMock(), edit_text=AsyncMock())
+        callback = SimpleNamespace(message=message, from_user=SimpleNamespace(id=123), answer=AsyncMock())
+        profile = {"name": "VPN", "tagline": "Ваш VPN", "description": "Описание"}
+        with patch("app.bot.handlers.get_store_profile", AsyncMock(return_value=profile)), \
+             patch("app.bot.handlers.get_user_subscription", AsyncMock(return_value=None)), \
+             patch("app.bot.handlers.welcome_image_path", return_value=Path("/tmp/test.jpg")):
+            await home_handler(callback)
+        message.edit_caption.assert_awaited_once()
+        message.edit_text.assert_not_awaited()
 
     async def test_ready_plan_review_binds_price_and_device_count_to_confirmation(self):
         from app.bot.handlers import fixed_plan_handler

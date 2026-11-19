@@ -45,7 +45,7 @@ async def setup_bot() -> None:
             try:
                 await bot.set_chat_menu_button(
                     menu_button=MenuButtonWebApp(
-                        text="Открыть магазин",
+                        text="Mini App",
                         web_app=WebAppInfo(url=settings.webapp_url),
                     )
                 )
