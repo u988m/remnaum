@@ -193,11 +193,50 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(runner.call_args_list[0].args[0], ["bash", "update.sh"])
         self.assertEqual(runner.call_args_list[1].args[0], ["docker", "compose", "ps"])
 
+    def test_password_rotation_rolls_back_verifier_and_env_on_probe_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            path = root / ".env"
+            initial = (b"COMPOSE_FILE=compose.yaml\nPOSTGRES_PASSWORD=wrong\n"
+                       b"DATABASE_URL=postgresql+asyncpg://remnaum:wrong@postgres:5432/remnaum\n")
+            path.write_bytes(initial)
+            new_password = "new-db-password-123"
+
+            def run(command):
+                if "check_connection" in command[-1]:
+                    self.assertIn(f"POSTGRES_PASSWORD={new_password}", path.read_text())
+                    raise subprocess.CalledProcessError(1, command)
+
+            with patch.object(installer.backups, "DATA", root / "data"), \
+                 patch.object(installer.backups, "wait_for_postgres"), \
+                 patch.object(installer.backups, "prepare_branding_directory"), \
+                 patch.object(installer.backups, "postgres_admin", return_value="existing-verifier") as admin, \
+                 patch.object(installer.backups, "set_postgres_password") as change, \
+                 patch.object(installer, "run", side_effect=run) as runner:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    installer.rotate_postgres_password(new_password, path=path)
+            change.assert_called_once_with(new_password)
+            self.assertIn("PASSWORD 'existing-verifier'", admin.call_args.args[0])
+            self.assertEqual(path.read_bytes(), initial)
+            self.assertFalse(any("--force-recreate" in call.args[0] for call in runner.call_args_list))
+
+    def test_password_rotation_rejects_an_external_database(self):
+        with self.assertRaises(ValueError):
+            installer.local_postgres_url("postgresql+asyncpg://remnaum:old@external.com/remnaum", "new-password")
+        self.assertEqual(installer.local_postgres_url(
+            "postgresql+asyncpg://remnaum:old@postgres:5432/remnaum", "new-password"),
+            "postgresql+asyncpg://remnaum:new-password@postgres:5432/remnaum")
+
     def test_update_checks_database_before_replacing_containers(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             shutil.copyfile(installer.ROOT / "update.sh", root / "update.sh")
+            (root / ".git").mkdir()
             (root / ".env").write_text("COMPOSE_FILE=compose.yaml\n")
+            (root / "scripts").mkdir()
+            (root / "scripts" / "backup_manager.py").write_text(
+                "ROOT = None\ndef prepare_branding_directory(root): pass\n"
+            )
             (root / "backup.sh").write_text('echo backup >> "$TEST_UPDATE_LOG"\n')
             (root / "git").write_text(
                 '#!/bin/bash\nif [[ "$*" == *"branch --show-current" ]]; then echo main; fi\n'
@@ -229,7 +268,7 @@ class InstallerTests(unittest.TestCase):
                         "compose run --rm --no-deps -T --entrypoint python app -m app.db.check_connection",
                     ]
                     self.assertEqual((root / "commands").read_text().splitlines(),
-                                     expected if result else expected + ["compose up -d"])
+                                     expected if result else expected + ["compose up -d --wait --wait-timeout 120"])
 
     def test_installer_health_retries_then_succeeds(self):
         from subprocess import CompletedProcess

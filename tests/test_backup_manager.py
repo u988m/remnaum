@@ -183,7 +183,7 @@ class BackupTests(unittest.TestCase):
                             or (failure == "redis" and backup._RESTORE_REDIS in command)):
                         self.assertTrue(kwargs["check"])
                         raise subprocess.CalledProcessError(1, command)
-                    return subprocess.CompletedProcess(command, 0)
+                    return subprocess.CompletedProcess(command, 0, stdout="test-password\n")
 
                 def stage_archive(_archive, destination, _key):
                     staged_paths.append(destination.parent)

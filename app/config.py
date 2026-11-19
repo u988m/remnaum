@@ -1,3 +1,5 @@
+import re
+
 from functools import lru_cache
 
 from pydantic import Field, model_validator
@@ -73,7 +75,7 @@ class Settings(BaseSettings):
             if len(self.app_secret_key) < 32 or self.app_secret_key in weak_secrets:
                 raise ValueError("APP_SECRET_KEY must be a strong unique secret in production")
             if self.telegram_use_webhook:
-                if len(self.telegram_webhook_secret) < 24:
+                if not re.fullmatch(r"[A-Za-z0-9_-]{24,256}", self.telegram_webhook_secret):
                     raise ValueError("TELEGRAM_WEBHOOK_SECRET must be configured in production")
                 if not self.telegram_webhook_url.startswith("https://"):
                     raise ValueError("TELEGRAM_WEBHOOK_URL must be HTTPS in production")

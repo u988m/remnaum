@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
@@ -37,7 +38,7 @@ KEY = BACKUPS / ".recovery-key"
 SETTINGS = DATA / "backup-settings.json"
 MAGIC = b"REMNAUM-BACKUP-V1\n"
 EXCLUDE_TOP = {"backups", ".pytest_cache", "__pycache__", ".venv", ".mypy_cache"}
-EXCLUDE_DATA = {"backup.key", ".backup.lock"}
+EXCLUDE_DATA = {"backup.key", ".backup.lock", ".deploy.lock"}
 ALLOWED_SCHEDULES = {"off", "hourly", "daily"}
 MAX_TELEGRAM_BYTES = 45 * 1024 * 1024
 
@@ -203,12 +204,56 @@ def _collect_source(archive: tarfile.TarFile) -> None:
 
 
 @contextlib.contextmanager
-def _lock():
+def _lock(filename: str = ".backup.lock"):
     DATA.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd = os.open(DATA / ".backup.lock", os.O_CREAT | os.O_RDWR, 0o600)
+    fd = os.open(DATA / filename, os.O_CREAT | os.O_RDWR, 0o600)
     with os.fdopen(fd, "w") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         yield
+
+
+def postgres_admin(sql: str, *, cwd: Path = ROOT) -> str:
+    # The official image allows local socket access. Keep credentials out of
+    # command arguments, shell history and installer output.
+    command = ["docker", "compose", "exec", "-T", "postgres", "psql", "-X", "-w", "-qAt",
+               "-v", "ON_ERROR_STOP=1", "-h", "/var/run/postgresql", "-U", "remnaum", "-d", "remnaum"]
+    result = subprocess.run(command, cwd=cwd, input=sql, capture_output=True, text=True, timeout=30)
+    if result.returncode:
+        raise RuntimeError("Не удалось выполнить команду через локальный сокет PostgreSQL")
+    return result.stdout.strip()
+
+
+def set_postgres_password(password: str, *, cwd: Path = ROOT) -> None:
+    if not password or any(character in password for character in "\r\n\0"):
+        raise ValueError("Пароль PostgreSQL должен быть непустой строкой")
+    postgres_admin(f"\\password remnaum\n{password}\n{password}\n", cwd=cwd)
+
+
+def wait_for_postgres(cwd: Path) -> None:
+    for _ in range(30):
+        health = subprocess.run(
+            ["docker", "compose", "exec", "-T", "postgres", "pg_isready", "-h", "127.0.0.1",
+             "-U", "remnaum", "-d", "remnaum"],
+            cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10,
+        )
+        if health.returncode == 0:
+            return
+        time.sleep(2)
+    raise RuntimeError("PostgreSQL не готов принимать подключения")
+
+
+def prepare_branding_directory(cwd: Path) -> None:
+    data = cwd / "data"
+    branding = data / "branding"
+    if data.is_symlink() or branding.is_symlink():
+        raise ValueError("Каталог брендинга должен находиться внутри data")
+    branding.mkdir(parents=True, exist_ok=True)
+    # Match Dockerfile's unprivileged app user, preserving host-side data ownership.
+    data.chmod(stat.S_IMODE(data.stat().st_mode) | stat.S_IXOTH)
+    os.chown(branding, 1000, 1000)
+    image = branding / "welcome.jpg"
+    if image.is_file() and not image.is_symlink():
+        os.chown(image, 1000, 1000, follow_symlinks=False)
 
 
 def _manifest() -> dict:
@@ -499,7 +544,7 @@ def restore_backup(archive: Path, *, supplied_key: str | None = None, target_roo
         raise ValueError("Нельзя восстанавливать в системный каталог")
     if target != ROOT.resolve() and target.exists() and any(target.iterdir()):
         raise ValueError("Внешняя папка восстановления уже содержит данные")
-    with _lock():
+    with _lock(".deploy.lock"), _lock():
         with tempfile.TemporaryDirectory(prefix="remnaum-restore-") as tmp:
             folder = Path(tmp)
             plain = folder / "archive.tar.gz"
@@ -535,17 +580,13 @@ def restore_backup(archive: Path, *, supplied_key: str | None = None, target_roo
                     ["docker", "compose", "up", "-d", "postgres", "redis"],
                     cwd=target, check=True, capture_output=True, timeout=180,
                 )
-                for _ in range(30):
-                    health = subprocess.run(
-                        ["docker", "compose", "exec", "-T", "postgres", "pg_isready", "-U", "remnaum", "-d", "remnaum"],
-                        cwd=target, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    )
-                    if health.returncode == 0:
-                        break
-                    import time
-                    time.sleep(2)
-                else:
-                    raise RuntimeError("PostgreSQL не запустился после восстановления конфигурации")
+                wait_for_postgres(target)
+                # pg_dump restores database objects but does not include role passwords.
+                result = subprocess.run(
+                    ["docker", "compose", "exec", "-T", "postgres", "printenv", "POSTGRES_PASSWORD"],
+                    cwd=target, check=True, capture_output=True, text=True, timeout=30,
+                )
+                set_postgres_password(result.stdout.removesuffix("\n"), cwd=target)
                 with (extracted / "database.dump").open("rb") as dump:
                     subprocess.run([
                         "docker", "compose", "exec", "-T", "postgres",
@@ -561,9 +602,9 @@ def restore_backup(archive: Path, *, supplied_key: str | None = None, target_roo
                     "--entrypoint", "sh", "redis", "-c",
                     _RESTORE_REDIS,
                 ], cwd=target, check=True, capture_output=True, timeout=120)
+                prepare_branding_directory(target)
                 subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=target,
                                check=True, timeout=360)
-                import time
                 for _ in range(40):
                     health = subprocess.run([
                         "docker", "compose", "exec", "-T", "app", "python", "-c",

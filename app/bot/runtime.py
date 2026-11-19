@@ -9,9 +9,9 @@ from app.bot.handlers import router
 
 bot = Bot(settings.telegram_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML)) if settings.telegram_bot_token else None
 dispatcher = Dispatcher()
+dispatcher.include_router(router)
 
 async def setup_bot() -> None:
-    dispatcher.include_router(router)
     if bot is not None:
         try:
             identity = await bot.get_me()
@@ -50,4 +50,4 @@ async def setup_bot() -> None:
                     )
                 )
             except Exception as exc:
-                logging.getLogger(__name__).warning("Telegram menu registration failed: %s", exc)
+                logging.getLogger(__name__).warning("Telegram menu registration failed: %s", type(exc).__name__)
