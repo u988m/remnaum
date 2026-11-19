@@ -3,6 +3,11 @@ tg?.ready?.();
 tg?.expand?.();
 const $=id=>document.getElementById(id);
 const orderDialog = $("page-order");
+const deviceEditor = $("device-editor");
+const nativeBack = tg?.BackButton?.onClick && (tg.isVersionAtLeast?.("6.1") ?? true) ? tg.BackButton : null;
+let nativeBackAvailable = false;
+let awaitingBack = false;
+$("order-close").hidden = Boolean(nativeBack);
 const rootPage = new URLSearchParams(location.search).get("section") === "account" ? "account" : "vpn";
 const primaryPages = new Set(["vpn", "bonuses", "devices", "account"]);
 const orderScreens = new Map();
@@ -22,7 +27,8 @@ function renderScreen(next) {
   const visiblePage = order ? next.origin : next.page;
   const topbar = document.querySelector(".topbar");
   topbar.hidden = visiblePage === "vpn";
-  $("shop-back").hidden = !next.depth;
+  $("shop-back").hidden = Boolean(nativeBack) || !next.depth;
+  if (deviceEditor.open && next.page !== "devices") deviceEditor.close();
   for (const panel of document.querySelectorAll("[data-page-panel]")) {
     panel.hidden = panel.dataset.pagePanel !== visiblePage;
   }
@@ -46,8 +52,7 @@ function renderScreen(next) {
       if (next.page === "bonuses") { loadOffers(); loadReferrals(); }
     }
   }
-  if (next.depth) tg?.BackButton?.show?.();
-  else tg?.BackButton?.hide?.();
+  syncNativeBack();
 }
 
 function switchPage(page, order = null) {
@@ -61,12 +66,22 @@ function switchPage(page, order = null) {
     orderScreens.set(next.id, order);
   }
   history.pushState({miniShop: next}, "");
+  nativeBackAvailable = true;
   renderScreen(next);
   tg?.HapticFeedback?.selectionChanged?.();
 }
 
+function syncNativeBack() {
+  if (nativeBackAvailable || deviceEditor.open) nativeBack?.show?.();
+  else nativeBack?.hide?.();
+}
+
 function goBack() {
-  if (screen.depth) history.back();
+  if (!screen.depth || awaitingBack) return;
+  awaitingBack = true;
+  nativeBackAvailable = false;
+  syncNativeBack();
+  history.back();
 }
 
 for (const button of document.querySelectorAll("[data-page], [data-go-page]")) {
@@ -75,9 +90,19 @@ for (const button of document.querySelectorAll("[data-page], [data-go-page]")) {
 $("shop-back").onclick = $("order-close").onclick = goBack;
 orderDialog.addEventListener("cancel", event => { event.preventDefault(); goBack(); });
 orderDialog.addEventListener("click", event => { if (event.target === orderDialog) goBack(); });
-tg?.BackButton?.onClick?.(goBack);
+nativeBack?.onClick(() => {
+  if (deviceEditor.open) {
+    nativeBackAvailable = false;
+    deviceEditor.close();
+    syncNativeBack();
+  } else if (nativeBackAvailable) {
+    goBack();
+  }
+});
 window.addEventListener("popstate", event => {
+  awaitingBack = false;
   if (!navigationReady || !event.state?.miniShop) return;
+  nativeBackAvailable = false;
   if (!orderDialog.open) scrollPositions.set(screen.id, window.scrollY);
   renderScreen(event.state.miniShop);
 });
@@ -94,7 +119,16 @@ $("copy-referral").onclick=async()=>{
   }
 };
 
-function api(path,body){return fetch(path,{method:body?"POST":"GET",headers:{"Content-Type":"application/json","X-Telegram-Init-Data":tg?.initData||""},body:body?JSON.stringify(body):undefined}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.detail||"Ошибка запроса");return d})}
+async function api(path, body, method = body ? "POST" : "GET") {
+  const response = await fetch(path, {
+    method,
+    headers: {"Content-Type":"application/json", "X-Telegram-Init-Data":tg?.initData || ""},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await response.json();
+  if (!response.ok) throw Error(typeof data.detail === "string" ? data.detail : "Ошибка запроса");
+  return data;
+}
 async function loadOffers(){
   try{
     const d=await api("/api/v1/webapp/offers");
@@ -124,13 +158,64 @@ $("promo-form").onsubmit=async event=>{
   }catch(e){$("promo-status").textContent=e.message}
   $("promo-activate").disabled=false;
 };
+let deviceAction = null;
+let savingDevice = false;
+let deviceListRequest = 0;
+
+function openDeviceEditor(device, remove) {
+  if (savingDevice || deviceEditor.open) return;
+  deviceAction = {device, remove};
+  $("device-editor-title").textContent = remove ? "Удалить устройство?" : "Переименовать устройство";
+  $("device-editor-description").textContent = remove
+    ? "Устройство «" + device.name + "» будет удалено из списка. При новом подключении оно может появиться снова."
+    : "Пустое поле возвращает название модели.";
+  $("device-name-field").hidden = remove;
+  $("device-name-input").value = device.alias || "";
+  $("device-name-input").placeholder = device.model || device.name;
+  $("device-editor-status").textContent = "";
+  $("device-editor-submit").textContent = remove ? "Удалить" : "Сохранить";
+  $("device-editor-submit").className = remove ? "secondary-btn danger-btn" : "primary-btn";
+  deviceEditor.showModal();
+  if (!remove) $("device-name-input").focus();
+  syncNativeBack();
+}
+
+$("device-editor-cancel").onclick = () => deviceEditor.close();
+deviceEditor.addEventListener("close", () => {
+  deviceAction = null;
+  syncNativeBack();
+});
+
+$("device-form").onsubmit = async event => {
+  event.preventDefault();
+  if (!deviceAction || savingDevice) return;
+  const {device, remove} = deviceAction;
+  const path = "/api/v1/webapp/devices/" + encodeURIComponent(device.id);
+  savingDevice = true;
+  $("device-editor-submit").disabled = true;
+  $("device-editor-status").textContent = "";
+  try {
+    if (remove) await api(path, undefined, "DELETE");
+    else await api(path, {name:$("device-name-input").value.trim()}, "PATCH");
+    if (deviceEditor.open) deviceEditor.close();
+    $("device-status").textContent = remove ? "Устройство удалено." : "Имя сохранено.";
+    await loadDevices();
+  } catch (error) {
+    $(deviceEditor.open ? "device-editor-status" : "device-status").textContent = error.message;
+  } finally {
+    savingDevice = false;
+    $("device-editor-submit").disabled = false;
+  }
+};
+
 async function loadDevices() {
   const box = $("account-device-info");
   const refresh = $("devices-refresh"), capacity = $("device-capacity");
-  if (refresh.disabled) return;
+  const request = ++deviceListRequest;
   refresh.disabled = true;
   try {
     const data = await api("/api/v1/webapp/devices");
+    if (request !== deviceListRequest) return;
     box.replaceChildren();
     const count = data.total ?? data.items.length;
     $("device-count").textContent = data.limit ? count + " из " + data.limit : count + " подключено";
@@ -139,31 +224,55 @@ async function loadDevices() {
       capacity.max = data.limit;
       capacity.value = count;
     }
-    for (const [index, device] of data.items.entries()) {
+    for (const device of data.items) {
       const record = document.createElement("article");
       record.className = "panel device-card";
       const title = document.createElement("strong");
-      title.textContent = device.name || "Устройство " + (index + 1);
+      title.textContent = device.name;
       record.append(title);
       const platform = [device.platform, device.os_version].filter(Boolean).join(" ");
-      if (platform) {
+      const details = [device.alias && device.model !== device.name ? device.model : "", platform].filter(Boolean);
+      if (details.length) {
         const detail = document.createElement("p");
         detail.className = "muted";
-        detail.textContent = platform;
+        detail.textContent = details.join(" · ");
         record.append(detail);
+      }
+      const client = document.createElement("p");
+      client.className = "device-client";
+      client.textContent = device.client ? "Клиент · " + device.client : "Клиент не определён";
+      record.append(client);
+      if (device.id) {
+        const actions = document.createElement("div");
+        actions.className = "device-actions";
+        for (const [label, remove] of [["Переименовать", false], ["Удалить", true]]) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = remove ? "secondary-btn danger-btn" : "secondary-btn";
+          button.textContent = label;
+          button.setAttribute("aria-label", label + " " + device.name);
+          button.onclick = () => openDeviceEditor(device, remove);
+          actions.append(button);
+        }
+        record.append(actions);
       }
       box.append(record);
     }
-    if (!data.items.length) box.textContent = "Подключённых устройств пока нет.";
-  } catch {
+    if (!data.items.length) box.textContent = data.has_subscription === false
+      ? "Устройства появятся после подключения VPN." : "Подключённых устройств пока нет.";
+  } catch (error) {
+    if (request !== deviceListRequest) return;
     capacity.hidden = true;
     box.replaceChildren();
-    $("device-count").textContent = "Информация об устройствах временно недоступна.";
+    $("device-count").textContent = error.message || "Информация об устройствах временно недоступна.";
   } finally {
-    refresh.disabled = false;
+    if (request === deviceListRequest) refresh.disabled = false;
   }
 }
-$("devices-refresh").onclick = loadDevices;
+$("devices-refresh").onclick = () => {
+  $("device-status").textContent = "";
+  loadDevices();
+};
 
 async function loadPurchases() {
   const box = $("account-purchase-info");

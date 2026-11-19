@@ -160,3 +160,7 @@ class RemnawaveClient:
     async def get_hwid_devices(self, user_id: int | str) -> Any:
         """List hardware-bound devices for a user (Panel 3.x)."""
         return await self.request("GET", f"/api/hwid/devices/{user_id}")
+
+    async def delete_hwid_device(self, user_id: int | str, hwid: str) -> Any:
+        identity = {"userId": int(user_id)} if str(user_id).isdigit() else {"userUuid": str(user_id)}
+        return await self.request("POST", "/api/hwid/devices/delete", json={**identity, "hwid": hwid})

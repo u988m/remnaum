@@ -30,6 +30,7 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mini.count('data-go-page="guide"'), 1)
         self.assertIn('data-page="vpn" aria-current="page"', mini)
         self.assertIn('id="device-capacity"', mini)
+        self.assertIn('id="device-editor"', mini)
         self.assertIn('<dialog class="order-dialog" id="page-order"', mini)
         self.assertIn('aria-label="Добавить одно устройство"', mini)
         self.assertIn('id="order-method-options"', mini)

@@ -58,6 +58,7 @@
         <p id="device-count" class="muted" role="status">Загружаем устройства…</p>
         <progress id="device-capacity" aria-label="Занятые места" hidden></progress>
         <button class="secondary-btn full" type="button" id="device-upgrade" hidden>Добавить устройства</button>
+        <p class="status" id="device-status" role="status"></p>
       </section>
       <div class="device-list" id="account-device-info"></div>
     </section>
@@ -138,11 +139,23 @@
   <button type="button" data-page="devices"><svg aria-hidden="true"><use href="#i-device"/></svg><span>Устройства</span></button>
   <button type="button" data-page="account"><svg aria-hidden="true"><use href="#i-user"/></svg><span>Профиль</span></button>
 </nav>
+<dialog class="device-dialog" id="device-editor" aria-labelledby="device-editor-title">
+  <form id="device-form">
+    <h2 id="device-editor-title"></h2>
+    <p class="muted" id="device-editor-description"></p>
+    <label id="device-name-field">Новое имя<input id="device-name-input" type="text" maxlength="48" autocomplete="off" autocapitalize="sentences"></label>
+    <p class="status" id="device-editor-status" role="status"></p>
+    <div class="device-actions">
+      <button class="secondary-btn" id="device-editor-cancel" type="button">Отмена</button>
+      <button class="primary-btn" id="device-editor-submit" type="submit">Сохранить</button>
+    </div>
+  </form>
+</dialog>
 <dialog class="order-dialog" id="page-order" aria-labelledby="order-title">
   <div class="order-sheet">
     <header class="order-heading">
       <div><p class="muted" id="order-kind"></p><h1 id="order-title">Подписка</h1></div>
-      <button class="icon-button" id="order-close" type="button" aria-label="Закрыть заказ" autofocus><svg aria-hidden="true"><use href="#i-close"/></svg></button>
+      <button class="icon-button" id="order-close" type="button" aria-label="Закрыть заказ" hidden><svg aria-hidden="true"><use href="#i-close"/></svg></button>
     </header>
     <div class="order-body" id="order-body">
       <div class="order-plan">

@@ -79,6 +79,9 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
         mock_redis = SimpleNamespace(lock=lock, get=AsyncMock(side_effect=storage.get),
                                      set=AsyncMock(side_effect=storage.__setitem__))
         credentials = {"platega": {"merchant_id": "test", "secret_key": "test"}}
+        device_key = "ab" * 16
+        device = {"id": device_key, "name": "iPhone", "alias": "", "model": "iPhone",
+                  "client": "Happ", "platform": "iOS", "os_version": "18"}
         with (
             patch.object(menu, "redis", mock_redis),
             patch.object(menu, "customer_is_blocked", return_value=False) as blocked_user,
@@ -86,6 +89,8 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
             patch.object(handlers, "get_or_create_user", return_value=False),
             patch.object(handlers, "get_store_profile", return_value=profile),
             patch.object(handlers, "get_user_subscription", return_value=None) as get_subscription,
+            patch.object(handlers, "get_customer_devices", return_value={"has_subscription": False, "items": []}) as get_devices,
+            patch.object(handlers, "change_customer_device", return_value=device | {"name": "Телефон", "alias": "Телефон"}) as change_device,
             patch.object(handlers, "retry_paid_payments_for_user"),
             patch.object(handlers, "welcome_image_path", return_value=None),
             patch.object(handlers, "list_plans", return_value=[
@@ -156,9 +161,30 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
             await press(handlers.subscription_handler, messages[103], "menu:subscription")
             self.assertIn("Моя подписка", messages[103].text)
 
+            get_devices.return_value = {"has_subscription": True, "items": [device], "total": 1, "limit": 2}
+            await press(handlers.devices_handler, messages[103], "menu:devices")
+            device_button = messages[103].reply_markup.inline_keyboard[0][0]
+            self.assertEqual(device_button.text, "iPhone · Happ")
+            await press(handlers.device_action_handler, messages[103], device_button.callback_data)
+            await press(handlers.device_action_handler, messages[103], f"device:name:{device_key}:0")
+            name_input = telegram_message(7, from_user=user, text="Телефон")
+            await middleware(lambda event, _: handlers.device_name_handler(event), name_input, {"bot": bot})
+            self.assertEqual(set(messages), {104})
+            self.assertIn("Имя сохранено", messages[104].text)
+            self.assertIn(7, deleted)
+            change_device.assert_awaited_once_with(42, device_key, name="Телефон")
+
+            await press(handlers.device_action_handler, messages[104], f"device:remove:{device_key}:0")
+            self.assertIn("Место освободится", messages[104].text)
+            get_devices.return_value = {"has_subscription": True, "items": [], "total": 0, "limit": 2}
+            await press(handlers.device_action_handler, messages[104], f"device:confirm:{device_key}:0")
+            change_device.assert_awaited_with(42, device_key, name=None)
+            self.assertIn("Устройство удалено", messages[104].text)
+            self.assertEqual(set(messages), {104})
+
             blocked_user.return_value = True
             await start(3)
             await start(4)
-            self.assertEqual(set(messages), {105})
-            self.assertEqual(messages[105].text, menu.BLOCKED_MESSAGE)
-            self.assertIsNone(messages[105].reply_markup)
+            self.assertEqual(set(messages), {106})
+            self.assertEqual(messages[106].text, menu.BLOCKED_MESSAGE)
+            self.assertIsNone(messages[106].reply_markup)

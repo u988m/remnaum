@@ -27,6 +27,8 @@ from app.services.subscriptions import provision_paid_payment
 from app.services.payment_notifications import notify_external_payment_success
 from app.services.telegram_webapp import telegram_photo_url, validate_telegram_init_data
 from app.services import customer_admin
+from app.services.devices import DeviceNotFound, DevicesUnavailable, change_customer_device, get_customer_devices
+from app.services.subscriptions import PanelAccountConflict
 from app.services.users import BLOCKED_MESSAGE, BlockedCustomer, customer_is_blocked, upsert_active_customer
 
 logger = logging.getLogger(__name__)
@@ -1039,27 +1041,40 @@ async def webapp_hwid_devices(x_telegram_init_data: str | None = Header(default=
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     identity = await _webapp_user(x_telegram_init_data)
-    subscription = await get_user_subscription(int(identity["id"]))
-    if not subscription or not subscription.get("panel_user_id"):
-        return {"limit": None, "total": 0, "items": []}
+    return await _device_request(get_customer_devices, int(identity["id"]))
+
+
+async def _device_request(operation, *args, **kwargs):
     try:
-        client = RemnawaveClient()
-        panel_id = await client.resolve_user_id(
-            subscription["panel_user_id"], username=f"tg_{identity['id']}"
-        )
-        result = await client.get_hwid_devices(panel_id)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="Device list temporarily unavailable") from exc
-    data = result.get("response", result) if isinstance(result, dict) else result
-    devices = data if isinstance(data, list) else data.get("devices", data.get("items", [])) if isinstance(data, dict) else []
-    return {"limit": subscription.get("device_limit"), "total": len(devices), "items": [
-        {
-            "name": str(device.get("deviceModel") or device.get("platform") or device.get("userAgent") or "Устройство")[:100],
-            "platform": str(device.get("platform") or "")[:40],
-            "os_version": str(device.get("osVersion") or "")[:40],
-        }
-        for device in devices[:25] if isinstance(device, dict)
-    ]}
+        return await operation(*args, **kwargs)
+    except BlockedCustomer as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except DeviceNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PanelAccountConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DevicesUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+class DeviceNameUpdate(BaseModel):
+    name: str = Field(max_length=48)
+
+
+@router.patch("/api/v1/webapp/devices/{device_id}")
+async def webapp_update_device_name(device_id: str, data: DeviceNameUpdate,
+                                    x_telegram_init_data: str | None = Header(default=None)):
+    identity = _require_telegram_identity(x_telegram_init_data)
+    return await _device_request(change_customer_device, int(identity["id"]), device_id, name=data.name)
+
+
+@router.delete("/api/v1/webapp/devices/{device_id}")
+async def webapp_remove_device(device_id: str, x_telegram_init_data: str | None = Header(default=None)):
+    identity = _require_telegram_identity(x_telegram_init_data)
+    await _device_request(change_customer_device, int(identity["id"]), device_id, name=None)
+    return {"ok": True}
 
 
 @router.get("/api/v1/webapp/referrals")

@@ -234,8 +234,29 @@ main {
 .device-summary progress { width: 100%; height: 9px; accent-color: #96cbbb; }
 .device-summary #device-upgrade { margin-top: 0; }
 .device-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.device-card { align-content: start; display: grid; gap: 6px; }
+.device-card { display: flex; flex-direction: column; align-items: start; gap: 6px; }
 .device-card p { font-size: .82rem; }
+.device-client { color: #bcd9cf; }
+.device-actions { display: flex; flex-wrap: wrap; width: 100%; gap: 7px; }
+.device-card .device-actions { margin-top: auto; padding-top: 5px; }
+.device-actions button { padding-inline: 8px; flex: 1 0 auto; font-size: .85rem; }
+.device-actions .danger-btn { color: #f2acac; border-color: #604345; background: #271b1c; }
+.device-dialog {
+    width: min(calc(100% - 30px), 440px);
+    max-height: calc(100dvh - 38px);
+    padding: 16px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 18px;
+    background: var(--color-surface);
+    color: var(--color-text);
+}
+.device-dialog::backdrop { background: rgb(0 0 0 / .70); }
+#device-form { display: grid; gap: 10px; }
+#device-name-field input { margin-top: 5px; }
+#device-editor-description { overflow-wrap: anywhere; }
+@media (max-width: 490px) {
+    .device-list { grid-template-columns: minmax(0, 1fr); }
+}
 #account-support { display: grid; gap: 10px; }
 #account-support .primary-btn { margin: 0; }
 .promo-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 10px; }
@@ -262,7 +283,7 @@ main {
 }
 
 
-html:has(.order-dialog[open]) { overflow: hidden; }
+html:has(.order-dialog[open], .device-dialog[open]) { overflow: hidden; }
 .order-dialog {
     position: fixed;
     inset: auto 0 max(6px, env(safe-area-inset-bottom)) 0;

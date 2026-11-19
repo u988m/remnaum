@@ -68,6 +68,21 @@ class RemnawaveClientTests(unittest.IsolatedAsyncioTestCase):
         await client.get_hwid_devices(1204)
         self.assertEqual(seen, ["/api/hwid/devices/1204"])
 
+    async def test_remove_device_uses_numeric_and_legacy_account_ids(self):
+        seen = []
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual((request.method, request.url.path), ("POST", "/api/hwid/devices/delete"))
+            seen.append(json.loads(request.content))
+            return httpx.Response(200, json={"response": {"devices": [], "total": 0}})
+
+        client = RemnawaveClient("https://panel.example", "token", httpx.MockTransport(handler))
+        await client.delete_hwid_device(1204, "private-hardware-id")
+        await client.delete_hwid_device("7e141bf3-cc24-4285-ad98-ac366edacb45", "private-hardware-id")
+        self.assertEqual(seen, [
+            {"userId": 1204, "hwid": "private-hardware-id"},
+            {"userUuid": "7e141bf3-cc24-4285-ad98-ac366edacb45", "hwid": "private-hardware-id"},
+        ])
+
     async def test_legacy_uuid_user_updates(self):
         seen = {}
 
