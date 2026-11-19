@@ -26,14 +26,20 @@
   <button data-tab="referrals" type="button">Реферальная программа</button>
   <p class="sidebar-category">МАГАЗИН</p>
   <button data-tab="brand" type="button">Внешний вид</button>
-  <button data-tab="trial" type="button">Пробный доступ</button>
-  <button data-tab="pricing" type="button">Формула цен</button>
-  <p class="sidebar-category">ПЛАТЁЖНЫЕ СИСТЕМЫ</p>
-  <button data-tab="settings" type="button">Способы оплаты</button>
-  <button data-tab="pay-stars" type="button">Telegram Stars</button>
-  <button data-tab="pay-yookassa" type="button">YooKassa</button>
-  <button data-tab="pay-yoomoney" type="button">YooMoney</button>
-  <button data-tab="pay-cryptopay" type="button">Crypto Pay</button>
+  <details id="settings-accordion" class="settings-accordion">
+    <summary><svg class="admin-sidebar-icon" aria-hidden="true"><use href="#ai-wallet"/></svg> Настройки</summary>
+    <div class="settings-nav-items">
+      <p class="sidebar-category">ПЛАТЁЖНЫЕ СИСТЕМЫ</p>
+      <button data-tab="settings" type="button">Все способы оплаты</button>
+      <button data-tab="pay-stars" type="button">Telegram Stars</button>
+      <button data-tab="pay-yookassa" type="button">YooKassa</button>
+      <button data-tab="pay-yoomoney" type="button">YooMoney</button>
+      <button data-tab="pay-cryptopay" type="button">Crypto Pay</button>
+      <p class="sidebar-category">ДРУГИЕ НАСТРОЙКИ</p>
+      <button data-tab="trial" type="button">Пробный доступ</button>
+      <button data-tab="pricing" type="button">Служебная формула цен</button>
+    </div>
+  </details>
 </nav>
 <a class="admin-return-link" href="/app">← В магазин</a>
 </aside>
@@ -41,16 +47,24 @@
 <section id="overview-view">
   <h1>Дашборд</h1>
   <p class="muted" id="welcome"></p>
-  <div class="cards">
-    <div class="card"><span>Всего клиентов</span><b id="users-count">—</b></div>
-    <div class="card"><span>Активные подписки</span><b id="active-count">—</b></div>
-    <div class="card"><span>Успешные платежи</span><b id="paid-count">—</b></div>
-    <div class="card"><span>Ожидают оплаты</span><b id="pending-count">—</b></div>
+  <div class="cards overview-metrics">
+    <div class="card"><span>Пользователи</span><b id="users-count">—</b><small>Всего зарегистрировано</small></div>
+    <div class="card"><span>Активные подписки</span><b id="active-count">—</b><small>Работает сейчас</small></div>
+    <div class="card"><span>Поступления в рублях</span><b id="revenue-count">—</b><small>Подтверждённые оплаты</small></div>
+    <div class="card"><span>Получено Stars</span><b id="stars-count">—</b><small>Оплаченные XTR</small></div>
+    <div class="card"><span>Выданные заказы</span><b id="paid-count">—</b><small>Успешно завершены</small></div>
+    <div class="card"><span>Ожидают оплаты</span><b id="pending-count">—</b><small>Ещё не оплачены</small></div>
   </div>
   <div class="toolbar dashboard-actions">
     <button class="action primary" type="button" data-open-tab="plans">Управлять тарифами →</button>
-    <button class="action" type="button" data-open-tab="brand">Настроить магазин</button>
+    <button class="action" type="button" data-open-tab="settings">Способы оплаты</button>
+    <button class="action" type="button" data-open-tab="users">Клиенты</button>
+    <button class="action" type="button" data-open-tab="brand">Оформление</button>
   </div>
+  <section class="overview-recent">
+    <div class="toolbar"><h2>Последние платежи</h2><button class="action" type="button" data-open-tab="payments">Все платежи →</button></div>
+    <div id="dashboard-payments" class="overview-payment-list" role="status">Загружаем историю…</div>
+  </section>
 </section>
 <section class="section" id="users-view" hidden><div class="toolbar"><h2>Клиенты и подписки</h2><button class="action" id="users-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>Telegram ID</th><th>Username</th><th>Подписка</th><th>До</th><th>Регистрация</th><th>Действие</th></tr></thead><tbody id="users-table"></tbody></table></div><div id="customer-detail" class="section" hidden aria-live="polite"><div class="toolbar"><h2 id="customer-title">Карточка клиента</h2><button class="action" id="customer-close">Закрыть</button></div><p class="muted" id="customer-summary"></p><h3>Подписки</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Статус</th><th>Действует до</th><th>Создана</th></tr></thead><tbody id="customer-subscriptions"></tbody></table></div><h3>Платежи</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="customer-payments"></tbody></table></div></div><div class="toolbar"><button class="action" id="users-prev">Назад</button><span id="users-page" class="muted">Страница 1</span><button class="action" id="users-next">Далее</button></div></section>
 <section class="section" id="payments-view" hidden><div class="toolbar"><h2>История платежей</h2><button class="action" id="payments-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Клиент</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="payments-table"></tbody></table></div><div class="toolbar"><button class="action" id="payments-prev">Назад</button><span id="payments-page" class="muted">Страница 1</span><button class="action" id="payments-next">Далее</button></div></section>
@@ -221,8 +235,8 @@
   <button class="action primary provider-save" type="button" data-save-provider="cryptopay">Сохранить Crypto Pay</button>
 </section>
 <section class="section" id="pricing-view" hidden>
-<h2>Цены индивидуального конструктора</h2>
-<p class="muted">Все суммы в рублях указываются в копейках; Stars — целыми единицами.</p>
+<h2>Служебная формула цен</h2>
+<p class="muted">Настройка для прежних заказов. Новые покупки используют только опубликованные тарифы администратора. Рубли указываются в копейках; Stars — целыми единицами.</p>
 <div id="pricing-fields" class="grid"></div>
 <button class="action primary" id="pricing-save">Сохранить формулу цен</button>
 </section>

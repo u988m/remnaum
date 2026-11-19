@@ -343,12 +343,21 @@ async def admin_overview(x_telegram_init_data: str | None = Header(default=None)
         active = await session.scalar(select(func.count(Subscription.id)).where(Subscription.status == "active")) or 0
         succeeded = await session.scalar(select(func.count(Payment.id)).where(Payment.status == "succeeded")) or 0
         pending = await session.scalar(select(func.count(Payment.id)).where(Payment.status == "pending")) or 0
+        paid_statuses = ("paid", "succeeded")
+        revenue = await session.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(
+            Payment.currency == "RUB", Payment.status.in_(paid_statuses),
+        )) or 0
+        stars_received = await session.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(
+            Payment.currency == "XTR", Payment.status.in_(paid_statuses),
+        )) or 0
     return {
         "admin_name": identity.get("first_name", ""),
         "users": users,
         "active_subscriptions": active,
         "successful_payments": succeeded,
         "pending_payments": pending,
+        "revenue_rub_minor": int(revenue),
+        "stars_received": int(stars_received),
     }
 
 
