@@ -67,7 +67,17 @@ sudo remnaum
 
 [Инструкция](docs/INSTALL.md) · [История изменений](CHANGELOG.md) · [Лицензия MIT](LICENSE) · [GitHub Releases](https://github.com/u988m/remnaum/releases)
 
-[Помощь](https://t.me/remnaum/6) · [Сообщить об ошибке](https://t.me/remnaum/3) · [Предложить идею](https://t.me/remnaum/5)
+## 💬 Нужна помощь или есть предложение?
+
+<p align="center"><strong>Выберите, куда написать — мы собираем вопросы, ошибки и идеи для Remnaum.</strong></p>
+
+<table align="center">
+  <tr>
+    <td align="center"><a href="https://t.me/remnaum/6"><img src="assets/community-help.svg" alt="Помощь" width="200"></a><br><strong><a href="https://t.me/remnaum/6">❓ Получить помощь</a></strong><br><sub>Вопросы по установке и работе</sub></td>
+    <td align="center"><a href="https://t.me/remnaum/3"><img src="assets/community-bugs.svg" alt="Сообщить об ошибке" width="200"></a><br><strong><a href="https://t.me/remnaum/3">🐛 Сообщить об ошибке</a></strong><br><sub>Проблемы и неполадки</sub></td>
+    <td align="center"><a href="https://t.me/remnaum/5"><img src="assets/community-ideas.svg" alt="Предложить идею" width="200"></a><br><strong><a href="https://t.me/remnaum/5">💡 Предложить идею</a></strong><br><sub>Пожелания и новые функции</sub></td>
+  </tr>
+</table>
 
 <div align="center">
 
