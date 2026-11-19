@@ -5,8 +5,9 @@ from typing import Any
 import httpx
 from sqlalchemy import select
 
+from app.services.squads import fetch_catalog, require_available
 from app.config import settings
-from app.db.models import Payment, Subscription, SubscriptionDetails, User
+from app.db.models import Payment, Subscription, SubscriptionDetails, TrialClaim, User
 from app.db.session import SessionLocal
 from app.services.remnawave import RemnawaveClient
 from app.services.referrals import pending_rewards_for_payment, grant_referral_reward
@@ -28,6 +29,43 @@ def _panel_identity(user: dict[str, Any]) -> int | str:
     return int(value) if str(value).isdigit() else str(value)
 
 
+async def get_panel_user(panel, telegram_id):
+    try:
+        return _unwrap(await panel.get_user_by_username(f"tg_{telegram_id}"))
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 404:
+            raise
+        return {}
+
+
+def matches_panel_account(panel_user_id: int | str, panel_user):
+    return any(panel_user.get(key) is not None and str(panel_user[key]) == str(panel_user_id)
+               for key in ("id", "uuid"))
+
+
+def has_panel_squads(panel_user):
+    assignments = panel_user.get("activeInternalSquads")
+    return isinstance(assignments, list) and bool(assignments)
+
+
+def panel_expiry(panel_user):
+    value = panel_user.get("expireAt")
+    if not isinstance(value, str):
+        return None
+    expiry = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return expiry if expiry.tzinfo else expiry.replace(tzinfo=timezone.utc)
+
+
+async def paid_tariff_key(session, subscription):
+    if subscription.paid_tariff is not None:
+        return subscription.paid_tariff
+    previous = await session.scalar(select(Payment).where(
+        Payment.user_id == subscription.user_id, Payment.status == "succeeded"
+    ).order_by(Payment.id.desc()).limit(1))
+    order = json.loads(previous.payload or "{}") if previous else {}
+    return str(order["plan_id"] or "flexible") if "plan_id" in order else None
+
+
 async def provision_paid_payment(payment_id: int) -> bool:
     async with SessionLocal() as session:
         payment = await session.scalar(
@@ -40,10 +78,12 @@ async def provision_paid_payment(payment_id: int) -> bool:
         if payment.status != "paid":
             raise ValueError("Payment has not been verified as paid")
 
-        user = await session.get(User, payment.user_id)
+        user = await session.get(User, payment.user_id, with_for_update=True)
         if user is None:
             raise RuntimeError("Payment owner not found")
-        snapshot = json.loads(payment.payload or "{}").get("tariff") or {}
+        order = json.loads(payment.payload or "{}")
+        tariff_key = str(order["plan_id"] or "flexible") if "plan_id" in order else None
+        snapshot = order.get("tariff") or {}
         days = int(snapshot.get("duration_days", 0))
         traffic_gb = int(snapshot.get("traffic_gb", 0))
         device_limit = int(snapshot.get("device_limit", 0))
@@ -59,33 +99,52 @@ async def provision_paid_payment(payment_id: int) -> bool:
         subscription = await session.scalar(
             select(Subscription)
             .where(Subscription.user_id == user.id)
-            .order_by(Subscription.created_at.desc())
+            .order_by(Subscription.created_at.desc(), Subscription.id.desc())
+            .limit(1)
             .with_for_update()
         )
         username = f"tg_{user.telegram_id}"
         traffic_bytes = traffic_gb * 1024 * 1024 * 1024
         panel = RemnawaveClient()
 
-        panel_user: dict[str, Any] | None = None
-        try:
-            panel_user = _unwrap(await panel.get_user_by_username(username))
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != 404:
-                raise
+        panel_user = await get_panel_user(panel, user.telegram_id)
+        if subscription is not None and not matches_panel_account(subscription.panel_user_id, panel_user):
+            raise RuntimeError("Panel account missing or replaced for existing subscription")
 
         marker = f"remnaum-payment:{payment_id}"
         if panel_user:
             panel_user_id = _panel_identity(panel_user)
             description = str(panel_user.get("description") or "")
-            if marker not in description:
-                expire_value = panel_user.get("expireAt")
-                if isinstance(expire_value, str):
-                    current_expiry = datetime.fromisoformat(expire_value.replace("Z", "+00:00"))
-                    if current_expiry.tzinfo is None:
-                        current_expiry = current_expiry.replace(tzinfo=timezone.utc)
+            markers = {part.strip() for part in description.split("|")}
+            # Reconcile a previous panel write before using the local tariff identity.
+            if marker not in markers:
+                pending_ids = await session.scalars(select(Payment.id).where(
+                    Payment.user_id == user.id, Payment.status == "paid", Payment.id != payment_id
+                ))
+                if any(f"remnaum-payment:{other}" in markers for other in pending_ids):
+                    raise RuntimeError("Retry the previously applied payment first")
+            if marker not in markers:
+                current_key = await paid_tariff_key(session, subscription) if subscription else None
+                same_tariff = tariff_key is not None and tariff_key == current_key
+                # Older orders have no checkout decision. Preserve only known renewals
+                # or legacy orders without tariff identity against a paid subscription.
+                if "preserve_squads" in snapshot:
+                    preserve = snapshot["preserve_squads"] and same_tariff
                 else:
-                    current_expiry = datetime.now(timezone.utc)
-                new_expiry = max(current_expiry, datetime.now(timezone.utc)) + timedelta(days=total_days)
+                    preserve = same_tariff or (
+                        tariff_key is None and subscription is not None
+                        and not await session.scalar(select(TrialClaim.id).where(
+                            TrialClaim.user_id == user.id, TrialClaim.status == "completed"
+                        ))
+                    )
+                selected = None
+                if preserve and not has_panel_squads(panel_user):
+                    raise RuntimeError("Existing panel account has no Internal Squads to preserve")
+                if not preserve:
+                    selected = snapshot.get("internal_squads", settings.remnawave_internal_squad_ids)
+                    require_available(selected, await fetch_catalog())
+                now = datetime.now(timezone.utc)
+                new_expiry = max(panel_expiry(panel_user) or now, now) + timedelta(days=total_days)
                 new_description = f"{description} | {marker}".strip(" |")
                 await panel.update_user(
                     panel_user_id,
@@ -93,17 +152,15 @@ async def provision_paid_payment(payment_id: int) -> bool:
                     hwid_device_limit=device_limit,
                     expire_at=new_expiry,
                     description=new_description,
-                )
-            else:
-                await panel.update_user(
-                    panel_user_id,
-                    traffic_limit_bytes=traffic_bytes,
-                    hwid_device_limit=device_limit,
-                    description=description,
+                    active_internal_squads=selected,
                 )
             panel_user = _unwrap(await panel.get_user(panel_user_id))
         else:
             expire_at = datetime.now(timezone.utc) + timedelta(days=total_days)
+            squads = snapshot.get("internal_squads", settings.remnawave_internal_squad_ids)
+            if not squads:
+                raise RuntimeError("No Internal Squads configured for VPN issuance")
+            require_available(squads, await fetch_catalog())
             created = await panel.create_user(
                 username,
                 expire_at,
@@ -111,7 +168,7 @@ async def provision_paid_payment(payment_id: int) -> bool:
                 traffic_limit_bytes=traffic_bytes,
                 traffic_limit_strategy="NO_RESET",
                 hwid_device_limit=device_limit,
-                active_internal_squads=settings.remnawave_internal_squad_ids or None,
+                active_internal_squads=squads,
                 description=marker,
             )
             panel_user = _unwrap(created)
@@ -120,12 +177,9 @@ async def provision_paid_payment(payment_id: int) -> bool:
             panel_user_id = _panel_identity(panel_user)
             panel_user = _unwrap(await panel.get_user(panel_user_id))
 
-        expire_value = panel_user.get("expireAt")
-        expires_at = (
-            datetime.fromisoformat(expire_value.replace("Z", "+00:00"))
-            if isinstance(expire_value, str)
-            else datetime.now(timezone.utc) + timedelta(days=total_days)
-        )
+        if not matches_panel_account(panel_user_id, panel_user):
+            raise RuntimeError("Could not confirm the updated Remnawave account")
+        expires_at = panel_expiry(panel_user) or datetime.now(timezone.utc) + timedelta(days=total_days)
         subscription_url = panel_user.get("subscriptionUrl")
 
         if subscription is None:
@@ -141,6 +195,9 @@ async def provision_paid_payment(payment_id: int) -> bool:
             subscription.panel_user_id = str(panel_user_id)
             subscription.status = "active"
             subscription.expires_at = expires_at
+
+        if tariff_key:
+            subscription.paid_tariff = tariff_key
 
         details = await session.scalar(
             select(SubscriptionDetails).where(

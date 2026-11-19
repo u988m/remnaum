@@ -16,6 +16,7 @@ class User(Base):
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
+    paid_tariff: Mapped[str | None] = mapped_column(String(48))
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     panel_user_id: Mapped[str | None] = mapped_column(String(128), index=True)
@@ -97,6 +98,7 @@ class Referral(Base):
 class TariffPlan(Base):
     """Operator-managed fixed plan; independent RUB and Telegram Stars prices."""
     __tablename__ = "tariff_plans"
+    internal_squads: Mapped[list[str] | None] = mapped_column(JSON(none_as_null=True))
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(80), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
@@ -198,3 +200,17 @@ class PromoRedemption(Base):
     bonus_days: Mapped[int] = mapped_column(Integer, nullable=False)
     applied_payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class InternalSquadCatalog(Base):
+    __tablename__ = "internal_squad_catalog"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    items: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_success: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failed: Mapped[bool] = mapped_column(default=False)
+
+
+class SquadPolicy(Base):
+    __tablename__ = "squad_policies"
+    mode: Mapped[str] = mapped_column(String(16), primary_key=True)
+    squads: Mapped[list[str]] = mapped_column(JSON)

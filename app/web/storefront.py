@@ -125,7 +125,7 @@ async def store_checkout(request: Request, data: StoreCheckoutPayload):
     try:
         await choose_plan(telegram_id, data.plan_id)
         await accept_current_terms(telegram_id)
-        payment, link = await create_payment_for_user(telegram_id, data.provider)
+        payment, link = await create_payment_for_user(telegram_id, data.provider, expected_plan_id=data.plan_id)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not link.url.startswith("https://"):

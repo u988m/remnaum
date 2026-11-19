@@ -85,6 +85,7 @@ class RemnawaveClient:
         *,
         traffic_limit_bytes: int,
         hwid_device_limit: int,
+        active_internal_squads: list[str] | None = None,
         expire_at: datetime | str | None = None,
         description: str | None = None,
     ) -> Any:
@@ -96,6 +97,8 @@ class RemnawaveClient:
             "trafficLimitBytes": traffic_limit_bytes,
             "hwidDeviceLimit": hwid_device_limit,
         }
+        if active_internal_squads is not None:
+            payload["activeInternalSquads"] = active_internal_squads
         if expire_at is not None:
             payload["expireAt"] = self._iso_datetime(expire_at)
         if description is not None:

@@ -20,7 +20,6 @@ from urllib.request import Request, urlopen
 import terminal_ui as ui
 import backup_manager as backups
 from remnawave_setup import (
-    discover_squads, select_squads, validate_uuid_list,
     local_panel_for_url, panel_webhook_secret, apply_local_panel_webhook,
     discover_local_panel, read_panel_env, public_webhook_ready,
     panel_api_url,
@@ -582,28 +581,8 @@ def wait_for_app_health(max_attempts: int = 35) -> bool:
 
 
 def refresh_all_remnawave_squads(existing: dict[str, str]) -> bool:
-    """Sync all Panel Internal Squads on upgrade, without prompting or losing state.
-
-    A transient Panel outage must never erase a working installation's UUIDs.
-    The upgraded app container is recreated only when the selected UUIDs changed.
-    """
-    url = existing.get("REMNAWAVE_BASE_URL", "")
-    token = existing.get("REMNAWAVE_API_TOKEN", "")
-    if not url or not token:
-        print("Remnawave не настроена; синхронизация внутренних групп пропущена.")
-        return False
-    try:
-        squads = discover_squads(url, token)
-        updated = select_squads(squads)
-    except (OSError, ValueError):
-        print("Remnawave API недоступен или группы отсутствуют — сохраняем прежние UUID.")
-        return False
-    if updated == existing.get("REMNAWAVE_ACTIVE_INTERNAL_SQUADS", ""):
-        print("✅ Все Internal Squads уже актуальны.")
-        return False
-    write_env({"REMNAWAVE_ACTIVE_INTERNAL_SQUADS": updated})
-    print(f"✅ Обновлён список Internal Squads: {len(squads)}")
-    return True
+    """Compatibility hook for update.sh running from an older checkout."""
+    return False
 
 
 def perform_update(existing: dict[str, str]) -> int:
@@ -616,8 +595,6 @@ def perform_update(existing: dict[str, str]) -> int:
     ui.section(1, 3, "Создание резервной копии и загрузка обновлений")
     offer_backup_key()
     run(["bash", "update.sh"])
-    if refresh_all_remnawave_squads(existing):
-        run(["docker", "compose", "up", "-d", "--no-deps", "--force-recreate", "app"])
     ui.section(2, 3, "Проверка контейнеров")
     run(["docker", "compose", "ps"])
     ui.section(3, 3, "Проверка приложения")
@@ -797,25 +774,6 @@ def config_for_install(existing: dict[str, str], mode: str,
     for key, label, hidden in required:
         if not cfg.get(key):
             cfg[key] = prompt(label, hidden=hidden)
-    # First install always enables every existing Internal Squad, no manual choices.
-    if not cfg.get("REMNAWAVE_ACTIVE_INTERNAL_SQUADS"):
-        print("\\n🔎 Получаем все внутренние группы Remnawave через API...")
-        try:
-            squads = discover_squads(cfg["REMNAWAVE_BASE_URL"], cfg["REMNAWAVE_API_TOKEN"])
-        except (OSError, ValueError):
-            print("Не удалось получить группы автоматически. Проверьте API-токен и доступность панели.")
-            manual = prompt("UUID внутренних групп (резервный вариант, через запятую)")
-            cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"] = validate_uuid_list(manual)
-        else:
-            cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"] = select_squads(squads)
-    elif existing:
-        # Reconfiguration of a live store also picks up newly added squads,
-        # preserving the last valid list if the Panel cannot be reached.
-        try:
-            squads = discover_squads(cfg["REMNAWAVE_BASE_URL"], cfg["REMNAWAVE_API_TOKEN"])
-            cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"] = select_squads(squads)
-        except (OSError, ValueError):
-            print("Remnawave API недоступен; прежние Internal Squads сохранены.")
     # On a shared host reuse the already configured secret so other Panel
     # webhook consumers are not disconnected or made incompatible.
     panel_env = local_panel_for_url(cfg["REMNAWAVE_BASE_URL"]) if mode == "panel" else None
@@ -841,8 +799,7 @@ def config_for_install(existing: dict[str, str], mode: str,
         raise ValueError("Do not reuse the Panel's domain for the Remnaum bot/Mini App")
     if cfg.get("TELEGRAM_TERMS_URL") and not cfg["TELEGRAM_TERMS_URL"].startswith("https://"):
         raise ValueError("Terms URL must use HTTPS")
-    for required in ("TELEGRAM_BOT_TOKEN", "REMNAWAVE_API_TOKEN",
-                     "REMNAWAVE_ACTIVE_INTERNAL_SQUADS"):
+    for required in ("TELEGRAM_BOT_TOKEN", "REMNAWAVE_API_TOKEN"):
         if not cfg.get(required):
             raise ValueError(f"Missing required setting: {required}")
 

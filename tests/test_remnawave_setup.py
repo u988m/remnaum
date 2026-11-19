@@ -25,11 +25,6 @@ class RemnawaveSetupTests(unittest.TestCase):
         self.assertEqual(setup.parse_squads(payload), [
             {"uuid": A, "name": "Standard"}, {"uuid": B, "name": "Premium"},
         ])
-        def do_not_prompt(*args, **kwargs):
-            raise AssertionError("Выбирать UUID вручную нельзя")
-        self.assertEqual(setup.select_squads(setup.parse_squads(payload), do_not_prompt), A + "," + B)
-        self.assertEqual(setup.select_squads([{"uuid": A, "name": "One"}], do_not_prompt), A)
-
     def test_api_discovery_uses_bearer_token(self):
         with patch.object(setup, "_fetch_json", return_value={
             "response": {"internalSquads": [{"uuid": A, "name": "Default"}]}
@@ -41,19 +36,9 @@ class RemnawaveSetupTests(unittest.TestCase):
     def test_refresh_all_squads_on_update_and_keep_previous_on_outage(self):
         initial = {"REMNAWAVE_BASE_URL": "https://panel.myvpn.site",
                    "REMNAWAVE_API_TOKEN": "secret", "REMNAWAVE_ACTIVE_INTERNAL_SQUADS": A}
-        with patch.object(installer, "discover_squads",
-                          return_value=[{"uuid": A, "name": "Free"}, {"uuid": B, "name": "Premium"}]), \
-             patch.object(installer, "write_env") as write:
-            self.assertTrue(installer.refresh_all_remnawave_squads(initial))
-            write.assert_called_once_with({"REMNAWAVE_ACTIVE_INTERNAL_SQUADS": A + "," + B})
-        with patch.object(installer, "discover_squads", side_effect=OSError("offline")), \
-             patch.object(installer, "write_env") as write:
+        with patch.object(installer, "write_env") as write:
             self.assertFalse(installer.refresh_all_remnawave_squads(initial))
             write.assert_not_called()
-
-    def test_empty_squads_is_a_configuration_error(self):
-        with self.assertRaisesRegex(ValueError, "нет внутренних групп"):
-            setup.select_squads([], lambda *args, **kwargs: "1")
 
     def test_unsafe_url_and_invalid_squads_rejected(self):
         for url in ("http://panel.myvpn.site", "https://user:pass@panel.myvpn.site",
@@ -65,7 +50,7 @@ class RemnawaveSetupTests(unittest.TestCase):
                 setup.validate_uuid_list(value)
         self.assertEqual(setup.validate_uuid_list(A + "," + A), A)
 
-    def test_fallback_to_manual_only_when_api_fails(self):
+    def test_install_does_not_assign_squads(self):
         existing = {
             "PUBLIC_DOMAIN": "hook.myvpn.site",
             "WEBAPP_DOMAIN": "miniapp.myvpn.site",
@@ -79,18 +64,10 @@ class RemnawaveSetupTests(unittest.TestCase):
         }
         with patch.object(installer, "network_exists", return_value=False), \
              patch.object(installer, "local_panel_for_url", return_value=None), \
-             patch.object(installer, "discover_squads", return_value=[{"uuid": A, "name": "Default"}]), \
              patch.object(installer, "prompt") as prompt:
             cfg = installer.config_for_install(existing, "panel", "none", 18080)
-        self.assertEqual(cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"], A)
+        self.assertFalse(cfg.get("REMNAWAVE_ACTIVE_INTERNAL_SQUADS"))
         prompt.assert_not_called()
-
-        with patch.object(installer, "network_exists", return_value=False), \
-             patch.object(installer, "local_panel_for_url", return_value=None), \
-             patch.object(installer, "discover_squads", side_effect=OSError("offline")), \
-             patch.object(installer, "prompt", return_value=B):
-            cfg = installer.config_for_install(existing, "panel", "none", 18080)
-        self.assertEqual(cfg["REMNAWAVE_ACTIVE_INTERNAL_SQUADS"], B)
 
     def _panel(self, temp):
         root = Path(temp) / "remnawave"
@@ -122,7 +99,6 @@ class RemnawaveSetupTests(unittest.TestCase):
             root, env = self._panel(temp)
             with patch.object(installer, "network_exists", return_value=False), \
                  patch.object(installer, "local_panel_for_url", return_value=env), \
-                 patch.object(installer, "discover_squads", return_value=[{"uuid": A, "name": "Default"}]), \
                  patch.object(installer, "prompt") as prompt:
                 config = installer.config_for_install(existing, "panel", "none", 18080)
             self.assertEqual(config["REMNAWAVE_WEBHOOK_SECRET"], SECRET)
@@ -144,7 +120,6 @@ class RemnawaveSetupTests(unittest.TestCase):
             with patch.object(installer, "network_exists", return_value=False), \
                  patch.object(installer, "discover_local_panel", return_value=env), \
                  patch.object(installer, "local_panel_for_url", return_value=env), \
-                 patch.object(installer, "discover_squads", return_value=[{"uuid": A, "name": "Default"}]), \
                  patch.object(installer, "prompt") as prompt:
                 config = installer.config_for_install(existing, "panel", "none", 18080)
             self.assertEqual(config["REMNAWAVE_BASE_URL"], "https://panel.myvpn.site")

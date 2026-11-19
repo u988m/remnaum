@@ -8,8 +8,89 @@ async function showCustomer(id){$("status").textContent="";try{const d=await api
 $("customer-close").onclick=()=>{$("customer-detail").hidden=true};
 async function loadPayments(){const d=await api("/admin/api/payments?limit="+pageSize+"&offset="+paymentOffset);$("payments-table").replaceChildren();d.items.forEach(p=>row("payments-table",[p.id,p.telegram_id,p.provider,p.amount+" "+p.currency,p.status,new Date(p.created_at).toLocaleString()]));$("payments-page").textContent="Показано "+(d.total?paymentOffset+1:0)+"–"+Math.min(paymentOffset+d.items.length,d.total)+" из "+d.total;$("payments-prev").disabled=paymentOffset===0;$("payments-next").disabled=paymentOffset+pageSize>=d.total}
 async function adminApi(method,path,body){const r=await fetch(path,{method,headers:{"X-Telegram-Init-Data":tg?.initData||"","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(typeof d.detail==="string"?d.detail:"Ошибка запроса");return d}
+let squadItems = [];
+let selectedSquads = [];
+function renderSquads() {
+  const query = $("squads-search").value.trim().toLocaleLowerCase();
+  const selected = $("squads-selected");
+  const options = $("squads-options");
+  selected.replaceChildren();
+  options.replaceChildren();
+  $("squads-policy").textContent = selectedSquads === null
+    ? "В старом тарифе не заданы сквады. Выберите сквады для новых подписок."
+    : "Выбранные сквады для новых подписок";
+  function button(parent, item, chosen) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "action";
+    b.textContent = (chosen ? "Удалить " : "Добавить ") + item.name + " · " + item.uuid
+      + (item.available ? "" : " ⚠ Недоступен");
+    b.disabled = !chosen && !item.available;
+    b.onclick = () => {
+      selectedSquads = chosen ? selectedSquads.filter(id => id !== item.uuid)
+        : [...(selectedSquads || []), item.uuid];
+      renderSquads();
+    };
+    parent.appendChild(b);
+  }
+  for (const id of selectedSquads || []) {
+    button(selected, squadItems.find(item => item.uuid === id) || {uuid: id, name: "Сквад"}, true);
+  }
+  for (const item of squadItems) {
+    if (!selectedSquads?.includes(item.uuid) && item.name.toLocaleLowerCase().includes(query)) {
+      button(options, item, false);
+    }
+  }
+}
+async function loadSquads(refresh = false) {
+  const control = $("squads-refresh");
+  control.disabled = true;
+  $("squads-status").textContent = "Загрузка списка…";
+  try {
+    const data = await adminApi(refresh ? "POST" : "GET", "/admin/api/internal-squads" + (refresh ? "/refresh" : ""));
+    squadItems = data.items;
+    $("squads-status").textContent = (data.failed ? "⚠ Ошибка синхронизации. " : "")
+      + (data.last_success ? "Последнее обновление: " + new Date(data.last_success).toLocaleString() : "Список ещё не получен");
+    renderSquads();
+  } catch (error) {
+    $("squads-status").textContent = "⚠ Ошибка загрузки списка: " + error.message;
+  } finally {
+    control.disabled = false;
+  }
+}
+$("squads-search").oninput = renderSquads;
+$("squads-refresh").onclick = () => loadSquads(true);
 let cachedPlans=[];
 async function loadPlans(){
+  await loadSquads();
+  const policies = await adminApi("GET", "/admin/api/squad-policies");
+  const container = $("mode-policies");
+  container.replaceChildren();
+  for (const [mode, title] of [["flexible", "Гибкий конструктор"], ["trial", "Пробный доступ"]]) {
+    const label = document.createElement("label");
+    label.textContent = title;
+    const select = document.createElement("select");
+    select.multiple = true;
+    const keys = new Set([...policies[mode], ...squadItems.map(item => item.uuid)]);
+    for (const key of keys) {
+      const item = squadItems.find(row => row.uuid === key);
+      const option = new Option((item?.name || "") + " · " + key + (item?.available ? "" : " ⚠ Недоступен"), key);
+      option.selected = policies[mode].includes(key);
+      option.disabled = !item?.available && !option.selected;
+      select.add(option);
+    }
+    label.appendChild(select);
+    const save = document.createElement("button");
+    save.className = "action";
+    save.textContent = "Сохранить · " + title;
+    save.onclick = async () => {
+      try {
+        await adminApi("PUT", "/admin/api/squad-policies/" + mode, Array.from(select.selectedOptions, o => o.value));
+        $("status").textContent = "Настройки сохранены";
+      } catch (error) { $("status").textContent = error.message; }
+    };
+    container.append(label, save);
+  }
   const d=await adminApi("GET","/admin/api/plans");cachedPlans=d.items;$("plans-table").replaceChildren();
   d.items.forEach(p=>{
     row("plans-table",[p.title,p.duration_days+" д / "+p.traffic_gb+" ГБ / "+p.device_limit+" уст.",(p.price_rub_minor/100).toFixed(2),p.price_stars,p.is_active?"Активен":"Скрыт"]);
@@ -18,21 +99,23 @@ async function loadPlans(){
   });
 }
 function fillPlan(p){
+  selectedSquads = p.internal_squads; $("squads-search").value = ""; renderSquads();
   $("plan-id").value=p.id;$("plan-title").value=p.title;$("plan-description").value=p.description||"";
   $("plan-days").value=p.duration_days;$("plan-traffic").value=p.traffic_gb;$("plan-devices").value=p.device_limit;
   $("plan-rub").value=p.price_rub_minor;$("plan-stars").value=p.price_stars;
   $("plan-order").value=p.sort_order;$("plan-active").checked=p.is_active;
 }
-$("plan-new").onclick=()=>{$("plan-form").reset();$("plan-id").value="";};
+$("plan-new").onclick=()=>{$("plan-form").reset();$("plan-id").value=""; selectedSquads = []; renderSquads();};
 $("plans-refresh").onclick=()=>loadPlans().catch(e=>$("status").textContent=e.message);
 $("plan-form").onsubmit=async e=>{
   e.preventDefault();try{
-    const payload={title:$("plan-title").value,description:$("plan-description").value,
+    const payload={internal_squads:selectedSquads,title:$("plan-title").value,description:$("plan-description").value,
       duration_days:+$("plan-days").value,traffic_gb:+$("plan-traffic").value,device_limit:+$("plan-devices").value,
       price_rub_minor:+$("plan-rub").value,price_stars:+$("plan-stars").value,
       sort_order:+$("plan-order").value,is_active:$("plan-active").checked};
     const id=$("plan-id").value;
-    await adminApi(id?"PUT":"POST",id?"/admin/api/plans/"+id:"/admin/api/plans",payload);
+    const saved = await adminApi(id?"PUT":"POST",id?"/admin/api/plans/"+id:"/admin/api/plans",payload);
+    fillPlan(saved);
     $("status").textContent="Тариф сохранён";await loadPlans();
   }catch(e){$("status").textContent=e.message}
 };
