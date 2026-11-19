@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 from typing import Any
 
 import httpx
@@ -78,6 +79,16 @@ class RemnawaveClient:
 
     async def get_user_by_username(self, username: str) -> Any:
         return await self.request("GET", f"/api/users/by-username/{username}")
+
+    async def get_users_by_telegram_id(self, telegram_id: int) -> Any:
+        try:
+            return await self.request("GET", f"/api/users/by-telegram-id/{telegram_id}")
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 404:
+                raise
+        return await self.request("GET", "/api/users", params={
+            "filters": json.dumps([{"id": "telegramId", "value": str(telegram_id)}]), "size": 50,
+        })
 
     async def update_user(
         self,

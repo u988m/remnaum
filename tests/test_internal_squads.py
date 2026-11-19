@@ -51,6 +51,7 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.fetch = stack.enter_context(patch.object(squads.RemnawaveClient, "request"))
             self.panel = AsyncMock()
             self.panel.get_user_by_username.return_value = {}
+            self.panel.get_users_by_telegram_id.return_value = {"response": []}
             stack.enter_context(patch.object(payment_service, "RemnawaveClient", return_value=self.panel))
             stack.enter_context(patch.object(customer_admin, "RemnawaveClient", return_value=self.panel))
             self.addCleanup(stack.pop_all().close)
@@ -182,6 +183,65 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(overview["stars_received"], 40)
         self.assertEqual(len(overview["revenue_days"]), 30)
 
+    async def test_reconciles_a_verified_new_panel_id_and_recreates_a_missing_account(self):
+        async with self.engine.begin() as conn:
+            await initialize_schema(conn)
+        await self.sync((A, "Basic"))
+        plan = await plans.save_plan(PLAN | {"internal_squads": [A]})
+        async with self.sessions.begin() as session:
+            user = User(telegram_id=42)
+            session.add(user)
+            await session.flush()
+            session.add(Subscription(user_id=user.id, panel_user_id=str(uuid4()), paid_tariff=str(plan["id"]),
+                                     status="active", expires_at=ACTIVE_EXPIRY))
+
+        panel = self.panel
+        remote = {"id": 45, "telegramId": "42", "status": "ACTIVE",
+                  "expireAt": (ACTIVE_EXPIRY - timedelta(days=2)).isoformat(), "activeInternalSquads": [A]}
+        panel.get_users_by_telegram_id.return_value = {"response": {"users": [remote], "total": 1}}
+
+        async def get_account(panel_id):
+            if str(panel_id) == str(remote.get("id")):
+                return {"response": remote.copy()}
+            response = httpx.Response(400 if not str(panel_id).isdigit() else 404)
+            raise httpx.HTTPStatusError("missing", request=httpx.Request("GET", "https://panel.test"), response=response)
+
+        panel.get_user.side_effect = get_account
+        async def update_account(panel_id, **values):
+            self.assertEqual(panel_id, 45)
+            remote.update(expireAt=values["expire_at"].isoformat(), description=values["description"])
+        panel.update_user.side_effect = update_account
+
+        async def buy(receipt):
+            order, amount = await payment_service.create_stars_payment_for_user(42, plan_id=plan["id"], revision=plan["revision"])
+            self.assertTrue(await payment_service.validate_stars_pre_checkout(42, order.id, amount, "XTR", f"remnaum:{order.id}"))
+            await payment_service.settle_payment(VerifiedPayment(order.id, receipt, amount, "XTR"), "telegram_stars")
+            self.assertTrue(await subscriptions.provision_paid_payment(order.id))
+            return order
+
+        with patch.object(payment_service, "get_terms_url", return_value=""), \
+             patch.object(subscriptions, "RemnawaveClient", return_value=panel):
+            panel.get_users_by_telegram_id.return_value["response"] = [remote, {"id": 46, "telegramId": 42}]
+            with self.assertRaises(subscriptions.PanelAccountConflict):
+                await payment_service.create_stars_payment_for_user(42, plan_id=plan["id"], revision=plan["revision"])
+            panel.get_users_by_telegram_id.return_value["response"] = {"users": [remote], "total": 1}
+            await buy("verified-replacement")
+            rebound = await subscriptions.get_user_subscription(42)
+            self.assertEqual((rebound["panel_user_id"], rebound["expires_at"]), ("45", ACTIVE_EXPIRY + timedelta(days=30)))
+
+            remote.clear()
+            panel.get_users_by_telegram_id.return_value = {"response": []}
+            async def create_account(username, expiry, **values):
+                self.assertEqual((username, values["telegram_id"], values["active_internal_squads"]), ("tg_42", 42, [A]))
+                remote.update(id=55, telegramId=42, status="ACTIVE", expireAt=expiry.isoformat())
+                return {"response": remote.copy()}
+            panel.create_user.side_effect = create_account
+            restored = await buy("restored-account")
+            self.assertTrue(json.loads(restored.payload)["tariff"]["allow_recreate"])
+            self.assertFalse(await subscriptions.provision_paid_payment(restored.id))
+            rebound = await subscriptions.get_user_subscription(42)
+            self.assertEqual((rebound["panel_user_id"], rebound["expires_at"]), ("55", ACTIVE_EXPIRY + timedelta(days=60)))
+
     async def test_purchase_edit_renew_and_catalog_failures(self):
         async with self.engine.begin() as conn:
             await initialize_schema(conn)
@@ -245,15 +305,15 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(await subscriptions.provision_paid_payment(switched.id))
             missing_account = await checkout()
             panel.get_user_by_username.return_value = {}
-            with self.assertRaisesRegex(ValueError, "отсутствует"):
-                await checkout()
+            stored = panel.get_user.return_value
+            panel.get_user.return_value = {}
             with self.assertRaisesRegex(RuntimeError, "Panel account missing"):
                 await subscriptions.provision_paid_payment(missing_account.id)
             async with self.sessions() as session:
                 self.assertEqual((await session.get(Payment, missing_account.id)).status, "paid")
                 self.assertEqual(await session.scalar(select(func.count()).select_from(Subscription)), 1)
             panel.create_user.assert_awaited_once()
-            panel.get_user_by_username.return_value = panel.get_user.return_value
+            panel.get_user.return_value = stored
             self.assertTrue(await subscriptions.provision_paid_payment(missing_account.id))
 
         last = await self.sync((A, "Renamed"))

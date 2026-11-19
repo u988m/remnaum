@@ -4,7 +4,7 @@ tg?.expand?.();
 const $=id=>document.getElementById(id);
 const orderDialog = $("page-order");
 const rootPage = new URLSearchParams(location.search).get("section") === "account" ? "account" : "vpn";
-const primaryPages = new Set(["vpn", "bonuses", "devices", "support", "account"]);
+const primaryPages = new Set(["vpn", "bonuses", "devices", "account"]);
 const orderScreens = new Map();
 const scrollPositions = new Map();
 let screen = {page: rootPage, tab: rootPage, depth: 0, id: 0};
@@ -102,7 +102,9 @@ async function loadOffers(){
       $("trial-offer").hidden = false;
       $("trial-copy").textContent=d.trial.days+" дней · "+d.trial.traffic_gb+" ГБ · "+d.trial.device_limit+" устройств";
     }else{$("trial-offer").hidden = true}
-    $("promo-balance").textContent="Бонусные дни: "+d.promo_balance.days+" · Активировано кодов: "+d.promo_balance.claimed+". Бонус добавится к следующему оплаченному тарифу.";
+    $("promo-balance").textContent = d.promo_balance.days
+      ? countWith(d.promo_balance.days, dayWords) + " к следующей подписке"
+      : "Добавляет дни к следующей оплате";
   }catch(e){$("promo-balance").textContent="Бонусы пока недоступны"}
 }
 $("trial-claim").onclick=async()=>{
@@ -268,8 +270,9 @@ async function loadOrderMethods(order) {
   order.methodError = false;
   if (order === currentOrder()) renderOrder(order);
   try {
-    const {methods, terms_url: termsUrl} = await api("/api/v1/payment-methods");
+    const {methods, terms_url: termsUrl, presentation} = await api("/api/v1/payment-methods");
     order.methods = methods;
+    order.labels = presentation ? Object.fromEntries(presentation.map(item => [item.provider, item.label])) : providerLabels;
     order.termsUrl = termsUrl;
     const limit = availableExtraDevices(order);
     if (!order.upgrade && order.devices > limit) {
@@ -318,7 +321,7 @@ function renderPaymentMethods(order, methods, totals) {
       mark.textContent = providerMarks[provider];
       mark.setAttribute("aria-hidden", "true");
       const name = document.createElement("strong");
-      name.textContent = providerLabels[provider];
+      name.className = "payment-choice-name";
       const price = document.createElement("span");
       price.className = "payment-choice-price";
       option.append(mark, name, price, radio);
@@ -334,6 +337,7 @@ function renderPaymentMethods(order, methods, totals) {
   }
   for (const option of options.children) {
     const radio = option.querySelector("input");
+    option.querySelector(".payment-choice-name").textContent = order.labels[radio.value] || providerLabels[radio.value];
     radio.checked = radio.value === order.provider;
     radio.disabled = Boolean(order.busy);
     option.querySelector(".payment-choice-price").textContent =
@@ -345,7 +349,7 @@ function renderOrder(order) {
   const {plan, devices} = order;
   const limit = availableExtraDevices(order);
   const totals = orderTotals(order);
-  const methods = limit < order.minDevices ? [] : Object.keys(providerLabels).filter(key =>
+  const methods = limit < order.minDevices ? [] : Object.keys(order.labels || providerLabels).filter(key =>
     order.methods?.[key] && (key === "telegram_stars" ? totals.stars >= 1 : totals.rub > 0)
   );
   if (!methods.includes(order.provider)) order.provider = methods[0] || "";
@@ -376,7 +380,7 @@ function renderOrder(order) {
   $("order-method").classList.toggle("single-choice", methods.length === 1);
   if (methods.length === 1) $("order-method").open = false;
   $("order-method-mark").textContent = providerMarks[order.provider] || "";
-  $("order-method-name").textContent = providerLabels[order.provider] || "";
+  $("order-method-name").textContent = order.labels?.[order.provider] || "";
   $("order-total").textContent = canPay ? providerAmount(order.provider,
     order.provider === "telegram_stars" ? totals.stars : totals.rub) : "";
   $("order-consent").hidden = !order.termsUrl;
@@ -472,6 +476,7 @@ async function loadReadyPlans() {
       api("/api/v1/plans"), api("/api/v1/payment-methods").catch(() => null),
     ]);
     const methods = paymentInfo?.methods;
+    const rublesFirst = paymentInfo?.presentation?.[0]?.provider !== "telegram_stars";
     const rublesAvailable = !methods || Object.keys(providerLabels).some(key => key !== "telegram_stars" && methods[key]);
     availablePlans = new Map(result.items.map(plan => [plan.id, plan]));
     renderRenewalActions();
@@ -507,7 +512,9 @@ async function loadReadyPlans() {
       const prices = [];
       if (rublesAvailable && plan.price_rub_minor > 0) prices.push(money(plan.price_rub_minor));
       if ((!methods || methods.telegram_stars) && plan.price_stars > 0) {
-        prices.push(providerAmount("telegram_stars", plan.price_stars));
+        const stars = providerAmount("telegram_stars", plan.price_stars);
+        if (rublesFirst) prices.push(stars);
+        else prices.unshift(stars);
       }
       const total = document.createElement("span");
       total.className = "plan-total";
@@ -544,7 +551,14 @@ function renderProfile(profile, user) {
   const mark = name.trim().charAt(0).toUpperCase() || "R";
   $("store-mark").textContent = mark;
   $("landing-mark").textContent = mark;
-  const description = profile?.description?.trim() || profile?.tagline?.trim();
+  const tagline = profile?.tagline?.trim();
+  $("home-message").textContent = tagline || "";
+  $("home-message").hidden = !tagline;
+  const instructions = profile?.connection_instructions?.trim();
+  $("custom-guide").textContent = instructions || "";
+  $("custom-guide").hidden = !instructions;
+  $("default-guide").hidden = Boolean(instructions);
+  const description = profile?.description?.trim();
   if (description) {
     $("store-description").textContent = description;
     $("store-description").hidden = false;
@@ -573,6 +587,12 @@ function renderProfile(profile, user) {
   $("profile-name").textContent = user.first_name || "Покупатель";
   $("profile-monogram").textContent = $("profile-name").textContent.trim().charAt(0).toUpperCase();
   $("profile-id").textContent = user.id;
+  if (user.photo_url) {
+    const photo = $("profile-photo");
+    photo.onload = () => { photo.hidden = false; $("profile-monogram").hidden = true; };
+    photo.onerror = () => { photo.hidden = true; $("profile-monogram").hidden = false; };
+    photo.src = user.photo_url;
+  }
 }
 
 function renderRenewalActions() {

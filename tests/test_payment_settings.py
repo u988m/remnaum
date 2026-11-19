@@ -75,6 +75,20 @@ class PaymentSettingsPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(methods["telegram_stars"])
         self.assertEqual(stored, credentials)
 
+    async def test_editing_display_names_and_order_preserves_flags_and_credentials(self):
+        credentials = {"yookassa": {"shop_id": "shop", "secret_key": "private"}}
+        await store_settings.update_store_payment_settings({"yookassa": True}, credentials)
+        presentation = [{"provider": "yookassa", "label": "Банковская карта"},
+                        {"provider": "telegram_stars", "label": ""}]
+        saved = await store_settings.update_store_payment_settings({}, {}, presentation=presentation)
+        self.assertEqual(saved["presentation"][:2], [presentation[0], {"provider": "telegram_stars", "label": "Telegram Stars"}])
+        self.assertEqual(await store_settings.get_payment_presentation(), saved["presentation"])
+        methods, stored = await store_settings.get_store_payment_settings()
+        self.assertTrue(methods["yookassa"])
+        self.assertEqual(stored, credentials)
+        with self.assertRaises(ValueError):
+            await store_settings.update_store_payment_settings({}, {}, presentation=[presentation[0], presentation[0]])
+
 
 if __name__ == "__main__":
     unittest.main()

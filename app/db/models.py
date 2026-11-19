@@ -12,6 +12,7 @@ class User(Base):
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     username: Mapped[str | None] = mapped_column(String(64))
     display_name: Mapped[str | None] = mapped_column(String(80))
+    telegram_photo_url: Mapped[str | None] = mapped_column(Text)
     blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -80,6 +81,7 @@ class StorePaymentSettings(Base):
         "telegram_stars": True, "yookassa": False, "yoomoney": False, "cryptopay": False, "platega": False,
     }, nullable=False)
     encrypted_credentials: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    presentation: Mapped[list[dict] | None] = mapped_column(JSON(none_as_null=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

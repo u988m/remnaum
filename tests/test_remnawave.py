@@ -1,3 +1,4 @@
+import json
 import unittest
 from datetime import datetime, timezone
 
@@ -7,6 +8,17 @@ from app.services.remnawave import RemnawaveClient
 
 
 class RemnawaveClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_uses_filtered_user_list_when_legacy_telegram_lookup_is_absent(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/api/users/by-telegram-id/42":
+                return httpx.Response(404)
+            self.assertEqual(request.url.path, "/api/users")
+            self.assertEqual(json.loads(request.url.params["filters"]), [{"id": "telegramId", "value": "42"}])
+            return httpx.Response(200, json={"response": {"total": 1, "users": [{"id": 5, "telegramId": 42}]}})
+
+        client = RemnawaveClient("https://panel.example", "token", httpx.MockTransport(handler))
+        self.assertEqual((await client.get_users_by_telegram_id(42))["response"]["users"][0]["id"], 5)
+
     async def test_create_user_uses_bearer_auth_and_documented_payload(self):
         seen = {}
 

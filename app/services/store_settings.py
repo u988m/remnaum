@@ -20,6 +20,25 @@ REQUIRED_CREDENTIALS = {
     "platega": ("merchant_id", "secret_key"),
 }
 PROVIDER_LABELS = {"yookassa": "ЮKassa", "yoomoney": "ЮMoney", "cryptopay": "Crypto Pay", "platega": "Platega"}
+PAYMENT_LABELS = {"telegram_stars": "Telegram Stars", **PROVIDER_LABELS}
+
+
+def payment_presentation(entries: list[dict] | None = None) -> list[dict[str, str]]:
+    labels = {}
+    for item in entries or []:
+        provider, label = item["provider"], item["label"].strip()
+        if provider not in PAYMENT_LABELS or provider in labels or len(label) > 24:
+            raise ValueError("Проверьте названия и порядок способов оплаты.")
+        labels[provider] = label or PAYMENT_LABELS[provider]
+    return [{"provider": key, "label": label} for key, label in (labels | {
+        key: label for key, label in PAYMENT_LABELS.items() if key not in labels
+    }).items()]
+
+
+async def get_payment_presentation() -> list[dict[str, str]]:
+    async with SessionLocal() as session:
+        row = await session.get(StorePaymentSettings, 1)
+        return payment_presentation(row.presentation if row else None)
 
 
 def _cipher() -> Fernet:
@@ -60,9 +79,12 @@ async def is_payment_method_enabled(provider: str) -> bool:
         return bool(methods.get(provider, DEFAULT_METHODS.get(provider, False)))
 
 
-async def update_store_payment_settings(methods: dict[str, bool], credentials: dict[str, dict[str, str]]):
+async def update_store_payment_settings(methods: dict[str, bool], credentials: dict[str, dict[str, str]], *,
+                                        presentation: list[dict] | None = None):
     if methods.keys() - DEFAULT_METHODS.keys() or credentials.keys() - REQUIRED_CREDENTIALS.keys():
         raise ValueError("Неизвестный способ оплаты")
+    if presentation is not None:
+        presentation = payment_presentation(presentation)
     affected = (methods.keys() | credentials.keys()) & REQUIRED_CREDENTIALS.keys()
     async with SessionLocal() as session:
         await session.execute(insert(StorePaymentSettings).values(
@@ -86,6 +108,9 @@ async def update_store_payment_settings(methods: dict[str, bool], credentials: d
             if current[provider] and not result["configured"][provider]:
                 raise ValueError(f"Заполните реквизиты {PROVIDER_LABELS[provider]} перед включением.")
         row.methods = current
+        if presentation is not None:
+            row.presentation = presentation
+        result["presentation"] = payment_presentation(row.presentation)
         if credentials:
             row.encrypted_credentials = encrypt_credentials(stored)
         await session.commit()

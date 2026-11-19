@@ -521,13 +521,14 @@ main { max-width:1480px;padding:16px clamp(14px,3vw,36px) 44px; }
 
 .admin-header {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
     gap: 8px;
     align-items: center;
 }
 .admin-header .brand-logo { grid-column: 1; }
 .admin-header .brand-block { grid-column: 2; }
-#admin-back { grid-column: 3; }
+#admin-viewer { grid-column: 3; }
+#admin-back { grid-column: 4; }
 #admin-menu-open svg, .admin-icon-action svg, .admin-return-link svg {
     width: 18px;
     height: 18px;
@@ -547,11 +548,12 @@ main { max-width:1480px;padding:16px clamp(14px,3vw,36px) 44px; }
 .provider-webhook input { min-width: 0; }
 .provider-back { padding-inline: 4px; }
 @media (max-width: 850px) {
-    .admin-header { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+    .admin-header { grid-template-columns: auto auto minmax(0, 1fr) auto auto; }
     #admin-menu-open { grid-column: 1; }
     .admin-header .brand-logo { grid-column: 2; }
     .admin-header .brand-block { grid-column: 3; }
-    #admin-back { grid-column: 4; }
+    #admin-viewer { grid-column: 4; }
+    #admin-back { grid-column: 5; }
     .admin-header .brand-block small { font-size: .72rem; }
 }
 @media (max-width: 540px) {
@@ -561,3 +563,30 @@ main { max-width:1480px;padding:16px clamp(14px,3vw,36px) 44px; }
     .provider-tile { min-height: 48px; }
     .editor-group .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 }
+
+
+.viewer-avatar {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 36px;
+    height: 36px;
+    overflow: hidden;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 50%;
+    background: var(--color-surface-raised);
+    color: var(--color-text);
+    font-weight: 700;
+}
+.viewer-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.table-avatar { width: 30px; height: 30px; }
+.customer-identity { display: flex; align-items: center; gap: 8px; }
+.customer-identity > :last-child { min-width: 0; }
+.customers-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; max-width: 480px; }
+.customers-search button { margin: 0; }
+.payment-layout { margin-top: 12px; border: 1px solid var(--color-border); border-radius: var(--radius-control); padding: 0 12px; }
+.payment-layout summary { padding-block: 12px; cursor: pointer; font-weight: 650; }
+.payment-layout form { padding-bottom: 12px; }
+.payment-layout form > p { font-size: .84rem; }
+.payment-layout-row { display: grid; grid-template-columns: minmax(0, 1fr) 44px 44px; gap: 7px; align-items: end; }
+#payment-layout-feedback:not(:empty) { margin-top: 8px; }

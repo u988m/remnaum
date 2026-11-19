@@ -20,7 +20,7 @@ from app.services.plans import PlanQuote, quote_plan, selected_plan_for_user
 from app.services.squads import fetch_catalog, mode_squads, require_available
 from app.services.remnawave import RemnawaveClient
 from app.services.subscriptions import (
-    get_panel_user, has_panel_squads, matches_panel_account, paid_tariff_key, panel_expiry,
+    has_panel_squads, matches_panel_account, paid_tariff_key, panel_expiry, resolve_panel_user,
 )
 from app.services.store_profile import get_terms_url
 from app.services.users import BlockedCustomer
@@ -38,34 +38,39 @@ class PaymentProviderUnavailable(RuntimeError):
         super().__init__("Платёжная система не смогла создать счёт. Повторите попытку или выберите другой способ оплаты.")
 
 
-async def checkout_squads(session, user, plan) -> tuple[list[str], bool]:
+async def checkout_squads(session, user, plan) -> tuple[list[str], bool, bool]:
     selected = await mode_squads(session, "flexible") if plan is None else (plan.internal_squads or [])
     tariff_key = str(plan.id) if plan else "flexible"
-    preserve = await validate_checkout_access(session, user.id, user.telegram_id, tariff_key, selected)
-    return selected, preserve
+    preserve, recreate = await validate_checkout_access(
+        session, user.id, user.telegram_id, tariff_key, selected, allow_recreate=True,
+    )
+    return selected, preserve, recreate
 
 
-async def validate_checkout_access(session, user_id, telegram_id, tariff_key, selected, allow_preserve=True):
+async def validate_checkout_access(session, user_id, telegram_id, tariff_key, selected, *,
+                                   allow_preserve=True, allow_recreate=False):
     current = await session.scalar(select(Subscription).where(
         Subscription.user_id == user_id
     ).order_by(Subscription.created_at.desc(), Subscription.id.desc()).limit(1))
     try:
-        panel_user = await get_panel_user(RemnawaveClient(), telegram_id)
-        if current is not None and not matches_panel_account(current.panel_user_id, panel_user):
-            raise ValueError("Аккаунт подписки в Remnawave отсутствует или был заменён")
+        panel_user = await resolve_panel_user(RemnawaveClient(), telegram_id, current)
+        missing = current is not None and not panel_user
+        if missing and not allow_recreate:
+            raise ValueError("Аккаунт Remnawave исчез после создания счёта. Оформите заказ заново.")
         now = datetime.now(timezone.utc)
         remote_expiry = panel_expiry(panel_user)
         if (allow_preserve and tariff_key is not None and current is not None and current.status == "active" and current.expires_at
                 and current.expires_at > now and panel_user.get("status") == "ACTIVE"
                 and remote_expiry and remote_expiry > now and has_panel_squads(panel_user)
+                and matches_panel_account(current.panel_user_id, panel_user)
                 and await paid_tariff_key(session, current) == tariff_key):
-            return True
+            return True, False
         if not selected:
             require_available(selected, {})
         require_available(selected, await fetch_catalog())
     except httpx.HTTPError as exc:
         raise ValueError("Не удалось проверить доступ в Remnawave. Повторите попытку позже.") from exc
-    return False
+    return False, missing
 
 
 async def _payment_quote(
@@ -91,7 +96,7 @@ async def _payment_quote(
     return None, TariffQuote(draft.duration_days, draft.traffic_gb, draft.device_limit, amount, draft_quote.currency)
 
 
-def _order_snapshot(quote: TariffQuote, plan: TariffPlan | None, squads: list[str], preserve: bool) -> dict:
+def _order_snapshot(quote: TariffQuote, plan: TariffPlan | None, squads: list[str], preserve: bool, recreate: bool) -> dict:
     order = {
         "tariff": {
             "duration_days": quote.duration_days,
@@ -99,6 +104,7 @@ def _order_snapshot(quote: TariffQuote, plan: TariffPlan | None, squads: list[st
             "device_limit": quote.device_limit,
             "internal_squads": squads,
             "preserve_squads": preserve,
+            "allow_recreate": recreate,
         },
         "plan_id": plan.id if plan is not None else None,
     }
@@ -133,14 +139,14 @@ async def create_payment_for_user(
 
         if provider_name == "yoomoney" and quote.currency.upper() != "RUB":
             raise ValueError("Set TARIFF_CURRENCY=RUB to enable YooMoney wallet payments")
-        selected_squads, preserve = await checkout_squads(session, user, plan)
+        selected_squads, preserve, recreate = await checkout_squads(session, user, plan)
         payment = Payment(
             user_id=user.id,
             provider=provider_name,
             amount=amount_minor,
             currency=quote.currency,
             status="pending",
-            payload=json.dumps(_order_snapshot(quote, plan, selected_squads, preserve)),
+            payload=json.dumps(_order_snapshot(quote, plan, selected_squads, preserve, recreate)),
         )
         session.add(payment)
         await session.commit()
@@ -273,14 +279,14 @@ async def create_stars_payment_for_user(
             stars = quote.stars
         else:
             stars = await calculate_store_stars_price(quote.duration_days, quote.traffic_gb, quote.device_limit)
-        selected_squads, preserve = await checkout_squads(session, user, plan)
+        selected_squads, preserve, recreate = await checkout_squads(session, user, plan)
         payment = Payment(
             user_id=user.id,
             provider="telegram_stars",
             amount=stars,
             currency="XTR",
             status="pending",
-            payload=json.dumps(_order_snapshot(quote, plan, selected_squads, preserve) | {
+            payload=json.dumps(_order_snapshot(quote, plan, selected_squads, preserve, recreate) | {
                 "terms_version": settings.telegram_terms_version,
             }),
         )
@@ -323,6 +329,7 @@ async def validate_stars_pre_checkout(
                     session, payment.user_id, telegram_id, tariff_key,
                     snapshot.get("internal_squads", settings.remnawave_internal_squad_ids),
                     allow_preserve=snapshot.get("preserve_squads", True),
+                    allow_recreate=snapshot.get("allow_recreate", False),
                 )
         except (ValueError, RuntimeError, TimeoutError):
             return False

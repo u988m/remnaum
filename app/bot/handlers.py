@@ -24,7 +24,9 @@ from app.services.payment_providers import VerifiedPayment
 from app.services.payment_service import settle_payment
 from app.services.subscriptions import get_user_subscription, provision_paid_payment
 from app.services.users import get_or_create_user
-from app.services.store_settings import PROVIDER_LABELS, is_payment_method_enabled, get_store_payment_settings, public_payment_settings
+from app.services.store_settings import (
+    PROVIDER_LABELS, get_payment_presentation, get_store_payment_settings, is_payment_method_enabled, public_payment_settings,
+)
 from app.services.store_profile import get_terms_url
 from app.services.store_profile import get_store_profile
 from app.services.store_media import welcome_image_path
@@ -69,7 +71,9 @@ SUBSCRIPTION_STATUS = {
 
 
 async def home_text(telegram_id: int, profile: dict) -> str:
-    lines = [f"<b>{escape(profile['name'])}</b>", escape(profile["tagline"] or "Ваш VPN — ваши правила")]
+    lines = [f"<b>{escape(profile['name'])}</b>"]
+    if tagline := profile.get("tagline"):
+        lines.append(escape(tagline))
     if description := profile.get("description"):
         lines.extend(("", escape(description)))
     if subscription := await get_user_subscription(telegram_id):
@@ -296,14 +300,17 @@ async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
     else:
         methods, credentials = await get_store_payment_settings()
         configured = public_payment_settings(methods, credentials)["configured"]
-        if quote.stars is not None and methods.get("telegram_stars") and configured.get("telegram_stars"):
-            rows.append([InlineKeyboardButton(text=f"⭐ Stars · {quote.stars}", callback_data=f"plan:pay:stars:{key}")])
-        if quote.amount_minor > 0:
-            for provider, title in PROVIDER_LABELS.items():
-                if methods.get(provider) and configured.get(provider):
-                    rows.append([InlineKeyboardButton(
-                        text=f"💳 {title} · {quote.amount_minor / 100:.2f} ₽", callback_data=f"plan:pay:{provider}:{key}",
-                    )])
+        for item in await get_payment_presentation():
+            provider, label = item["provider"], item["label"]
+            if not methods.get(provider) or not configured.get(provider):
+                continue
+            if provider == "telegram_stars":
+                if quote.stars is not None:
+                    rows.append([InlineKeyboardButton(text=f"⭐ {label} · {quote.stars}", callback_data=f"plan:pay:stars:{key}")])
+            elif quote.amount_minor > 0:
+                rows.append([InlineKeyboardButton(
+                    text=f"💳 {label} · {quote.amount_minor / 100:.2f} ₽", callback_data=f"plan:pay:{provider}:{key}",
+                )])
         text = "Выберите способ оплаты." if rows else "Для этого заказа нет доступных способов оплаты."
     rows.append([InlineKeyboardButton(text="← Назад", callback_data=f"plan:select:{plan_id}:{extras}{suffix}")])
     await edit_menu_message(callback.message, f"{_plan_summary(quote)}\n\n{text}",

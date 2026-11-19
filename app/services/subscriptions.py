@@ -24,7 +24,7 @@ def _unwrap(data: Any) -> dict[str, Any]:
 
 
 def _panel_identity(user: dict[str, Any]) -> int | str:
-    value = user.get("id") if user.get("id") is not None else user.get("uuid")
+    value = user.get("uuid") or user.get("id")
     if value is None or value == "":
         raise RuntimeError("Remnawave user has no id/uuid")
     return int(value) if str(value).isdigit() else str(value)
@@ -42,6 +42,55 @@ async def get_panel_user(panel, telegram_id):
 def matches_panel_account(panel_user_id: int | str, panel_user):
     return any(panel_user.get(key) is not None and str(panel_user[key]) == str(panel_user_id)
                for key in ("id", "uuid"))
+
+
+class PanelAccountConflict(ValueError):
+    def __init__(self):
+        super().__init__("Не удалось однозначно связать аккаунт Remnawave с вашим Telegram. Напишите в поддержку.")
+
+
+async def resolve_panel_user(panel, telegram_id: int, subscription: Subscription | None) -> dict:
+    named = await get_panel_user(panel, telegram_id)
+    stored_id = subscription.panel_user_id if subscription else None
+    owner_ids = (telegram_id, str(telegram_id))
+    stored_id_unrecognized = False
+    if named and named.get("telegramId") in (None, *owner_ids):
+        if not subscription or matches_panel_account(stored_id, named):
+            return named
+    if stored_id:
+        try:
+            stored = _unwrap(await panel.get_user(stored_id))
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in (400, 404, 422):
+                raise
+            stored_id_unrecognized = exc.response.status_code != 404
+            stored = {}
+        if stored:
+            if not matches_panel_account(stored_id, stored) or stored.get("telegramId") not in (None, *owner_ids):
+                raise PanelAccountConflict()
+            if named and not matches_panel_account(stored_id, named) and named.get("telegramId") in owner_ids:
+                raise PanelAccountConflict()
+            return stored
+    if not subscription and not named:
+        return {}
+
+    result = await panel.get_users_by_telegram_id(telegram_id)
+    entries = result.get("response") if isinstance(result, dict) else result
+    if isinstance(entries, dict):
+        users = entries.get("users")
+        total = entries.get("total")
+        if not isinstance(users, list) or not isinstance(total, int) or total > len(users):
+            raise PanelAccountConflict()
+        entries = users
+    if not isinstance(entries, list):
+        raise PanelAccountConflict()
+    candidates = {}
+    for entry in ([named] if named else []) + entries:
+        if isinstance(entry, dict) and entry.get("telegramId") in owner_ids:
+            candidates[_panel_identity(entry)] = entry
+    if len(candidates) > 1 or ((named or stored_id_unrecognized) and not candidates):
+        raise PanelAccountConflict()
+    return next(iter(candidates.values()), {})
 
 
 def has_panel_squads(panel_user):
@@ -116,8 +165,8 @@ async def provision_paid_payment(payment_id: int) -> bool:
         traffic_bytes = traffic_gb * 1024 * 1024 * 1024
         panel = RemnawaveClient()
 
-        panel_user = await get_panel_user(panel, user.telegram_id)
-        if subscription is not None and not matches_panel_account(subscription.panel_user_id, panel_user):
+        panel_user = await resolve_panel_user(panel, user.telegram_id, subscription)
+        if subscription is not None and not panel_user and not snapshot.get("allow_recreate"):
             raise RuntimeError("Panel account missing or replaced for existing subscription")
 
         marker = f"remnaum-payment:{payment_id}"
@@ -134,7 +183,8 @@ async def provision_paid_payment(payment_id: int) -> bool:
                     raise RuntimeError("Retry the previously applied payment first")
             if marker not in markers:
                 current_key = await paid_tariff_key(session, subscription) if subscription else None
-                same_tariff = tariff_key is not None and tariff_key == current_key
+                same_tariff = (tariff_key is not None and tariff_key == current_key
+                               and matches_panel_account(subscription.panel_user_id if subscription else None, panel_user))
                 # Older orders have no checkout decision. Preserve only known renewals
                 # or legacy orders without tariff identity against a paid subscription.
                 if "preserve_squads" in snapshot:
@@ -153,7 +203,8 @@ async def provision_paid_payment(payment_id: int) -> bool:
                     selected = snapshot.get("internal_squads", settings.remnawave_internal_squad_ids)
                     require_available(selected, await fetch_catalog())
                 now = datetime.now(timezone.utc)
-                new_expiry = max(panel_expiry(panel_user) or now, now) + timedelta(days=total_days)
+                local_expiry = subscription.expires_at if subscription else None
+                new_expiry = max(panel_expiry(panel_user) or now, local_expiry or now, now) + timedelta(days=total_days)
                 description_parts = [part.strip() for part in description.split("|")]
                 new_description = " | ".join([
                     part for part in description_parts
@@ -169,7 +220,9 @@ async def provision_paid_payment(payment_id: int) -> bool:
                 )
             panel_user = _unwrap(await panel.get_user(panel_user_id))
         else:
-            expire_at = datetime.now(timezone.utc) + timedelta(days=total_days)
+            now = datetime.now(timezone.utc)
+            local_expiry = subscription.expires_at if subscription else None
+            expire_at = max(local_expiry or now, now) + timedelta(days=total_days)
             squads = snapshot.get("internal_squads", settings.remnawave_internal_squad_ids)
             if not squads:
                 raise RuntimeError("No Internal Squads configured for VPN issuance")
