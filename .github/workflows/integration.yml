@@ -19,6 +19,7 @@ jobs:
           cp .env.example .env
           # Replace the documented placeholder before starting production-mode containers.
           sed -i 's|^APP_SECRET_KEY=.*|APP_SECRET_KEY=integration-test-only-secret-do-not-use-in-production-123456|' .env
+          sed -i 's|^TELEGRAM_WEBHOOK_SECRET=.*|TELEGRAM_WEBHOOK_SECRET=integration-test-only-webhook-secret-123456789|' .env
           chmod 600 .env
           if [ "${{ matrix.mode }}" = panel ]; then
             sed -i 's|^DEPLOY_MODE=.*|DEPLOY_MODE=panel|' .env
