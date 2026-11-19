@@ -1,3 +1,4 @@
+import logging
 from html import escape
 from urllib.parse import urlsplit
 
@@ -32,6 +33,7 @@ from app.db.models import Payment, User
 from app.db.session import SessionLocal
 from sqlalchemy import select
 
+logger = logging.getLogger(__name__)
 router = Router(name="user")
 
 
@@ -123,9 +125,8 @@ async def start_handler(message: Message) -> None:
                 FSInputFile(image),
                 caption=f"<b>{escape(profile['name'])}</b> · {escape(profile['tagline'])}",
             )
-        except Exception:
-            # A broken upload or Telegram photo failure must never block /start.
-            pass
+        except Exception as exc:
+            logger.warning("Could not send welcome photo: %s", type(exc).__name__)
     await message.answer(
         f"<b>{escape(profile['name'])}</b>\n"
         f"{escape(profile['description']) or 'Выберите подходящую подписку.'}\n\n"

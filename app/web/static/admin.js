@@ -10,6 +10,7 @@ async function loadPayments(){const d=await api("/admin/api/payments?limit="+pag
 async function adminApi(method,path,body){const r=await fetch(path,{method,headers:{"X-Telegram-Init-Data":tg?.initData||"","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(typeof d.detail==="string"?d.detail:"Ошибка запроса");return d}
 let squadItems = [];
 let selectedSquads = [];
+let modeSquads = null;
 function renderSquads() {
   const query = $("squads-search").value.trim().toLocaleLowerCase();
   const selected = $("squads-selected");
@@ -52,7 +53,9 @@ async function loadSquads(refresh = false) {
     $("squads-status").textContent = (data.failed ? "⚠ Ошибка синхронизации. " : "")
       + (data.last_success ? "Последнее обновление: " + new Date(data.last_success).toLocaleString() : "Список ещё не получен");
     renderSquads();
+    renderModePolicies();
   } catch (error) {
+    renderModePolicies();
     $("squads-status").textContent = "⚠ Ошибка загрузки списка: " + error.message;
   } finally {
     control.disabled = false;
@@ -61,36 +64,61 @@ async function loadSquads(refresh = false) {
 $("squads-search").oninput = renderSquads;
 $("squads-refresh").onclick = () => loadSquads(true);
 let cachedPlans=[];
-async function loadPlans(){
-  await loadSquads();
-  const policies = await adminApi("GET", "/admin/api/squad-policies");
+function renderModePolicies() {
+  if (!modeSquads) return;
   const container = $("mode-policies");
   container.replaceChildren();
   for (const [mode, title] of [["flexible", "Гибкий конструктор"], ["trial", "Пробный доступ"]]) {
-    const label = document.createElement("label");
-    label.textContent = title;
-    const select = document.createElement("select");
-    select.multiple = true;
-    const keys = new Set([...policies[mode], ...squadItems.map(item => item.uuid)]);
+    const fieldset = document.createElement("fieldset");
+    const legend = document.createElement("legend");
+    legend.textContent = title;
+    fieldset.append(legend);
+    const choices = document.createElement("div");
+    choices.className = "mode-squad-options";
+    const selected = modeSquads[mode];
+    const keys = new Set([...selected, ...squadItems.map(item => item.uuid)]);
+    if (!keys.size) choices.textContent = "Список сквадов пока пуст";
     for (const key of keys) {
       const item = squadItems.find(row => row.uuid === key);
-      const option = new Option((item?.name || "") + " · " + key + (item?.available ? "" : " ⚠ Недоступен"), key);
-      option.selected = policies[mode].includes(key);
-      option.disabled = !item?.available && !option.selected;
-      select.add(option);
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = selected.has(key);
+      checkbox.disabled = !item?.available && !checkbox.checked;
+      checkbox.onchange = () => {
+        if (checkbox.checked) selected.add(key);
+        else selected.delete(key);
+      };
+      const name = document.createElement("span");
+      name.textContent = (item?.name || "Сквад") + " · " + key + (item?.available ? "" : " ⚠ Недоступен");
+      label.append(checkbox, name);
+      choices.append(label);
     }
-    label.appendChild(select);
     const save = document.createElement("button");
+    save.type = "button";
     save.className = "action";
     save.textContent = "Сохранить · " + title;
     save.onclick = async () => {
+      save.disabled = true;
       try {
-        await adminApi("PUT", "/admin/api/squad-policies/" + mode, Array.from(select.selectedOptions, o => o.value));
+        await adminApi("PUT", "/admin/api/squad-policies/" + mode, [...selected]);
         $("status").textContent = "Настройки сохранены";
-      } catch (error) { $("status").textContent = error.message; }
+      } catch (error) {
+        $("status").textContent = error.message;
+      } finally {
+        save.disabled = false;
+      }
     };
-    container.append(label, save);
+    fieldset.append(choices, save);
+    container.append(fieldset);
   }
+}
+async function loadPlans(){
+  if (!modeSquads) {
+    const policies = await adminApi("GET", "/admin/api/squad-policies");
+    modeSquads = {flexible: new Set(policies.flexible), trial: new Set(policies.trial)};
+  }
+  await loadSquads();
   const d=await adminApi("GET","/admin/api/plans");cachedPlans=d.items;$("plans-table").replaceChildren();
   d.items.forEach(p=>{
     row("plans-table",[p.title,p.duration_days+" д / "+p.traffic_gb+" ГБ / "+p.device_limit+" уст.",(p.price_rub_minor/100).toFixed(2),p.price_stars,p.is_active?"Активен":"Скрыт"]);

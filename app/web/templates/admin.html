@@ -33,7 +33,11 @@
 <section class="section" id="plans-view" hidden>
 <div class="toolbar"><h2>Готовые тарифы</h2><button class="action" id="plans-refresh">Обновить</button></div>
 <p class="muted">Создайте тарифы с отдельными ценами в рублях и Telegram Stars. Неактивные планы скрываются от покупателей.</p>
-<fieldset><legend>Доступ по режимам</legend>
+<div class="toolbar">
+<button class="action" id="squads-refresh" type="button">Обновить список сквадов</button>
+<span id="squads-status" role="status"></span>
+</div>
+<fieldset class="squad-settings"><legend>Доступ по режимам</legend>
 <div id="mode-policies"></div>
 </fieldset>
 <form id="plan-form">
@@ -49,8 +53,6 @@
 <label>Активен<input id="plan-active" type="checkbox" checked></label>
 </div>
 <fieldset><legend>Internal Squads</legend>
-<button class="action" id="squads-refresh" type="button">Обновить список сквадов</button>
-<p id="squads-status" role="status"></p>
 <p id="squads-policy"></p>
 <div id="squads-selected" aria-label="Выбранные сквады"></div>
 <label>Поиск по названию<input type="search" id="squads-search"></label>
