@@ -360,6 +360,19 @@ $("referral-form").onsubmit=async e=>{
     $("status").textContent="Реферальная программа сохранена";
   }catch(err){$("status").textContent=err.message}
 };
+const adminSidebar=$("admin-sidebar"), adminMenuOpen=$("admin-menu-open"), adminBackdrop=$("admin-menu-backdrop");
+let adminReturnFocus=null;
+function setAdminMenu(open) {
+  adminSidebar.classList.toggle("is-open",open);
+  adminBackdrop.hidden=!open;
+  adminMenuOpen.setAttribute("aria-expanded",String(open));
+  if(open){adminReturnFocus=document.activeElement; adminSidebar.querySelector('[data-tab][aria-current="page"]')?.focus();}
+  else if(adminReturnFocus?.isConnected){adminReturnFocus.focus({preventScroll:true});adminReturnFocus=null;}
+}
+adminMenuOpen.onclick=()=>setAdminMenu(true);
+$("admin-menu-close").onclick=()=>setAdminMenu(false);
+adminBackdrop.onclick=()=>setAdminMenu(false);
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&adminSidebar.classList.contains("is-open"))setAdminMenu(false);});
 const tabs = {
   overview: {sections: ["overview-view"]},
   plans: {sections: ["plans-view"], load: loadPlans},
@@ -383,9 +396,11 @@ async function openTab(requested) {
     const button = document.querySelector(`nav [data-tab="${name}"]`);
     if (tab === item) {
       button.setAttribute("aria-current", "page");
-      button.scrollIntoView({block: "nearest", inline: "nearest"});
+      $("admin-mobile-title").textContent=button.textContent.trim();
+      if(window.matchMedia("(min-width: 851px)").matches)button.scrollIntoView({block: "nearest", inline: "nearest"});
     } else button.removeAttribute("aria-current");
   }
+  if(adminSidebar.classList.contains("is-open"))setAdminMenu(false);
   try { await tab.load?.(); }
   catch (error) { $("status").textContent = error.message; }
 }

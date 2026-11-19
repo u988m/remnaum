@@ -10,15 +10,25 @@
 </header>
 <div id="loading" class="section access-loading" role="status">Проверяем права владельца…</div>
 <div id="dashboard" hidden>
+<div class="admin-mobile-bar"><button id="admin-menu-open" type="button" class="action" aria-expanded="false" aria-controls="admin-sidebar">☰ Меню</button><strong id="admin-mobile-title">Дашборд</strong></div>
+<button type="button" class="admin-menu-backdrop" id="admin-menu-backdrop" aria-label="Закрыть меню" hidden></button>
+<aside class="admin-sidebar" id="admin-sidebar" aria-label="Навигация админки">
+<div class="sidebar-heading"><span class="eyebrow">REMNAUM / CONTROL</span><button type="button" id="admin-menu-close" aria-label="Закрыть меню">✕</button></div>
+<p class="sidebar-category">ОБЗОР</p>
 <nav class="admin-tabs" aria-label="Разделы управления">
   <button aria-current="page" data-tab="overview" type="button">Дашборд</button>
+  <p class="sidebar-category">УПРАВЛЕНИЕ</p>
   <button data-tab="plans" type="button">Тарифы</button>
   <button data-tab="users" type="button">Пользователи</button>
   <button data-tab="payments" type="button">Платежи</button>
+  <p class="sidebar-category">МАГАЗИН</p>
   <button data-tab="bonuses" type="button">Бонусы</button>
   <button data-tab="brand" type="button">Магазин</button>
   <button data-tab="settings" type="button">Настройки</button>
 </nav>
+<a class="admin-return-link" href="/app">← В магазин</a>
+</aside>
+<div class="admin-workspace">
 <section id="overview-view">
   <h1>Дашборд</h1>
   <p class="muted" id="welcome"></p>
@@ -174,5 +184,6 @@
 <button class="action primary" id="pricing-save">Сохранить формулу цен</button>
 </section>
 <div id="status" class="status" role="status"></div>
+</div>
 </div></main>
 <script src="/static/admin.js" defer></script></body></html>
