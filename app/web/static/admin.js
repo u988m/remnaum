@@ -1,4 +1,5 @@
 const tg=window.Telegram?.WebApp;tg?.ready?.();tg?.expand?.();const $=id=>document.getElementById(id);let userOffset=0,paymentOffset=0;const pageSize=20;
+if (tg?.isVersionAtLeast?.("6.1") ?? true) tg?.BackButton?.hide?.();
 async function api(path){const r=await fetch(path,{headers:{"X-Telegram-Init-Data":tg?.initData||""}});const d=await r.json();if(!r.ok)throw Error(d.detail||"Ошибка запроса");return d}
 function cell(value){const td=document.createElement("td");td.textContent=value??"—";return td}
 function row(target,values){const tr=document.createElement("tr");values.forEach(v=>tr.appendChild(cell(v)));$(target).appendChild(tr)}
@@ -992,7 +993,6 @@ function setAdminMenu(open) {
   document.querySelector(".admin-workspace").inert = open;
   adminBackdrop.hidden=!open;
   adminMenuOpen.setAttribute("aria-expanded",String(open));
-  syncAdminBack();
   if(open){adminReturnFocus=document.activeElement; adminSidebar.querySelector('[data-tab][aria-current="page"]')?.focus();}
   else if(adminReturnFocus?.isConnected){adminReturnFocus.focus({preventScroll:true});adminReturnFocus=null;}
 }
@@ -1046,8 +1046,6 @@ function syncAdminBack() {
   const hasParent = Boolean(parentFor(activeFrame));
   const canGoBack = Boolean(activeFrame.depth || hasParent || fromProfile);
   $("admin-back").hidden = !canGoBack || hasParent;
-  if (canGoBack || adminSidebar.classList.contains("is-open")) tg?.BackButton?.show?.();
-  else tg?.BackButton?.hide?.();
 }
 
 async function renderAdminFrame(frame) {
@@ -1134,7 +1132,6 @@ function goAdminBack(fallback = null) {
 }
 
 $("admin-back").onclick = () => goAdminBack();
-tg?.BackButton?.onClick?.(() => goAdminBack());
 window.addEventListener("popstate", event => {
   if (!activeFrame || !event.state?.adminPanel) return;
   adminScroll.set(activeFrame.id, window.scrollY);
