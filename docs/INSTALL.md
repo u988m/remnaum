@@ -45,7 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/u988m/remnaum/main/bootstrap.sh | s
 
 ## 🖥️ Два режима установки
 
-| | С панелью Remnawave | Отдельный VPS |
+| Параметр | Рядом с Remnawave | Отдельный VPS |
 | --- | --- | --- |
 | Выбор мастера | `panel` | `standalone` |
 | Порты 80 и 443 | Остаются у существующего прокси | Использует Caddy |
@@ -90,9 +90,9 @@ sudo sh install.sh --mode panel --proxy-network ИМЯ_СЕТИ
 
 Если 80/443 заняты, мастер предложит совместное использование существующего прокси вместо остановки других служб.
 
-## ⚙️ Что настроить после установки
+## ⚙️ Настройка после установки
 
-### Telegram
+### Telegram и оформление магазина
 
 Откройте [@BotFather](https://t.me/BotFather), выберите вашего бота и укажите URL Mini App:
 
@@ -175,29 +175,11 @@ cd /opt/remnaum
 sudo bash backup.sh
 ```
 
-## 💾 Полные резервные копии и восстановление
-
-После установки мастер доступен **из любой папки**:
-
-```bash
-remnaum
-```
-
-В главном меню выберите **3 — Резервные копии и восстановление**. Из меню можно создать полную копию прямо сейчас, восстановить архив, настроить периодические копии или посмотреть сохранённые файлы.
-
-- **Периодичность:** раз в час, раз в день или отключено.
-- **Хранение:** `/opt/remnaum/backups` при стандартном пути установки; количество хранимых копий задаётся владельцем.
-- **Содержимое:** PostgreSQL, Redis, `.env`, локальные настройки, исходные файлы Remnaum и конфигурации Docker.
-- **Защита:** архивы с расширением `.rmb` шифруются; при первом запуске создаётся ключ восстановления или можно выбрать собственный. **Сохраните ключ отдельно от VPS.** Без ключа архив нельзя восстановить.
-- **Telegram:** по желанию зашифрованные архивы отправляются в чат через **того же бота**. Введите Telegram chat ID (можно свой ID администратора) и заранее отправьте боту `/start`. Очень большие архивы остаются на сервере.
-- **Восстановление:** выберите `.rmb`, подтвердите замену локальной базы и файлов. Перед заменой существующего магазина мастер создаёт ещё одну аварийную копию. Внешняя Remnawave и её данные при восстановлении не затрагиваются.
-
-> Резервная копия магазина не включает удалённую базу панели Remnawave и чужую конфигурацию её прокси. Если восстанавливаете на другой VPS, проверьте DNS и подключение к панели.
+> Резервная копия Remnaum не включает базу удалённой панели Remnawave или конфигурацию её прокси. После переноса на другой VPS проверьте DNS и подключение к панели.
 
 ## 🔄 Обновление и обслуживание
 
 При обновлении Remnaum ещё раз запрашивает Internal Squads у Remnawave и автоматически добавляет новые группы. Если панель временно не отвечает, **прежний список UUID не стирается**, а магазин продолжает работать. Все обнаруженные группы будут назначаться новым покупателям (включая группы с привилегированным доступом), поэтому при необходимости ограничьте их на стороне панели.
-
 
 Если использовали стандартный путь установки:
 
@@ -244,15 +226,17 @@ systemctl status remnaum-update-check.timer
 
 ## 💬 Сообщество
 
-<p align="center"><strong>Следите за обновлениями, делитесь идеями и задавайте вопросы</strong></p>
+<p align="center"><strong>Обновления, предложения, вопросы и сообщения об ошибках</strong></p>
 
-<p align="center">
-  <a href="https://t.me/remnaum/3"><img alt="Баги" src="https://img.shields.io/badge/%D0%91%D0%B0%D0%B3%D0%B8-D94A5B?style=for-the-badge&amp;logo=telegram&amp;logoColor=white"></a>
-  <a href="https://t.me/remnaum/4"><img alt="Обновления" src="https://img.shields.io/badge/%D0%9E%D0%B1%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F-3978E6?style=for-the-badge&amp;logo=telegram&amp;logoColor=white"></a>
-</p>
-<p align="center">
-  <a href="https://t.me/remnaum/5"><img alt="Предложения" src="https://img.shields.io/badge/%D0%9F%D1%80%D0%B5%D0%B4%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B8%D1%8F-8A56CF?style=for-the-badge&amp;logo=telegram&amp;logoColor=white"></a>
-  <a href="https://t.me/remnaum/6"><img alt="Помощь" src="https://img.shields.io/badge/%D0%9F%D0%BE%D0%BC%D0%BE%D1%89%D1%8C-159B84?style=for-the-badge&amp;logo=telegram&amp;logoColor=white"></a>
-</p>
+<table align="center">
+  <tr>
+    <td align="center"><a href="https://t.me/remnaum/3"><img src="../assets/community-bugs.svg" alt="Баги" width="176" height="40"></a></td>
+    <td align="center"><a href="https://t.me/remnaum/4"><img src="../assets/community-updates.svg" alt="Обновления" width="176" height="40"></a></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="https://t.me/remnaum/5"><img src="../assets/community-ideas.svg" alt="Предложения" width="176" height="40"></a></td>
+    <td align="center"><a href="https://t.me/remnaum/6"><img src="../assets/community-help.svg" alt="Помощь" width="176" height="40"></a></td>
+  </tr>
+</table>
 
 [← Вернуться в README](../README.md)
