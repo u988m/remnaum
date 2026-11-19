@@ -320,6 +320,43 @@ class BackupTests(unittest.TestCase):
                 backup._safe_extract(archive, target)
             self.assertEqual((target / path).read_bytes(), content)
 
+    def test_telegram_upload_streams_archive_in_bounded_chunks(self):
+        from unittest.mock import MagicMock
+
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "backup.rmb"
+            with archive.open("wb") as handle:
+                for _ in range(3):
+                    handle.write(os.urandom(1024 * 1024))
+            connection = MagicMock()
+            connection.getresponse.return_value.status = 200
+            connection.getresponse.return_value.read.return_value = b'{"ok":true}'
+
+            with patch.object(backup, "_bot_token", return_value="example-token"), \
+                 patch.object(backup.http.client, "HTTPSConnection", return_value=connection), \
+                 patch.object(Path, "read_bytes", side_effect=AssertionError("must stream")):
+                backup.send_to_telegram(archive, "123456789")
+
+            sent = [call.args[0] for call in connection.send.call_args_list]
+            self.assertEqual(len(sent), 5)  # header, three 1 MiB blocks, footer
+            self.assertEqual(sum(map(len, sent)), archive.stat().st_size + len(sent[0]) + len(sent[-1]))
+            self.assertLessEqual(max(map(len, sent)), 1024 * 1024)
+            connection.close.assert_called_once()
+
+    def test_telegram_upload_rejection_still_closes_connection(self):
+        from unittest.mock import MagicMock
+
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "backup.rmb"
+            archive.write_bytes(b"encrypted")
+            connection = MagicMock()
+            connection.getresponse.return_value.status = 503
+            with patch.object(backup, "_bot_token", return_value="example-token"), \
+                 patch.object(backup.http.client, "HTTPSConnection", return_value=connection):
+                with self.assertRaisesRegex(RuntimeError, "HTTP 503"):
+                    backup.send_to_telegram(archive, "123456789")
+            connection.close.assert_called_once()
+
     def test_backup_directory_rotation(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(backup, "BACKUPS", Path(temp)):
             for i in range(8):
