@@ -37,6 +37,11 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         for panel in ('shop', 'vpn', 'bonuses', 'account'):
             self.assertIn(f'id="page-{panel}"', mini)
             self.assertIn(f'data-page="{panel}"', mini)
+        for page in ("home", "order", "devices", "purchases", "support", "guide"):
+            self.assertIn(f'id="page-{page}"', mini)
+        for html in (mini, admin):
+            self.assertIn('href="/static/theme.css"', html)
+            self.assertIn('data-theme="monochrome"', html)
         self.assertIn('id="hero-image"', mini)
         self.assertIn('id="copy-referral"', mini)
 
@@ -58,6 +63,22 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
             check = subprocess.run(["node", "--check"], input=js, text=True, capture_output=True)
             self.assertEqual(check.returncode, 0, f"{name}: {check.stderr}")
             self.assertTrue((STATIC / f"{name}.css").is_file())
+
+    def test_plan_payload_converts_rubles_without_rounding_and_accepts_legacy_keys(self):
+        from pydantic import ValidationError
+        from app.web.routes import PlanPayload
+
+        current = {"name": "Test", "days": 7, "traffic_gb": 0, "devices_included": 2,
+                   "price_rub": "199.90", "extra_device_price_rub": "49.05", "price_stars": 10}
+        plan = PlanPayload.model_validate(current)
+        self.assertEqual((plan.price_rub_minor, plan.extra_device_price_rub_minor), (19990, 4905))
+        with self.assertRaises(ValidationError):
+            PlanPayload.model_validate(current | {"extra_device_price_rub": "49.051"})
+        legacy = PlanPayload.model_validate({
+            "title": "Legacy", "duration_days": 30, "traffic_gb": 50, "device_limit": 1,
+            "price_rub_minor": 19990, "price_stars": 10,
+        })
+        self.assertNotIn("extra_device_price_rub_minor", legacy.model_dump(exclude_unset=True))
 
     def test_new_tables_start_without_demo_data(self):
         for cls in (ReferralSettings, ReferralReward, RemnawaveEvent):

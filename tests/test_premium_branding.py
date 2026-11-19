@@ -38,6 +38,18 @@ class StoreWelcomeImageTests(unittest.TestCase):
                 store_media.delete_welcome_image()
                 self.assertIsNone(store_media.welcome_image_url())
 
+    def test_square_logo_has_separate_storage_and_url(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(store_media, "DATA_DIR", Path(folder)), \
+                 patch.object(store_media, "WELCOME_IMAGE", Path(folder) / "welcome.jpg"):
+                store_media.save_welcome_image(self.make_picture())
+                self.assertIn("/logo-image?v=", store_media.save_logo_image(self.make_picture((800, 800))))
+                with Image.open(store_media.image_path("logo")) as logo:
+                    self.assertEqual(logo.size, (512, 512))
+                store_media.delete_logo_image()
+                self.assertIsNone(store_media.logo_image_url())
+                self.assertTrue(store_media.welcome_image_path().is_file())
+
     def test_rejects_invalid_format_and_large_pixel_count(self):
         with tempfile.TemporaryDirectory() as root:
             with patch.object(store_media, "DATA_DIR", Path(root)), \
@@ -84,6 +96,7 @@ class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
                    "description": "Всё под рукой"}
         with patch("app.bot.handlers.get_or_create_user", new_callable=AsyncMock) as register, \
              patch("app.bot.handlers.get_store_profile", new_callable=AsyncMock) as branding, \
+             patch("app.bot.handlers.get_user_subscription", AsyncMock(return_value={"status": "active"})), \
              patch("app.bot.handlers.welcome_image_path", return_value=Path("/tmp/welcome.jpg")):
             register.return_value = False
             branding.return_value = profile
@@ -92,8 +105,32 @@ class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
         message.answer.assert_awaited_once()
         photo_caption = message.answer_photo.call_args.kwargs["caption"]
         self.assertIn("Личный VPN", photo_caption)
+        self.assertIn("Активна", message.answer.call_args.args[0])
         markup = message.answer.call_args.kwargs["reply_markup"]
         self.assertEqual(len(markup.inline_keyboard[0]), 2)
+
+    async def test_ready_plan_review_binds_price_and_device_count_to_confirmation(self):
+        from app.bot.handlers import fixed_plan_handler
+        from app.db.models import TariffPlan
+        from app.services.plans import plan_revision
+
+        plan = TariffPlan(
+            id=4, title="Безлимит", duration_days=30, traffic_gb=0, device_limit=2,
+            price_rub_minor=39000, extra_device_price_rub_minor=9000,
+            price_stars=190, extra_device_price_stars=None, is_active=True,
+        )
+        message = SimpleNamespace(edit_text=AsyncMock())
+        callback = SimpleNamespace(message=message, answer=AsyncMock(), data="plan:select:4:2")
+        with patch("app.bot.handlers.get_plan", AsyncMock(return_value=plan)):
+            await fixed_plan_handler(callback)
+        review = message.edit_text.call_args.args[0]
+        self.assertIn("Безлимит", review)
+        self.assertIn("Устройств добавлено: 2", review)
+        self.assertIn("570.00 ₽", review)
+        keyboard = message.edit_text.call_args.kwargs["reply_markup"]
+        self.assertIn("plan:confirm:4:2:" + plan_revision(plan), [
+            button.callback_data for row in keyboard.inline_keyboard for button in row
+        ])
 
     async def test_start_keeps_menu_when_photo_missing_or_telegram_rejects_upload(self):
         from app.bot.handlers import start_handler
@@ -107,6 +144,7 @@ class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
                 )
                 with patch("app.bot.handlers.get_or_create_user", AsyncMock(return_value=False)), \
                      patch("app.bot.handlers.get_store_profile", AsyncMock(return_value=profile)), \
+                     patch("app.bot.handlers.get_user_subscription", AsyncMock(return_value=None)), \
                      patch("app.bot.handlers.welcome_image_path", return_value=image):
                     if image:
                         with self.assertLogs("app.bot.handlers", level="WARNING"):

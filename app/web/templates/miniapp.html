@@ -1,108 +1,188 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-theme="monochrome">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#091320">
-<title>VPN — личный кабинет</title>
+<title>Remnaum · VPN</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="/static/theme.css">
 <link rel="stylesheet" href="/static/miniapp.css">
 </head>
 <body>
 <main>
   <header class="topbar">
-    <div class="brand-logo" aria-hidden="true">R</div>
-    <div class="brand-meta"><strong id="store-name">Remnaum</strong><span>VPN STORE · ЛИЧНЫЙ КАБИНЕТ</span></div>
-    <span class="top-dot" aria-label="Безопасное подключение">●</span>
+    <button type="button" class="brand-lockup" data-go-page="home" aria-label="На главную">
+      <span class="brand-logo"><span id="store-mark" aria-hidden="true">R</span><img id="store-logo" alt="" hidden></span>
+      <strong id="store-name">Remnaum</strong>
+    </button>
+    <button class="top-link" type="button" data-go-page="support">Поддержка <span aria-hidden="true">→</span></button>
   </header>
-  <div id="loading" class="loading" role="status">Подключаем ваш кабинет…</div>
-  <div id="app">
-    <section class="page active" id="page-shop" data-page-panel="shop">
+  <div id="loading" class="loading" role="status">Открываем магазин…</div>
+  <div id="app" hidden>
+    <section class="page" id="page-home" data-page-panel="home">
       <div class="hero">
-        <h1 id="store-tagline">Простой доступ к свободному интернету</h1>
-        <p id="welcome" class="muted">Подберите подписку и подключайтесь за пару минут.</p>
+        <div class="hero-orbit" aria-hidden="true"><span></span></div>
+        <div class="hero-content">
+          <h1 id="store-tagline">Ваш VPN — ваши правила</h1>
+          <p id="welcome" class="muted">Выберите подписку и подключите свои устройства.</p>
+          <button class="primary-btn" type="button" data-go-page="shop">Выбрать тариф <span aria-hidden="true">→</span></button>
+        </div>
         <img id="hero-image" alt="Обложка магазина" hidden>
       </div>
-      <section class="panel" id="fixed-plans" style="display:none">
-        <div class="section-title"><h2>Готовые тарифы</h2></div>
-        <div id="plans-list" class="plan-list"></div>
-      </section>
-      <section class="panel" id="custom-plan">
-        <div class="section-title"><h2>Соберите свой тариф</h2></div>
+      <button class="home-subscription" type="button" data-go-page="vpn">
+        <span class="home-icon" aria-hidden="true">→</span>
+        <span><strong>Моя подписка</strong><small id="home-subscription-status">Подписки пока нет</small></span>
+        <span class="home-arrow" aria-hidden="true">→</span>
+      </button>
+      <div class="home-links">
+        <button class="secondary-btn" type="button" data-go-page="devices">Устройства</button>
+        <button class="secondary-btn" type="button" data-go-page="guide">Как подключиться</button>
+      </div>
+    </section>
+    <section class="page" id="page-shop" data-page-panel="shop" hidden>
+      <h1>Тарифы</h1>
+      <div id="plans-list" class="plan-list" aria-label="Готовые тарифы"></div>
+      <p class="panel muted" id="plans-status" role="status">Загружаем тарифы…</p>
+      <details class="panel" id="custom-plan">
+        <summary>Собрать свой тариф</summary>
         <div class="field-grid">
-          <label class="form-field"><span>Срок подписки</span><select id="days"></select></label>
-          <label class="form-field"><span>Трафик</span><select id="traffic"></select></label>
-          <label class="form-field"><span>Устройства</span><select id="devices"></select></label>
-          <label class="form-field"><span>Способ оплаты</span><select id="checkout-method"></select></label>
+          <label class="form-field">Срок подписки<select id="days"></select></label>
+          <label class="form-field">Трафик<select id="traffic"></select></label>
+          <label class="form-field">Устройства<select id="devices"></select></label>
+          <label class="form-field">Способ оплаты<select id="checkout-method"></select></label>
         </div>
-        <div class="checkout-summary">
-          <span id="price-label">Стоимость</span>
-          <strong id="stars-price" class="price">—</strong>
-        </div>
-        <label class="check"><input id="terms" type="checkbox"><span>Принимаю <a id="terms-link" href="#" target="_blank" rel="noopener">условия оказания услуги</a></span></label>
-        <button id="buy" class="primary-btn" type="button" disabled>Продолжить</button>
-        <div id="status" class="status" role="status" aria-live="polite"></div>
-      </section>
+        <div class="checkout-summary"><span id="price-label">Стоимость</span><strong id="stars-price">—</strong></div>
+        <label class="check"><input id="terms" type="checkbox"><span>Принимаю <a id="terms-link" target="_blank" rel="noopener">условия продажи</a></span></label>
+        <button id="buy" class="primary-btn full" type="button" disabled>Продолжить</button>
+        <p id="status" class="status" role="status"></p>
+      </details>
+    </section>
+    <section class="page" id="page-order" data-page-panel="order" hidden>
+      <button class="text-btn" type="button" data-go-page="shop">← К тарифам</button>
+      <h1 id="order-title">Ваш заказ</h1>
+      <div class="panel order-panel">
+        <p id="order-specification" class="muted"></p>
+        <dl class="order-details">
+          <div><dt>Включено устройств</dt><dd id="order-included"></dd></div>
+          <div><dt>За доп. устройство</dt><dd id="order-unit"></dd></div>
+          <div>
+            <dt>Доп. устройства</dt>
+            <dd class="stepper">
+              <button type="button" id="order-minus" aria-label="Убрать устройство">−</button>
+              <output id="order-extra" aria-live="polite">0</output>
+              <button type="button" id="order-plus" aria-label="Добавить устройство">+</button>
+            </dd>
+          </div>
+        </dl>
+        <div class="checkout-summary"><span>Итого</span><strong id="order-total" aria-live="polite"></strong></div>
+        <button class="primary-btn full" type="button" id="order-confirm">Подтвердить заказ</button>
+        <form id="order-payment" hidden>
+          <label class="form-field">Способ оплаты<select id="order-method" required></select></label>
+          <p class="muted" id="order-provider-total"></p>
+          <label class="check"><input id="order-terms" type="checkbox" required><span>Принимаю <a id="order-terms-link" target="_blank" rel="noopener">условия продажи</a></span></label>
+          <button class="primary-btn full" type="submit" id="order-pay">Перейти к оплате</button>
+        </form>
+        <p class="status" id="order-status" role="status"></p>
+      </div>
     </section>
     <section class="page" id="page-vpn" data-page-panel="vpn" hidden>
-      <div class="page-title"><small>МОЙ VPN</small><h1>Подписка и устройства</h1><p class="muted">Всё необходимое для подключения и контроля доступа.</p></div>
-      <section class="panel" id="subscription" style="display:none">
-        <div class="section-title"><h2>Текущая подписка</h2><span class="status-pill" id="sub-status">—</span></div>
+      <h1>Моя подписка</h1>
+      <section class="panel subscription-card" id="subscription" hidden>
+        <div class="section-title"><h2>Доступ VPN</h2><span class="status-pill" id="sub-status"></span></div>
         <div class="expiry-line"><span>Действует до</span><strong id="sub-expiry">—</strong></div>
         <div class="grid">
-          <div class="metric"><b id="sub-traffic">—</b><span>ГБ трафика</span></div>
-          <div class="metric"><b id="sub-devices">—</b><span>устройства</span></div>
-          <div class="metric"><b id="sub-days">—</b><span>дней осталось</span></div>
+          <div class="metric"><b id="sub-traffic">—</b><span>Трафик</span></div>
+          <div class="metric"><b id="sub-devices">—</b><span>Устройства</span></div>
+          <div class="metric"><b id="sub-days">—</b><span>Дней осталось</span></div>
         </div>
-        <a class="link-button" id="sub-link" href="#" target="_blank" rel="noopener" style="display:none">↗ Открыть ссылку подключения</a>
-        <button class="secondary-btn" type="button" data-go-page="shop">Продлить или изменить тариф</button>
+        <a class="primary-btn full" id="sub-link" target="_blank" rel="noopener" hidden>Открыть ссылку подключения →</a>
+        <button class="secondary-btn full" type="button" data-go-page="shop">Продлить или изменить тариф</button>
       </section>
-      <section class="panel empty-state" id="no-subscription"><span class="empty-glyph">◇</span><h2>Подписка ещё не активирована</h2><p class="muted">Выберите тариф в магазине, чтобы получить подключение.</p><button class="secondary-btn" type="button" data-go-page="shop">Посмотреть тарифы</button></section>
-      <section class="panel" id="account-devices"><div class="section-title"><h2>Мои устройства</h2><span>📱</span></div><div class="muted" id="account-device-info">Загружаем…</div></section>
+      <section class="panel empty-state" id="no-subscription">
+        <h2>Подписки пока нет</h2><p class="muted">После оплаты здесь появится ссылка подключения.</p>
+        <button class="primary-btn" type="button" data-go-page="shop">Посмотреть тарифы</button>
+      </section>
+      <div class="home-links">
+        <button class="secondary-btn" type="button" data-go-page="devices">Устройства</button>
+        <button class="secondary-btn" type="button" data-go-page="guide">Инструкция</button>
+      </div>
+    </section>
+    <section class="page" id="page-devices" data-page-panel="devices" hidden>
+      <button class="text-btn" type="button" data-go-page="vpn">← Моя подписка</button>
+      <h1>Устройства</h1>
+      <div class="panel" id="account-device-info" role="status">Загружаем устройства…</div>
+    </section>
+    <section class="page" id="page-purchases" data-page-panel="purchases" hidden>
+      <button class="text-btn" type="button" data-go-page="account">← Профиль</button>
+      <h1>Покупки</h1>
+      <div class="panel" id="account-purchase-info" role="status">Загружаем историю…</div>
+    </section>
+    <section class="page" id="page-guide" data-page-panel="guide" hidden>
+      <h1>Как подключиться</h1>
       <section class="panel" id="connection-guide">
-        <div class="section-title"><h2>Как подключиться</h2><span>↗</span></div>
-        <ol class="steps"><li>Установите VPN-клиент, подходящий для вашей подписки.</li><li>Откройте ссылку подключения выше и импортируйте её.</li><li>Обновите серверы, выберите нужный и подключитесь.</li></ol>
+        <ol class="steps">
+          <li>Установите VPN-клиент, совместимый с подпиской Remnawave.</li>
+          <li>Откройте ссылку из раздела «Моя подписка» и импортируйте её в VPN-клиент.</li>
+          <li>Обновите список серверов и подключитесь к нужному.</li>
+        </ol>
+        <button class="secondary-btn full" type="button" data-go-page="vpn">Моя подписка</button>
+      </section>
+    </section>
+    <section class="page" id="page-support" data-page-panel="support" hidden>
+      <h1>Поддержка</h1>
+      <section class="panel" id="account-support">
+        <p class="muted" id="support-text">Контакт поддержки пока не указан.</p>
+        <a class="primary-btn full" id="support-link" target="_blank" rel="noopener" hidden>Связаться с поддержкой →</a>
       </section>
     </section>
     <section class="page" id="page-bonuses" data-page-panel="bonuses" hidden>
-      <div class="page-title"><small>ПРИВИЛЕГИИ</small><h1>Бонусы и подарки</h1><p class="muted">Приглашайте друзей и активируйте специальные предложения.</p></div>
+      <h1>Бонусы</h1>
       <section class="panel" id="account-referrals">
-        <div class="section-title"><h2>Пригласить друга</h2><span>✦</span></div>
-        <div class="muted" id="account-referral-info">Загружаем…</div>
-        <a id="account-referral-link" class="ref-link" href="#" style="display:none"></a>
-        <div class="referral-actions">
+        <h2>Пригласить друга</h2>
+        <p class="muted" id="account-referral-info">Загружаем…</p>
+        <a id="account-referral-link" class="ref-link" hidden></a>
+        <div class="home-links">
           <button class="secondary-btn" id="copy-referral" type="button" hidden>Скопировать ссылку</button>
-          <a class="secondary-btn" id="share-referral" href="#" hidden>Поделиться</a>
+          <a class="secondary-btn" id="share-referral" hidden>Поделиться</a>
         </div>
       </section>
-      <section class="panel" id="trial-offer" style="display:none">
-        <div class="section-title"><h2>Пробный доступ</h2><span>✧</span></div>
-        <p class="muted" id="trial-copy"></p><button id="trial-claim" type="button" class="primary-btn">Получить доступ</button><p class="status" id="trial-status" role="status"></p>
+      <section class="panel" id="trial-offer" hidden>
+        <h2>Пробный доступ</h2>
+        <p class="muted" id="trial-copy"></p>
+        <button id="trial-claim" type="button" class="primary-btn full">Получить доступ</button>
+        <p class="status" id="trial-status" role="status"></p>
       </section>
       <section class="panel" id="promo-offer">
-        <div class="section-title"><h2>Промокод</h2><span>⌁</span></div>
+        <h2>Промокод</h2>
         <p class="muted" id="promo-balance">Проверяем бонусный баланс…</p>
-        <label class="form-field"><span>Ваш код</span><input id="promo-input" maxlength="32" placeholder="Например, WELCOME" autocomplete="off"></label>
-        <button id="promo-activate" type="button" class="primary-btn">Активировать</button><p class="status" id="promo-status" role="status"></p>
+        <label class="form-field">Ваш код<input id="promo-input" maxlength="32" autocomplete="off"></label>
+        <button id="promo-activate" type="button" class="primary-btn full">Активировать</button>
+        <p class="status" id="promo-status" role="status"></p>
       </section>
     </section>
     <section class="page" id="page-account" data-page-panel="account" hidden>
-      <div class="page-title"><small>ЛИЧНЫЙ КАБИНЕТ</small><h1>Мой аккаунт</h1><p class="muted">Информация и история операций.</p></div>
+      <h1>Профиль</h1>
       <section class="panel profile-card">
-        <div class="profile-avatar">◈</div><div><strong id="profile-name">Покупатель</strong><p class="muted">Telegram ID: <span id="profile-id">—</span></p></div>
+        <div class="brand-logo" id="profile-monogram" aria-hidden="true">R</div>
+        <div><strong id="profile-name">Покупатель</strong><p class="muted">Telegram ID <span id="profile-id">—</span></p></div>
       </section>
-      <section class="panel" id="account-purchases"><div class="section-title"><h2>История покупок</h2><span>↗</span></div><div class="muted" id="account-purchase-info">Загружаем…</div></section>
-      <section class="panel" id="account-support"><div class="section-title"><h2>Поддержка</h2><span>✉</span></div><p class="muted" id="support-text">Связаться с поддержкой магазина</p><a class="link-button" href="#" id="support-link" target="_blank" rel="noopener" hidden>Открыть поддержку</a></section>
-      <button class="secondary-btn admin-entry" id="admin-entry" type="button" hidden>⚙ Управление магазином</button>
+      <div class="account-links">
+        <button class="secondary-btn" type="button" data-go-page="purchases">Покупки <span aria-hidden="true">→</span></button>
+        <button class="secondary-btn" type="button" data-go-page="devices">Устройства <span aria-hidden="true">→</span></button>
+        <button class="secondary-btn" type="button" data-go-page="guide">Инструкции <span aria-hidden="true">→</span></button>
+        <button class="secondary-btn" type="button" data-go-page="support">Поддержка <span aria-hidden="true">→</span></button>
+      </div>
+      <button class="secondary-btn full" id="admin-entry" type="button" hidden>Управление магазином →</button>
     </section>
   </div>
 </main>
 <nav class="bottom-nav" id="bottom-nav" aria-label="Разделы магазина" hidden>
-  <button type="button" class="nav-active" data-page="shop" aria-current="page"><span class="nav-icon">▦</span><small>Магазин</small></button>
-  <button type="button" data-page="vpn"><span class="nav-icon">◈</span><small>Мой VPN</small></button>
-  <button type="button" data-page="bonuses"><span class="nav-icon">✧</span><small>Бонусы</small></button>
-  <button type="button" data-page="account"><span class="nav-icon">◎</span><small>Профиль</small></button>
+  <button type="button" data-page="home" aria-current="page"><span aria-hidden="true">⌂</span>Главная</button>
+  <button type="button" data-page="shop"><span aria-hidden="true">▤</span>Тарифы</button>
+  <button type="button" data-page="vpn"><span aria-hidden="true">◇</span>Подписка</button>
+  <button type="button" data-page="bonuses"><span aria-hidden="true">✦</span>Бонусы</button>
+  <button type="button" data-page="account"><span aria-hidden="true">◎</span>Профиль</button>
 </nav>
 <script src="/static/miniapp.js" defer></script>
-</body></html>
+</body>
+</html>

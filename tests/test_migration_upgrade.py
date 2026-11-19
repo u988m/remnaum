@@ -30,7 +30,16 @@ class LegacyMigrationTests(unittest.IsolatedAsyncioTestCase):
             async with test_engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
                 await conn.execute(text("ALTER TABLE subscriptions DROP COLUMN paid_tariff"))
-                await conn.execute(text("ALTER TABLE tariff_plans DROP COLUMN internal_squads"))
+                await conn.execute(text(
+                    "ALTER TABLE tariff_plans DROP COLUMN internal_squads, "
+                    "DROP COLUMN extra_device_price_rub_minor, DROP COLUMN extra_device_price_stars, "
+                    "DROP COLUMN badge, DROP COLUMN is_featured"
+                ))
+                await conn.execute(text(
+                    "INSERT INTO tariff_plans "
+                    "(title, description, duration_days, traffic_gb, device_limit, price_rub_minor, price_stars, is_active, sort_order) "
+                    "VALUES ('Legacy', '', 30, 10, 1, 19000, 100, true, 0)"
+                ))
                 await conn.execute(text(
                     "INSERT INTO users (telegram_id, username) VALUES (12345670001, 'legacy')"
                 ))
@@ -51,7 +60,11 @@ class LegacyMigrationTests(unittest.IsolatedAsyncioTestCase):
                         lambda c: {x["name"] for x in inspect(c).get_columns("tariff_plans")}
                     )
                     self.assertEqual(user, "legacy")
-                    self.assertEqual(revision, "0001_legacy_baseline")
+                    self.assertEqual(revision, "0002_tariff_plan_options")
+                    legacy_plan = (await conn.execute(text(
+                        "SELECT title, price_rub_minor, extra_device_price_rub_minor, badge, is_featured FROM tariff_plans"
+                    ))).one()
+                    self.assertEqual(tuple(legacy_plan), ("Legacy", 19000, None, "", False))
                     self.assertIn("paid_tariff", subscription_columns)
                     self.assertIn("internal_squads", plan_columns)
         finally:

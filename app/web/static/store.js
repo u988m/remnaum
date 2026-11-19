@@ -13,7 +13,7 @@ try{
    const card=document.createElement("article");card.className="card";
    const name=document.createElement("h3");name.textContent=p.title;
    const desc=document.createElement("p");desc.className="small";desc.textContent=p.description||"Выберите подходящую подписку";
-   const spec=document.createElement("p");spec.className="small";spec.textContent=p.duration_days+" дней · "+p.traffic_gb+" ГБ · "+p.device_limit+" устройств";
+   const spec=document.createElement("p");spec.className="small";spec.textContent=p.duration_days+" дней · "+(p.traffic_gb===0?"Безлимит":p.traffic_gb+" ГБ")+" · "+p.device_limit+" устройств";
    const price=document.createElement("div");price.className="price";price.textContent=(p.price_rub_minor/100).toFixed(2)+" ₽";
    const choose=document.createElement("button");choose.textContent="Выбрать тариф";
    choose.onclick=()=>{selected=p;document.querySelectorAll(".card button").forEach(b=>b.textContent="Выбрать тариф");choose.textContent="✓ Выбрано";$("buy").disabled=!me||!store.terms_url||!store.methods.length;$("account").scrollIntoView({behavior:"smooth"})};
