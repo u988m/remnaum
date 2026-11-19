@@ -25,6 +25,8 @@
     <circle cx="70" cy="582" r="3.2"/>
   </g>
 
+  <!-- Balanced centered brand lockup; its original intrinsic dimensions are preserved. -->
+  <g transform="translate(100 0)">
   <!-- Geometric R: a white monogram cut by an uninterrupted black wave -->
   <g fill="url(#logo)">
     <path d="M153 463V193H295C369 193 406 228 406 292C406 345 379 375 335 389L424 463H329L263 407H226V463ZM226 259V344H292C322 344 335 327 335 302C335 273 320 259 291 259Z"/>
@@ -35,6 +37,7 @@
   <path d="M484 217V453" stroke="#ededed" stroke-opacity=".8" stroke-width="2"/>
   <text x="537" y="334" fill="#f6f6f6" font-family="Arial,Helvetica,sans-serif" font-weight="800" font-size="111" letter-spacing="-3">REMNAUM</text>
   <text x="543" y="392" fill="#b4b4b4" font-family="Arial,Helvetica,sans-serif" font-size="23" letter-spacing="5">VPN STOREFRONT FOR REMNAWAVE</text>
+  </g>
 
   <!-- Layered monochrome wave field -->
   <g fill="none" stroke="url(#wave)" stroke-width="1.4">
