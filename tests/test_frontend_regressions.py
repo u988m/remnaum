@@ -30,6 +30,19 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('id="admin-sidebar"', admin)
         self.assertIn('id="admin-menu-backdrop"', admin)
         self.assertIn('function setAdminMenu(open)', admin_js)
+        self.assertIn('class="admin-icon-sprite"', admin)
+        self.assertIn('const sidebarIconNames =', admin_js)
+        self.assertIn('id="ai-wallet"', admin)
+        for section in ("referrals-view", "trial-view", "pricing-view", "payment-settings-view",
+                        "payment-telegram_stars-view", "payment-yookassa-view",
+                        "payment-yoomoney-view", "payment-cryptopay-view"):
+            self.assertIn('id="' + section + '"', admin)
+        for tab in ("referrals", "trial", "pricing", "pay-stars",
+                    "pay-yookassa", "pay-yoomoney", "pay-cryptopay"):
+            self.assertIn('data-tab="' + tab + '"', admin)
+        self.assertIn('async function savePaymentProvider(provider)', admin_js)
+        self.assertIn('methods:{[provider]:$("method-" + provider).checked}', admin_js)
+        self.assertNotIn('id="payment-settings-save"', admin)
         self.assertIn('fillPaymentOptions()', mini_js)
         self.assertNotIn('async function adminApi(', mini_js)
         self.assertNotIn('id="referral-form"', mini)
@@ -50,7 +63,11 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         for html in (mini, admin):
             self.assertIn('href="/static/theme.css"', html)
             self.assertIn('data-theme="monochrome"', html)
-        self.assertIn('id="hero-image"', mini)
+        self.assertNotIn('id="hero-image"', mini)
+        self.assertNotIn('profile?.welcome_image_url', mini_js)
+        self.assertIn('overflow:hidden; text-overflow:ellipsis;', (STATIC / "miniapp.css").read_text(encoding="utf-8"))
+        for icon in ("i-device", "i-book", "i-support"):
+            self.assertIn('id="' + icon + '"', mini)
         self.assertIn('id="copy-referral"', mini)
 
     async def test_storefront_and_miniapp_have_valid_javascript(self):

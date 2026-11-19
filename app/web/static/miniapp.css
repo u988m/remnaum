@@ -169,7 +169,7 @@ main {
     font-size: clamp(.64rem, 2.6vw, .82rem);
     padding: 4px 0;
 }
-.bottom-nav button span { font-size: 1.22rem; line-height: 1.2; }
+.bottom-nav button span { font-size: .66rem; line-height: 1.1; font-weight: 650; white-space: nowrap; }
 .bottom-nav [aria-current="page"] { background: var(--color-surface-raised); color: var(--color-text); }
 @media (min-width: 590px) {
     .plan-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -213,3 +213,44 @@ main { max-width:680px; padding:18px clamp(16px,4vw,28px) calc(124px + env(safe-
 @media (min-width:590px) { .bottom-nav { border-radius:26px; } }
 @media (max-width:370px) { .quick-action { padding:13px; }.home-actions { gap:8px; }.bottom-nav { width:calc(100% - 16px); } }
 @media (prefers-reduced-motion:reduce) { .page { animation:none; } }
+
+/* Layout corrections for Telegram iOS and Android webviews.
+ * The banner is delivered with the Telegram bot menu, never re-rendered
+ * underneath duplicate headings in the customer Mini App.
+ */
+html, body { width:100%; max-width:100%; overflow-x:clip; }
+main { max-width:620px; padding:14px clamp(14px,4vw,24px) calc(134px + env(safe-area-inset-bottom)); }
+.topbar { padding:4px 0 18px; }
+#page-home { gap:12px; }
+#page-home .hero {
+  min-height:248px; border-radius:25px; align-items:flex-end;
+  background:radial-gradient(circle at 82% 0, var(--color-glow), transparent 38%), var(--color-surface);
+}
+#page-home .hero-content { padding:24px; }
+#page-home .hero h1 { font-size:clamp(1.85rem,7.3vw,2.85rem); letter-spacing:-.055em; line-height:1.08; max-width:18ch; }
+#page-home .hero p { font-size:.9rem; margin:10px 0 17px; max-width:34ch; }
+#page-home .hero-orbit { opacity:.12; width:240px; right:-7%; top:-44%; }
+#page-home .hero .primary-btn { min-height:48px; }
+#page-home .home-subscription { min-height:92px; padding:15px; border-radius:22px; }
+#page-home .home-icon { width:44px; height:44px; border-radius:14px; }
+.home-icon svg, .quick-glyph svg {
+  display:block; width:23px; height:23px;
+  fill:none; stroke:currentColor; stroke-width:1.75; stroke-linecap:round; stroke-linejoin:round;
+}
+#page-home .home-subscription-copy .eyebrow { font-size:.59rem; letter-spacing:.11em; }
+#page-home .home-actions { gap:9px; }
+#page-home .quick-action { min-height:90px; padding:14px; border-radius:19px; }
+.quick-glyph { display:flex; }
+#page-home .quick-action strong { font-size:.86rem; min-width:0; overflow-wrap:anywhere; }
+.bottom-nav { width:calc(100% - 22px); padding:6px; gap:3px; bottom:calc(7px + env(safe-area-inset-bottom)); border-radius:22px; }
+.bottom-nav button { min-width:0; min-height:55px; padding:5px 2px; gap:4px; border-radius:17px; overflow:hidden; }
+.bottom-nav button svg { width:21px; height:21px; flex:none; }
+.bottom-nav button > span { display:block; width:100%; max-width:100%; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:clamp(.58rem,2.3vw,.7rem); line-height:1.15; letter-spacing:0; }
+@media (max-width:370px) {
+ #page-home .hero { min-height:220px; }
+ #page-home .hero-content { padding:19px; }
+ #page-home .quick-action { padding:11px; }
+ .bottom-nav { width:calc(100% - 14px); }
+ .bottom-nav button > span { font-size:.57rem; }
+}
+@media (min-width:700px) { #page-home .hero { min-height:320px; } }

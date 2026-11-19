@@ -160,3 +160,56 @@ main { max-width:1480px;padding:16px clamp(14px,3vw,36px) 44px; }
 }
 @media (max-width:390px) { .card { min-height:120px; }.card b { font-size:1.7rem; } }
 @media (prefers-reduced-motion:reduce) { .admin-sidebar { transition:none; } }
+
+/* Owner settings are task-based, not one giant form. */
+.admin-sidebar { scrollbar-width:thin; scrollbar-color:var(--color-border-strong) transparent; }
+.admin-tabs .sidebar-category { margin:18px 11px 8px; }
+.admin-tabs button { min-height:47px; width:100%; }
+.admin-workspace { overflow-x:clip; }
+.admin-workspace > .section { margin-top:0; }
+.provider-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:12px;margin:22px 0; }
+.provider-tile { width:100%; display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;gap:11px;padding:20px;text-align:left;background:var(--color-surface-raised);border:1px solid var(--color-border);border-radius:20px;color:var(--color-text); }
+.provider-tile strong { font-size:1.05rem; }
+.provider-tile span:nth-child(2) { grid-column:1; color:var(--color-muted);font-size:.84rem; }
+.provider-tile span:last-child { grid-column:2;grid-row:1/3;align-self:center;font-size:1.35rem; }
+.payment-provider-view { max-width:800px; }
+.payment-provider-view h1 { margin:17px 0 12px; }
+.payment-provider-view .provider-state { display:inline-block;padding:5px 11px;margin:20px 0 4px;border:1px solid var(--color-border-strong);border-radius:var(--radius-pill);color:var(--color-muted);font-size:.8rem; }
+.payment-provider-view .provider-toggle { display:flex;align-items:center;gap:12px;min-height:64px;margin:15px 0;border:1px solid var(--color-border);border-radius:16px;padding:15px;font-size:1rem; }
+.payment-provider-view .provider-toggle input { width:19px;height:19px;flex:none; }
+.payment-provider-view .provider-fields { display:grid;gap:12px;margin:16px 0;max-width:650px; }
+.payment-provider-view .provider-fields label { margin:0;font-size:.88rem; }
+.provider-save { margin-top:15px;min-width:190px; }
+.provider-back { width:auto; }
+@media (max-width:850px) {
+ .admin-sidebar { overscroll-behavior:contain; }
+ .payment-provider-view { padding:18px; }
+ .provider-grid { grid-template-columns:1fr; }
+}
+
+.admin-icon-sprite { position:absolute; width:0; height:0; overflow:hidden; }
+.admin-tabs button { display:flex; align-items:center; gap:12px; }
+.admin-sidebar-icon { width:19px; height:19px; min-width:19px; flex:none; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+@media (max-width:640px) {
+  #users-view > .table-wrap table,
+  #payments-view > .table-wrap table { display:block; min-width:0; width:100%; }
+  #users-view > .table-wrap thead,
+  #payments-view > .table-wrap thead {
+    position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%);
+  }
+  #users-table, #payments-table { display:grid; gap:10px; }
+  #users-table tr, #payments-table tr {
+    display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px;
+    border:1px solid var(--color-border); border-radius:18px; background:var(--color-input);
+    padding:13px; min-width:0;
+  }
+  #users-table td, #payments-table td { border:0; padding:4px 2px; font-size:.86rem; overflow-wrap:anywhere; min-width:0; }
+  #users-table td:first-child, #payments-table td:first-child { grid-column:1/-1; font-size:1rem; font-weight:800; }
+  #users-table td:last-child, #payments-table td:last-child { grid-column:1/-1; }
+  #users-table td:nth-child(1)::before { content:"Telegram ID · "; }
+  #payments-table td:nth-child(1)::before { content:"Платёж #"; }
+  #users-table td:nth-child(3)::before { content:"Статус · "; }
+  #users-table td:nth-child(4)::before { content:"До · "; }
+  #payments-table td:nth-child(4)::before { content:"Сумма · "; }
+  #payments-table td:nth-child(5)::before { content:"Статус · "; }
+}

@@ -315,7 +315,7 @@ function renderProfile(profile, user) {
   $("store-mark").textContent = name.trim().charAt(0).toUpperCase() || "R";
   $("store-tagline").textContent = profile?.tagline || "Ваш VPN — ваши правила";
   $("welcome").textContent = profile?.description || "Выберите подписку и подключите свои устройства.";
-  for (const [id, url] of [["hero-image", profile?.welcome_image_url], ["store-logo", profile?.logo_image_url]]) {
+  for (const [id, url] of [["store-logo", profile?.logo_image_url]]) {
     if (url) {
       $(id).src = url;
       $(id).hidden = false;

@@ -58,7 +58,7 @@ def main_menu(*, is_admin: bool = False) -> InlineKeyboardMarkup:
     ]
     if settings.webapp_url.startswith("https://"):
         rows.append([InlineKeyboardButton(
-            text="✨ Открыть Mini App", web_app=WebAppInfo(url=settings.webapp_url),
+            text="✨ Mini App", web_app=WebAppInfo(url=settings.webapp_url),
         )])
     if is_admin and settings.webapp_url.startswith("https://"):
         rows.append([InlineKeyboardButton(
@@ -106,7 +106,7 @@ async def tariff_text(quote: TariffQuote) -> str:
 async def show_tariff(callback: CallbackQuery, quote: TariffQuote | None = None) -> None:
     if callback.message:
         selected = quote or await get_tariff_draft(callback.from_user.id)
-        await callback.message.edit_text(await tariff_text(selected), reply_markup=tariff_keyboard())
+        await edit_menu_message(callback.message, await tariff_text(selected), reply_markup=tariff_keyboard())
 
 
 SUBSCRIPTION_STATUS = {
@@ -124,6 +124,36 @@ async def home_text(telegram_id: int, profile: dict) -> str:
     return "\n".join(lines)
 
 
+async def send_home_menu(message: Message, telegram_id: int, profile: dict, *, is_admin: bool) -> None:
+    """Send the welcome image, text and keyboard as ONE Telegram message.
+
+    A photo caption supports the same inline keyboard as a text message.
+    Falling back to plain text keeps the shop usable if Telegram rejects a photo.
+    """
+    caption = await home_text(telegram_id, profile)
+    keyboard = main_menu(is_admin=is_admin)
+    image = welcome_image_path()
+    if image is not None:
+        try:
+            await message.answer_photo(FSInputFile(image), caption=caption, reply_markup=keyboard)
+            return
+        except Exception as exc:
+            logger.warning("Could not send welcome photo: %s", type(exc).__name__)
+    await message.answer(caption, reply_markup=keyboard)
+
+
+async def edit_menu_message(message: Message, text: str, *, reply_markup: InlineKeyboardMarkup | None = None) -> None:
+    """Photo messages cannot be edited with edit_text; replace them safely."""
+    if getattr(message, "photo", None):
+        await message.answer(text, reply_markup=reply_markup)
+        try:
+            await message.delete()
+        except Exception as exc:
+            logger.warning("Could not remove old welcome photo: %s", type(exc).__name__)
+    else:
+        await message.edit_text(text, reply_markup=reply_markup)
+
+
 @router.message(CommandStart())
 async def start_handler(message: Message) -> None:
     if message.from_user is None:
@@ -133,18 +163,9 @@ async def start_handler(message: Message) -> None:
     if is_new_user and inviter is not None:
         await register_referral(message.from_user.id, inviter)
     profile = await get_store_profile()
-    image = welcome_image_path()
-    if image is not None:
-        try:
-            await message.answer_photo(
-                FSInputFile(image),
-                caption=f"<b>{escape(profile['name'])}</b> · {escape(profile['tagline'])}",
-            )
-        except Exception as exc:
-            logger.warning("Could not send welcome photo: %s", type(exc).__name__)
-    await message.answer(
-        await home_text(message.from_user.id, profile),
-        reply_markup=main_menu(is_admin=message.from_user.id in settings.admin_id_set),
+    await send_home_menu(
+        message, message.from_user.id, profile,
+        is_admin=message.from_user.id in settings.admin_id_set,
     )
 
 
@@ -174,17 +195,29 @@ async def home_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
         profile = await get_store_profile()
-        await callback.message.edit_text(
-            await home_text(callback.from_user.id, profile),
-            reply_markup=main_menu(is_admin=callback.from_user.id in settings.admin_id_set),
-        )
+        text = await home_text(callback.from_user.id, profile)
+        keyboard = main_menu(is_admin=callback.from_user.id in settings.admin_id_set)
+        image = welcome_image_path()
+        if getattr(callback.message, "photo", None):
+            await callback.message.edit_caption(caption=text, reply_markup=keyboard)
+        elif image is not None:
+            try:
+                await callback.message.answer_photo(
+                    FSInputFile(image), caption=text, reply_markup=keyboard,
+                )
+                await callback.message.delete()
+            except Exception as exc:
+                logger.warning("Could not restore welcome image: %s", type(exc).__name__)
+                await callback.message.edit_text(text, reply_markup=keyboard)
+        else:
+            await callback.message.edit_text(text, reply_markup=keyboard)
 
 
 @router.callback_query(F.data == "menu:bonuses")
 async def bonuses_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
-        await callback.message.edit_text(
+        await edit_menu_message(callback.message, 
             "🎁 <b>Бонусы и подарки</b>\n\n"
             "Приглашайте друзей, активируйте промокоды и получите пробный доступ.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -209,7 +242,7 @@ async def plans_handler(callback: CallbackQuery) -> None:
     rows.append([InlineKeyboardButton(text="🛠 Собрать свой тариф", callback_data="menu:builder")])
     rows.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")])
     if callback.message:
-        await callback.message.edit_text(
+        await edit_menu_message(callback.message, 
             "📦 <b>Выберите готовый тариф</b> или соберите свой вариант.\\n"
             "Цены готовых планов задаёт владелец магазина.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
@@ -260,7 +293,7 @@ async def fixed_plan_handler(callback: CallbackQuery) -> None:
         [InlineKeyboardButton(text="← К тарифам", callback_data="menu:plans")],
     ])
     if callback.message:
-        await callback.message.edit_text("\n".join(details), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        await edit_menu_message(callback.message, "\n".join(details), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
 @router.callback_query(F.data.regexp(
@@ -311,7 +344,7 @@ async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
                     )])
         text = f"<b>{escape(quote.name)}</b>\nВыберите способ оплаты." if rows else "Для этого заказа нет доступных способов оплаты."
     rows.append([InlineKeyboardButton(text="← К заказу", callback_data=f"plan:select:{plan_id}:{extras}")])
-    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    await edit_menu_message(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
 @router.callback_query(F.data.startswith("tariff:"))
@@ -338,12 +371,12 @@ async def payment_choose_handler(callback: CallbackQuery) -> None:
     enabled = public_payment_settings(methods, credentials)["configured"]
     if not any(methods.get(k) and enabled.get(k, False) for k in ("telegram_stars", "yookassa", "yoomoney", "cryptopay")):
         if callback.message:
-            await callback.message.edit_text("Оплата временно отключена администратором.", reply_markup=back_menu())
+            await edit_menu_message(callback.message, "Оплата временно отключена администратором.", reply_markup=back_menu())
         return
     terms_url = await get_terms_url()
     if not terms_url:
         if callback.message:
-            await callback.message.edit_text(
+            await edit_menu_message(callback.message, 
                 "Продажи пока не включены: администратору нужно опубликовать условия в разделе оформления админки.",
                 reply_markup=back_menu(),
             )
@@ -357,7 +390,7 @@ async def payment_choose_handler(callback: CallbackQuery) -> None:
         [InlineKeyboardButton(text="⬅️ Назад к тарифу", callback_data="menu:plans")],
     ])
     if callback.message:
-        await callback.message.edit_text(
+        await edit_menu_message(callback.message, 
             "Перед оплатой прочитайте и примите условия оказания услуги.",
             reply_markup=keyboard,
         )
@@ -385,7 +418,7 @@ async def show_payment_options(callback: CallbackQuery) -> None:
             rows.append([InlineKeyboardButton(text=title, callback_data=f"payment:create:{name}")])
     rows.append([InlineKeyboardButton(text="⬅️ Назад к тарифу", callback_data="menu:plans")])
     if callback.message:
-        await callback.message.edit_text(
+        await edit_menu_message(callback.message, 
             f"💳 <b>Выберите оплату</b>\n\n"
             f"Тариф: {quote.duration_days} дней, {format_traffic(quote.traffic_gb)}, {quote.device_limit} устройств.\n"
             f"Telegram Stars: <b>{stars} ⭐</b>\n"
@@ -552,7 +585,7 @@ async def promo_menu_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     balance = await promo_balance(callback.from_user.id)
     if callback.message:
-        await callback.message.edit_text(
+        await edit_menu_message(callback.message, 
             "🎟 <b>Промокоды</b>\n\n"
             "Введите в этом чате: <code>/promo ВАШ_КОД</code>\n\n"
             f"Бонусных дней: <b>{balance['days']}</b>. "
@@ -568,10 +601,10 @@ async def trial_menu_handler(callback: CallbackQuery) -> None:
         return
     config = await get_trial_settings()
     if not config["enabled"]:
-        await callback.message.edit_text("🎁 Пробный доступ пока отключён.", reply_markup=back_menu())
+        await edit_menu_message(callback.message, "🎁 Пробный доступ пока отключён.", reply_markup=back_menu())
         return
     if not await trial_eligible(callback.from_user.id):
-        await callback.message.edit_text(
+        await edit_menu_message(callback.message, 
             "🎁 Пробный доступ доступен только один раз до первой подписки.",
             reply_markup=back_menu(),
         )
@@ -580,7 +613,7 @@ async def trial_menu_handler(callback: CallbackQuery) -> None:
         [InlineKeyboardButton(text="🎁 Получить пробный доступ", callback_data="trial:claim")],
         [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
     ])
-    await callback.message.edit_text(
+    await edit_menu_message(callback.message, 
         "🎁 <b>Пробный доступ</b>\n\n"
         f"{config['days']} дней · {config['traffic_gb']} ГБ · "
         f"{config['device_limit']} устройств.\n"
@@ -597,10 +630,10 @@ async def trial_claim_handler(callback: CallbackQuery) -> None:
     try:
         result = await claim_trial(callback.from_user.id)
     except (ValueError, RuntimeError) as exc:
-        await callback.message.edit_text("🎁 " + escape(str(exc)), reply_markup=back_menu())
+        await edit_menu_message(callback.message, "🎁 " + escape(str(exc)), reply_markup=back_menu())
         return
     except Exception:
-        await callback.message.edit_text(
+        await edit_menu_message(callback.message, 
             "Пробный доступ временно недоступен. Попробуйте позже.", reply_markup=back_menu(),
         )
         return
@@ -611,7 +644,7 @@ async def trial_claim_handler(callback: CallbackQuery) -> None:
             [InlineKeyboardButton(text="🔗 Подключить VPN", url=link)],
             [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
         ])
-    await callback.message.edit_text(
+    await edit_menu_message(callback.message, 
         f"✅ Доступ выдан: {result['days']} дней, {result['traffic_gb']} ГБ, "
         f"{result['device_limit']} устройств.",
         reply_markup=keyboard,
@@ -624,7 +657,7 @@ async def profile_handler(callback: CallbackQuery) -> None:
     user = callback.from_user
     username = f"@{escape(user.username)}" if user.username else "не указан"
     if callback.message:
-        await callback.message.edit_text(
+        await edit_menu_message(callback.message, 
             "👤 <b>Мой профиль</b>\n\n"
             f"Telegram ID: <code>{user.id}</code>\n"
             f"Username: {username}\nСтатус аккаунта: активен",
@@ -643,7 +676,7 @@ async def subscription_handler(callback: CallbackQuery) -> None:
         pass
     subscription = await get_user_subscription(callback.from_user.id)
     if subscription is None:
-        await callback.message.edit_text(
+        await edit_menu_message(callback.message, 
             "🔐 <b>Моя подписка</b>\n\nАктивная VPN-подписка пока не найдена.",
             reply_markup=back_menu(),
         )
@@ -665,7 +698,7 @@ async def subscription_handler(callback: CallbackQuery) -> None:
             [InlineKeyboardButton(text="🔗 Получить ссылку подключения", url=url)],
             [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
         ])
-    await callback.message.edit_text(details, reply_markup=keyboard)
+    await edit_menu_message(callback.message, details, reply_markup=keyboard)
 
 
 @router.callback_query(F.data == "menu:connect")
@@ -679,7 +712,7 @@ async def connection_help_handler(callback: CallbackQuery) -> None:
     if isinstance(link, str) and link.startswith("https://"):
         rows.append([InlineKeyboardButton(text="🔗 Моя ссылка подключения", url=link)])
     rows.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")])
-    await callback.message.edit_text(
+    await edit_menu_message(callback.message, 
         "📖 <b>Как подключить VPN</b>\n\n"
         "1. Установите приложение-клиент, совместимое с подпиской вашей панели Remnawave.\n"
         "2. Откройте ссылку подключения из раздела «Подписка».\n"
@@ -712,7 +745,7 @@ async def support_handler(callback: CallbackQuery) -> None:
         rows.append([InlineKeyboardButton(text="💬 Написать в поддержку", url=button_url)])
     rows.append([InlineKeyboardButton(text="← Главное меню", callback_data="menu:home")])
     if callback.message:
-        await callback.message.edit_text(
+        await edit_menu_message(callback.message, 
             f"💬 <b>Помощь и поддержка</b>\n\n{support}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
@@ -752,7 +785,7 @@ async def devices_handler(callback: CallbackQuery) -> None:
             lines.append("Подключите VPN, чтобы увидеть зарегистрированные устройства.")
         message = chr(10).join(lines)
     if callback.message:
-        await callback.message.edit_text(message.replace(chr(92) + "n", chr(10)), reply_markup=back_menu())
+        await edit_menu_message(callback.message, message.replace(chr(92) + "n", chr(10)), reply_markup=back_menu())
 
 
 @router.callback_query(F.data == "menu:purchases")
@@ -771,7 +804,7 @@ async def purchases_handler(callback: CallbackQuery) -> None:
         amount = f"{p.amount} ⭐" if p.currency == "XTR" else f"{p.amount / 100:.2f} {escape(p.currency)}"
         lines.append(f"#{p.id} · {escape(p.provider)} · {amount} · {escape(p.status)}")
     if callback.message:
-        await callback.message.edit_text(chr(10).join(lines), reply_markup=back_menu())
+        await edit_menu_message(callback.message, chr(10).join(lines), reply_markup=back_menu())
 
 
 @router.callback_query(F.data == "menu:referral")
@@ -796,4 +829,4 @@ async def referral_handler(callback: CallbackQuery) -> None:
                if config["enabled"] else "Реферальная программа пока отключена владельцем.")
         )
     if callback.message:
-        await callback.message.edit_text(text.replace(chr(92) + "n", chr(10)), reply_markup=back_menu())
+        await edit_menu_message(callback.message, text.replace(chr(92) + "n", chr(10)), reply_markup=back_menu())
