@@ -19,6 +19,7 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMUNITY_UPDATES = "https://t.me/remnaum/4"
+PROJECT_URL = "https://github.com/u988m/remnaum"
 STATE_FILE = ROOT / "data" / "update-alerts.json"
 
 
@@ -88,7 +89,6 @@ def available_update() -> tuple[str, str] | None:
 def make_message() -> str:
     return (
         "🚀 Доступно новое обновление Remnaum!\n\n"
-        "Изменения и новости: https://t.me/remnaum/4\n\n"
         "Чтобы обновить проект, на сервере запустите:\n"
         "sudo sh install.sh → 2 — Обновить"
     )
@@ -98,10 +98,10 @@ def send_notice(token: str, telegram_id: int) -> bool:
     payload = urlencode({
         "chat_id": str(telegram_id),
         "text": make_message(),
-        "disable_web_page_preview": "true",
-        "reply_markup": json.dumps({"inline_keyboard": [[{
-            "text": "📢 Что нового", "url": COMMUNITY_UPDATES,
-        }]]}),
+        "reply_markup": json.dumps({"inline_keyboard": [[
+            {"text": "📢 Что нового", "url": COMMUNITY_UPDATES},
+            {"text": "GitHub", "url": PROJECT_URL},
+        ]]}),
     }).encode()
     request = Request(
         f"https://api.telegram.org/bot{token}/sendMessage",

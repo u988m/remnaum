@@ -89,6 +89,11 @@ class PremiumMenuTests(unittest.TestCase):
 
 
 class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        kinds = patch("app.bot.handlers.list_document_kinds", return_value=set())
+        self.list_document_kinds = kinds.start()
+        self.addCleanup(kinds.stop)
+
     async def test_long_plan_title_keeps_price_and_a_full_width_button(self):
         from app.bot.handlers import plans_handler
 
@@ -161,6 +166,38 @@ class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
             await home_handler(callback)
         message.edit_caption.assert_awaited_once()
         message.edit_text.assert_not_awaited()
+
+    async def test_published_documents_appear_and_open_from_the_bottom_of_the_menu(self):
+        from app.bot.handlers import document_handler, information_handler, send_home_menu
+
+        self.list_document_kinds.return_value = {"privacy"}
+        message = SimpleNamespace(answer=AsyncMock(), edit_text=AsyncMock())
+        callback = SimpleNamespace(message=message, answer=AsyncMock(), data="document:privacy:0")
+        body = "<текст & данные>\n" + "😀" * 3600 + "\nПоследний абзац."
+        with patch("app.bot.handlers.get_document", return_value=body), \
+             patch("app.bot.handlers.home_text", return_value="Магазин"), \
+             patch("app.bot.handlers.welcome_image_path", return_value=None):
+            await send_home_menu(message, 123, {})
+            menu = message.answer.await_args.kwargs["reply_markup"].inline_keyboard
+            self.assertEqual([b.callback_data for b in menu[-1]], ["menu:information"])
+
+            await information_handler(callback)
+            information = message.edit_text.await_args.kwargs["reply_markup"].inline_keyboard
+            self.assertEqual([row[0].callback_data for row in information], ["document:privacy:0", "menu:home"])
+
+            await document_handler(callback)
+            self.assertIn("&lt;текст &amp; данные&gt;", message.edit_text.await_args.args[0])
+            for _ in range(4):
+                markup = message.edit_text.await_args.kwargs["reply_markup"]
+                self.assertEqual(markup.inline_keyboard[-1][0].callback_data, "menu:information")
+                next_button = next((b for row in markup.inline_keyboard for b in row if b.text == "Следующая ›"), None)
+                if next_button is None:
+                    break
+                callback.data = next_button.callback_data
+                await document_handler(callback)
+            else:
+                self.fail("The document did not reach its last page")
+            self.assertIn("Последний абзац.", message.edit_text.await_args.args[0])
 
     async def test_photo_section_stays_photo_with_banner(self):
         from app.bot.handlers import edit_menu_message

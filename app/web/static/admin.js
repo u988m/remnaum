@@ -930,9 +930,50 @@ $("referral-form").onsubmit=async e=>{
     $("status").textContent="Реферальная программа сохранена";
   }catch(err){$("status").textContent=err.message}
 };
+const documentForms = document.querySelectorAll("[data-document-kind]");
+let documentsRequest;
+
+function loadDocuments() {
+  documentsRequest ??= adminApi("GET", "/admin/api/documents").then(({documents}) => {
+    for (const form of documentForms) {
+      const body = documents[form.dataset.documentKind];
+      form.querySelector("textarea").value = body ?? "";
+      form.querySelector("button").textContent = body ? "Сохранить изменения" : "Опубликовать";
+      form.querySelector('[role="status"]').textContent = body ? "Опубликован" : "Не опубликован";
+      form.querySelector("fieldset").disabled = false;
+    }
+  }).catch(error => {
+    documentsRequest = undefined;
+    throw error;
+  });
+  return documentsRequest;
+}
+
+for (const form of documentForms) {
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    const fieldset = form.querySelector("fieldset");
+    const input = form.querySelector("textarea");
+    const feedback = form.querySelector('[role="status"]');
+    if (fieldset.disabled) return;
+    fieldset.disabled = true;
+    feedback.textContent = "Сохраняем…";
+    try {
+      const {body} = await adminApi("PUT", `/admin/api/documents/${form.dataset.documentKind}`, {body: input.value});
+      input.value = body;
+      form.querySelector("button").textContent = "Сохранить изменения";
+      feedback.textContent = "Документ опубликован";
+    } catch (error) {
+      feedback.textContent = error.message;
+    } finally {
+      fieldset.disabled = false;
+    }
+  });
+}
+
 const sidebarIconNames = {
   overview:"grid", plans:"tag", users:"users", payments:"card",
-  bonuses:"ticket", referrals:"gift", configuration:"wallet",
+  bonuses:"ticket", referrals:"gift", configuration:"wallet", documents:"document",
 };
 for(const button of document.querySelectorAll(".admin-tabs [data-tab]")){
   const icon=document.createElementNS("http://www.w3.org/2000/svg","svg");
@@ -972,6 +1013,7 @@ const tabs = {
   brand: {sections: ["brand-view"], load: loadBrand},
   trial: {sections: ["trial-view"], load: loadTrialSettings},
   configuration: {sections: ["configuration-view"]},
+  documents: {sections: ["documents-view"], load: loadDocuments},
   settings: {sections: ["payment-settings-view"], load: loadPaymentSettings},
 };
 const providerByTab = Object.fromEntries(Object.entries(providerTabs).map(([name, tab]) => [tab, name]));

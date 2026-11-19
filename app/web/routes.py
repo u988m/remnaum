@@ -26,6 +26,7 @@ from app.services.tariffs import format_traffic
 from app.services.subscriptions import provision_paid_payment
 from app.services.payment_notifications import notify_external_payment_success
 from app.services.telegram_webapp import telegram_photo_url, validate_telegram_init_data
+from app.services.store_documents import DOCUMENT_MAX_LENGTH, DocumentKind, list_documents, save_document
 from app.services import customer_admin
 from app.services.devices import DeviceNotFound, DevicesUnavailable, change_customer_device, get_customer_devices
 from app.services.subscriptions import PanelAccountConflict
@@ -913,6 +914,31 @@ class StoreProfilePayload(BaseModel):
     accent_color: str = Field(default="#4b8bea", pattern=r"^#[a-fA-F0-9]{6}$")
     support_contact: str = Field(default="", max_length=300)
     terms_url: str = Field(default="", max_length=300)
+
+
+class StoreDocumentPayload(BaseModel):
+    body: str = Field(max_length=DOCUMENT_MAX_LENGTH)
+
+
+@router.get("/admin/api/documents")
+async def admin_list_documents(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    return {"documents": await list_documents()}
+
+
+@router.put("/admin/api/documents/{kind}")
+async def admin_save_document(
+    kind: DocumentKind, data: StoreDocumentPayload,
+    x_telegram_init_data: str | None = Header(default=None),
+):
+    await _require_telegram_admin(x_telegram_init_data)
+    body = data.body.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not body:
+        raise HTTPException(status_code=422, detail="Введите текст документа.")
+    if "\x00" in body:
+        raise HTTPException(status_code=422, detail="Текст содержит недопустимый нулевой символ.")
+    await save_document(kind, body)
+    return {"body": body}
 
 
 from app.services.store_media import (

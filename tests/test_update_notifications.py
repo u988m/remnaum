@@ -1,9 +1,11 @@
 """Unit tests for the VPS-only GitHub update checker. No live network."""
 import importlib.util
+import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
-from subprocess import CalledProcessError
+from urllib.parse import parse_qs
 from unittest.mock import patch
 
 SOURCE = Path(__file__).resolve().parents[1] / "scripts" / "check_updates.py"
@@ -13,10 +15,16 @@ spec.loader.exec_module(checker)
 
 
 class UpdateNotificationTests(unittest.TestCase):
-    def test_community_link_in_message(self):
-        text = checker.make_message()
-        self.assertIn("https://t.me/remnaum/4", text)
-        self.assertIn("sudo sh install.sh", text)
+    def test_notice_has_links_only_in_buttons(self):
+        with patch.object(checker, "urlopen", return_value=io.BytesIO(b'{"ok": true}')) as send:
+            self.assertTrue(checker.send_notice("test-token", 1234))
+        payload = parse_qs(send.call_args.args[0].data.decode())
+        self.assertNotIn("https://", payload["text"][0])
+        self.assertIn("sudo sh install.sh", payload["text"][0])
+        self.assertEqual(json.loads(payload["reply_markup"][0])["inline_keyboard"], [[
+            {"text": "📢 Что нового", "url": "https://t.me/remnaum/4"},
+            {"text": "GitHub", "url": "https://github.com/u988m/remnaum"},
+        ]])
 
     def test_main_commit_change(self):
         local = "1" * 40

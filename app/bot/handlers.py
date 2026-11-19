@@ -25,6 +25,7 @@ from app.services.payment_service import settle_payment
 from app.services.subscriptions import PanelAccountConflict, get_user_subscription, provision_paid_payment
 from app.services.users import BlockedCustomer, get_or_create_user
 from app.services.devices import DeviceNotFound, DevicesUnavailable, change_customer_device, get_customer_devices
+from app.services.store_documents import DOCUMENT_TITLES, get_document, list_document_kinds
 from app.services.store_settings import (
     PROVIDER_LABELS, get_payment_presentation, get_store_payment_settings, is_payment_method_enabled, public_payment_settings,
 )
@@ -46,7 +47,7 @@ router.message.middleware(MenuMiddleware())
 router.callback_query.middleware(MenuMiddleware())
 
 
-def main_menu() -> InlineKeyboardMarkup:
+def main_menu(*, has_documents: bool = False) -> InlineKeyboardMarkup:
     rows = []
     has_webapp = settings.webapp_url.startswith("https://")
     if has_webapp:
@@ -59,6 +60,8 @@ def main_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🧾 Покупки", callback_data="menu:purchases"),
          InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support")],
     ])
+    if has_documents:
+        rows.append([InlineKeyboardButton(text="ℹ️ Информация", callback_data="menu:information")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def back_menu(destination: str = "menu:home") -> InlineKeyboardMarkup:
@@ -84,9 +87,10 @@ async def home_text(telegram_id: int, profile: dict) -> str:
 
 
 async def send_menu(
-    message: Message, text: str, markup: InlineKeyboardMarkup | None, *, previous: Message | None = None,
+    message: Message, text: str, markup: InlineKeyboardMarkup | None, *,
+    previous: Message | None = None, with_photo: bool = True,
 ) -> None:
-    image = welcome_image_path()
+    image = welcome_image_path() if with_photo else None
     if image is not None:
         try:
             sent = await message.answer_photo(FSInputFile(image), caption=_menu_caption(text), reply_markup=markup)
@@ -100,7 +104,8 @@ async def send_menu(
 
 
 async def send_home_menu(message: Message, telegram_id: int, profile: dict) -> None:
-    await send_menu(message, await home_text(telegram_id, profile), main_menu())
+    keyboard = main_menu(has_documents=bool(await list_document_kinds()))
+    await send_menu(message, await home_text(telegram_id, profile), keyboard)
 
 
 async def show_command_section(message: Message, text: str, markup: InlineKeyboardMarkup) -> None:
@@ -118,19 +123,24 @@ def _menu_caption(text: str) -> str:
     return escape(shortened.rstrip(), quote=False) + suffix
 
 
-async def edit_menu_message(message: Message, text: str, *, reply_markup: InlineKeyboardMarkup | None = None) -> None:
+async def edit_menu_message(
+    message: Message, text: str, *, reply_markup: InlineKeyboardMarkup | None = None,
+    with_photo: bool = True,
+) -> None:
     """Edit the active menu or replace it if Telegram changes the message type."""
-    if getattr(message, "invoice", None) or (not getattr(message, "photo", None) and welcome_image_path() is not None):
-        await send_menu(message, text, reply_markup, previous=message)
+    has_photo = bool(getattr(message, "photo", None))
+    replace_photo = (not has_photo and welcome_image_path() is not None) if with_photo else has_photo
+    if getattr(message, "invoice", None) or replace_photo:
+        await send_menu(message, text, reply_markup, previous=message, with_photo=with_photo)
         return
     try:
-        if getattr(message, "photo", None):
+        if has_photo:
             await message.edit_caption(caption=_menu_caption(text), reply_markup=reply_markup)
         else:
             await message.edit_text(text, reply_markup=reply_markup)
     except TelegramBadRequest as exc:
         if "message is not modified" not in str(exc).lower():
-            await send_menu(message, text, reply_markup, previous=message)
+            await send_menu(message, text, reply_markup, previous=message, with_photo=with_photo)
             return
     await remember_menu(message, reply_markup)
 
@@ -153,7 +163,8 @@ async def admin_command_handler(message: Message) -> None:
     if message.from_user is None or message.from_user.id not in settings.admin_id_set:
         await show_command_section(message, "Доступ к панели управления запрещён.", back_menu())
         return
-    await show_command_section(message, "Откройте в Mini App «Профиль» → «Админ-панель».", main_menu())
+    keyboard = main_menu(has_documents=bool(await list_document_kinds()))
+    await show_command_section(message, "Откройте в Mini App «Профиль» → «Админ-панель».", keyboard)
 
 
 @router.message(Command("help"))
@@ -168,8 +179,63 @@ async def home_handler(callback: CallbackQuery) -> None:
     if callback.message:
         profile = await get_store_profile()
         text = await home_text(callback.from_user.id, profile)
-        keyboard = main_menu()
+        keyboard = main_menu(has_documents=bool(await list_document_kinds()))
         await edit_menu_message(callback.message, text, reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "menu:information")
+async def information_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.message:
+        return
+    kinds = await list_document_kinds()
+    rows = [
+        [InlineKeyboardButton(text=title, callback_data=f"document:{kind}:0")]
+        for kind, title in DOCUMENT_TITLES.items() if kind in kinds
+    ]
+    text = "ℹ️ <b>Информация</b>" if rows else "Документы пока не опубликованы."
+    rows.extend(back_menu().inline_keyboard)
+    await edit_menu_message(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+def _document_pages(body: str) -> list[str]:
+    # Keep every page within Telegram's 4096-character limit, even with emoji.
+    page_size = 1800
+    pages = []
+    while len(body) > page_size:
+        cut = body.rfind("\n", page_size // 2, page_size)
+        if cut == -1:
+            cut = body.rfind(" ", page_size // 2, page_size)
+        end = cut + 1 if cut != -1 else page_size
+        pages.append(body[:end])
+        body = body[end:]
+    pages.append(body)
+    return pages
+
+
+@router.callback_query(F.data.regexp(r"^document:(terms|privacy):[0-9]{1,2}$"))
+async def document_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.message:
+        return
+    _, kind, requested_page = callback.data.split(":")
+    body = await get_document(kind)
+    keyboard = back_menu("menu:information")
+    if not body:
+        await edit_menu_message(callback.message, "Документ пока не опубликован.", reply_markup=keyboard)
+        return
+    pages = _document_pages(body)
+    page = min(int(requested_page), len(pages) - 1)
+    text = f"<b>{DOCUMENT_TITLES[kind]}</b>\n\n{escape(pages[page], quote=False)}"
+    if len(pages) > 1:
+        text += f"\n\nСтраница {page + 1} из {len(pages)}"
+        navigation = []
+        if page > 0:
+            navigation.append(InlineKeyboardButton(text="‹ Предыдущая", callback_data=f"document:{kind}:{page - 1}"))
+        if page + 1 < len(pages):
+            navigation.append(InlineKeyboardButton(text="Следующая ›", callback_data=f"document:{kind}:{page + 1}"))
+        keyboard.inline_keyboard.insert(0, navigation)
+    await edit_menu_message(callback.message, text, reply_markup=keyboard, with_photo=False)
 
 
 @router.callback_query(F.data == "menu:bonuses")
