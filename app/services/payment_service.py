@@ -3,7 +3,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.db.models import Payment, TariffDraft, TermsAcceptance, User
+from app.db.models import InternalSquadCatalog, Payment, TariffDraft, TermsAcceptance, User
 from app.db.session import SessionLocal
 from app.config import settings
 from app.services.payment_providers import VerifiedPayment, get_provider
@@ -13,7 +13,23 @@ from app.services.plans import selected_plan_for_user
 from app.services.store_profile import get_terms_url
 
 
-async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple[Payment, Any]:
+async def checkout_squads(session, user_id, plan):
+    selected = settings.remnawave_internal_squad_ids if plan is None else (plan.internal_squads or [])
+    catalog = await session.get(InternalSquadCatalog, 1)
+    missing = catalog and catalog.last_success and any(
+        not catalog.items.get(key, {}).get("available") for key in selected
+    )
+    if not selected or missing:
+        # Existing paid subscriptions keep the assignments already on the panel.
+        paid = await session.scalar(select(Payment.id).where(
+            Payment.user_id == user_id, Payment.status == "succeeded"
+        ).limit(1))
+        if not paid:
+            raise ValueError("Сквады тарифа не настроены или недоступны")
+    return selected
+
+
+async def create_payment_for_user(telegram_id: int, provider_name: str, expected_plan_id: int | None = None) -> tuple[Payment, Any]:
     methods, credentials = await get_store_payment_settings()
     if provider_name not in {"yookassa", "yoomoney", "cryptopay"} or not methods.get(provider_name):
         raise ValueError("Выбранный способ оплаты отключён администратором")
@@ -22,8 +38,6 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
     quote = await ensure_tariff_draft(telegram_id)
     if not settings.remnawave_base_url or not settings.remnawave_api_token:
         raise RuntimeError("Remnawave is not configured; payment checkout is disabled")
-    if not settings.remnawave_internal_squad_ids:
-        raise RuntimeError("Set REMNAWAVE_ACTIVE_INTERNAL_SQUADS before accepting payments")
     async with SessionLocal() as session:
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
         if user is None:
@@ -34,6 +48,8 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
         if draft is None:
             raise ValueError("Configure your tariff before paying")
         plan = await selected_plan_for_user(session, user.id)
+        if expected_plan_id is not None and (plan is None or plan.id != expected_plan_id):
+            raise ValueError("Выбранный тариф изменился. Откройте тариф ещё раз.")
         if plan is not None:
             if not plan.is_active or (
                 draft.duration_days, draft.traffic_gb, draft.device_limit
@@ -60,6 +76,7 @@ async def create_payment_for_user(telegram_id: int, provider_name: str) -> tuple
                     "duration_days": draft.duration_days,
                     "traffic_gb": draft.traffic_gb,
                     "device_limit": draft.device_limit,
+                    "internal_squads": await checkout_squads(session, user.id, plan),
                 },
                 "plan_id": plan.id if plan is not None else None,
             }),
@@ -167,7 +184,7 @@ async def accept_current_terms(telegram_id: int) -> None:
             await session.commit()
 
 
-async def create_stars_payment_for_user(telegram_id: int) -> tuple[Payment, int]:
+async def create_stars_payment_for_user(telegram_id: int, expected_plan_id: int | None = None) -> tuple[Payment, int]:
     await ensure_tariff_draft(telegram_id)
     if not await get_terms_url():
         raise RuntimeError("Publish the terms URL in the admin branding settings before enabling sales")
@@ -175,8 +192,6 @@ async def create_stars_payment_for_user(telegram_id: int) -> tuple[Payment, int]
         raise ValueError("The user has not accepted the current terms")
     if not settings.remnawave_base_url or not settings.remnawave_api_token:
         raise RuntimeError("Remnawave is not configured; checkout is disabled")
-    if not settings.remnawave_internal_squad_ids:
-        raise RuntimeError("Set REMNAWAVE_ACTIVE_INTERNAL_SQUADS before accepting payments")
 
     async with SessionLocal() as session:
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
@@ -186,6 +201,8 @@ async def create_stars_payment_for_user(telegram_id: int) -> tuple[Payment, int]
         if draft is None:
             raise ValueError("Configure your tariff before paying")
         plan = await selected_plan_for_user(session, user.id)
+        if expected_plan_id is not None and (plan is None or plan.id != expected_plan_id):
+            raise ValueError("Выбранный тариф изменился. Откройте тариф ещё раз.")
         if plan is not None:
             if not plan.is_active or (
                 draft.duration_days, draft.traffic_gb, draft.device_limit
@@ -205,6 +222,7 @@ async def create_stars_payment_for_user(telegram_id: int) -> tuple[Payment, int]
                     "duration_days": draft.duration_days,
                     "traffic_gb": draft.traffic_gb,
                     "device_limit": draft.device_limit,
+                    "internal_squads": await checkout_squads(session, user.id, plan),
                 },
                 "plan_id": plan.id if plan is not None else None,
                 "terms_version": settings.telegram_terms_version,

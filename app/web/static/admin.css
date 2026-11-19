@@ -91,3 +91,8 @@ tr:last-child td{border-bottom:0}
   .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(max-width:350px){.admin-tabs button{font-size:10.5px}.section{padding:14px}main{padding-left:10px;padding-right:10px}}
+
+#plan-form fieldset { min-width: 0; margin: 16px 0; border: 1px solid #31516c; border-radius: 12px; }
+#squads-options, #squads-selected { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+#squads-options { max-height: 18rem; overflow-y: auto; }
+#squads-options button, #squads-selected button { text-align: left; overflow-wrap: anywhere; }

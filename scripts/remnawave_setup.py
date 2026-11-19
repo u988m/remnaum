@@ -91,26 +91,6 @@ def discover_squads(base_url: str, token: str) -> list[dict[str, str]]:
     return parse_squads(_fetch_json(panel_api_url(base_url), token))
 
 
-def select_squads(
-    squads: list[dict[str, str]],
-    ask=None,
-    *,
-    default_all: bool = True,
-) -> str:
-    """Assign every discovered Internal Squad automatically, without prompts.
-
-    Internal Squads can grant different access (including premium nodes).
-    The operator explicitly opted into the all-squads policy in Remnaum.
-    """
-    if not squads:
-        raise ValueError("У панели пока нет внутренних групп. Создайте Internal Squad в Remnawave.")
-    identifiers = validate_uuid_list(",".join(squad["uuid"] for squad in squads))
-    print(f"✅ Автоматически выбраны все внутренние группы Remnawave ({len(identifiers.split(','))}):")
-    for squad in squads:
-        print(f"    • {squad['name']} ({squad['uuid']})")
-    return identifiers
-
-
 def validate_uuid_list(value: str) -> str:
     try:
         identifiers = [str(uuid.UUID(item.strip())) for item in value.split(",")]

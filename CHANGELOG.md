@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0
+
+- Added per-plan Internal Squad selection, persistent panel discovery and payment snapshots. Renewals preserve existing paid subscriber assignments.
+
 ## 1.0.0-rc.8 — Remnawave 3.x compatibility and automatic squad synchronization
 
 - Installer now auto-selects **every** existing Internal Squad from `GET /api/internal-squads` with no manual choice; all found UUIDs are assigned to new VPN subscribers.

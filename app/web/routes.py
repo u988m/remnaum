@@ -505,10 +505,24 @@ async def remnawave_webhook(request: Request, x_remnawave_signature: str | None 
 
 
 # Fixed plans share the existing Telegram-authenticated admin dashboard.
+from app.services.squads import get_catalog, refresh_catalog
 from app.services.plans import list_plans, save_plan, choose_plan
 
 
+@router.get("/admin/api/internal-squads")
+async def admin_internal_squads(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    return await get_catalog()
+
+
+@router.post("/admin/api/internal-squads/refresh")
+async def admin_refresh_internal_squads(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    return await refresh_catalog()
+
+
 class PlanPayload(BaseModel):
+    internal_squads: list[str] | None = None
     title: str = Field(min_length=1, max_length=80)
     description: str = Field(default="", max_length=2000)
     duration_days: int = Field(ge=1, le=365)
@@ -571,7 +585,7 @@ async def webapp_checkout_ready_plan(data: WebAppFixedPlanCheckout, x_telegram_i
         raise HTTPException(status_code=403, detail="Telegram Stars checkout is disabled")
     try:
         quote = await choose_plan(telegram_id, data.plan_id)
-        payment, stars = await create_stars_payment_for_user(telegram_id)
+        payment, stars = await create_stars_payment_for_user(telegram_id, expected_plan_id=data.plan_id)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if bot is None:
@@ -895,9 +909,9 @@ def _validate_external_provider(name: str) -> None:
         raise HTTPException(status_code=422, detail="Unknown external provider")
 
 
-async def _external_checkout(telegram_id: int, provider: str):
+async def _external_checkout(telegram_id: int, provider: str, expected_plan_id: int | None = None):
     try:
-        payment, link = await create_payment_for_user(telegram_id, provider)
+        payment, link = await create_payment_for_user(telegram_id, provider, expected_plan_id=expected_plan_id)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if urlsplit(link.url).scheme != "https":
@@ -939,7 +953,7 @@ async def webapp_external_plan_checkout(
         await choose_plan(telegram_id, data.plan_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return await _external_checkout(telegram_id, data.provider)
+    return await _external_checkout(telegram_id, data.provider, expected_plan_id=data.plan_id)
 
 
 async def _get_public_checkout_methods():

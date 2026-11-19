@@ -8,8 +8,8 @@ from fastapi.staticfiles import StaticFiles
 
 from app.bot.runtime import bot, dispatcher, setup_bot
 from app.config import settings
-from app.db.base import Base
-from app.db.session import engine
+from app.db.session import engine, initialize_schema
+from app.services.squads import refresh_catalog
 from app.services.legacy_settings import migrate_legacy_payment_settings
 from app.web.routes import router as api_router
 from app.web.storefront import router as store_router
@@ -35,10 +35,20 @@ async def _register_telegram_webhook() -> None:
             await asyncio.sleep(30)
 
 
+async def _sync_squads_periodically():
+    while True:
+        await asyncio.sleep(900)
+        try:
+            await refresh_catalog()
+        except Exception:
+            log.exception("Could not persist the Internal Squads catalogue")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+        await initialize_schema(connection)
+    await refresh_catalog()
     await migrate_legacy_payment_settings()
 
     polling_task = None
@@ -51,10 +61,11 @@ async def lifespan(_: FastAPI):
             webhook_task = asyncio.create_task(_register_telegram_webhook())
         elif not settings.telegram_use_webhook:
             polling_task = asyncio.create_task(dispatcher.start_polling(bot))
+    sync_task = asyncio.create_task(_sync_squads_periodically())
     try:
         yield
     finally:
-        for task in (polling_task, webhook_task):
+        for task in (polling_task, webhook_task, sync_task):
             if task:
                 task.cancel()
                 try:
@@ -66,7 +77,7 @@ async def lifespan(_: FastAPI):
         await engine.dispose()
 
 
-app = FastAPI(title=settings.app_name, version="1.0.0-rc.8", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.0.0", lifespan=lifespan)
 app.include_router(api_router)
 app.include_router(store_router)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "static"), name="static")

@@ -1,7 +1,7 @@
 """Fixed price plans: a second purchase mode alongside the flexible tariff builder."""
 from sqlalchemy import select, delete
 from sqlalchemy.dialects.postgresql import insert
-from app.db.models import TariffPlan, SelectedPlan, TariffDraft, User
+from app.db.models import InternalSquadCatalog, TariffPlan, SelectedPlan, TariffDraft, User
 from app.db.session import SessionLocal
 from app.services.tariffs import TariffQuote
 from app.config import settings
@@ -41,24 +41,38 @@ async def list_plans(active_only: bool = True) -> list[dict]:
         if active_only:
             query = query.where(TariffPlan.is_active.is_(True))
         query = query.order_by(TariffPlan.sort_order, TariffPlan.id)
-        return [plan_to_dict(p) for p in (await session.scalars(query)).all()]
+        plans = (await session.scalars(query)).all()
+        return [plan_to_dict(p) if active_only else plan_to_dict(p) | {"internal_squads": p.internal_squads}
+                for p in plans]
 
 
 async def save_plan(data: dict, plan_id: int | None = None) -> dict:
     validate_plan(data)
     async with SessionLocal() as session:
-        plan = await session.get(TariffPlan, plan_id) if plan_id else None
+        plan = await session.get(TariffPlan, plan_id, with_for_update=True) if plan_id else None
         if plan_id and plan is None:
             raise ValueError("Unknown plan")
         if plan is None:
             plan = TariffPlan()
-            session.add(plan)
+        selected = data.get("internal_squads")
+        if selected is not None:
+            if not selected:
+                raise ValueError("Выберите хотя бы один Internal Squad")
+            catalog = await session.get(InternalSquadCatalog, 1)
+            known = catalog.items if catalog else {}
+            for identifier in set(selected) - set(plan.internal_squads or []):
+                if not known.get(identifier, {}).get("available"):
+                    raise ValueError("Сквад недоступен. Обновите список сквадов.")
+            plan.internal_squads = list(dict.fromkeys(selected))
+        elif not plan_id:
+            raise ValueError("Выберите хотя бы один Internal Squad")
         for key in ("title", "description", "duration_days", "traffic_gb", "device_limit", "price_rub_minor", "price_stars", "is_active", "sort_order"):
             if key in data:
                 setattr(plan, key, data[key])
+        session.add(plan)
         await session.commit()
         await session.refresh(plan)
-        return plan_to_dict(plan)
+        return plan_to_dict(plan) | {"internal_squads": plan.internal_squads}
 
 
 async def choose_plan(telegram_id: int, plan_id: int) -> TariffQuote:

@@ -45,6 +45,14 @@
 <label>Цена (Stars)<input id="plan-stars" type="number" value="100" min="1" required></label>
 <label>Активен<input id="plan-active" type="checkbox" checked></label>
 </div>
+<fieldset><legend>Internal Squads</legend>
+<button class="action" id="squads-refresh" type="button">Обновить список сквадов</button>
+<p id="squads-status" role="status"></p>
+<p id="squads-policy"></p>
+<div id="squads-selected" aria-label="Выбранные сквады"></div>
+<label>Поиск по названию<input type="search" id="squads-search"></label>
+<div id="squads-options" aria-label="Доступные сквады"></div>
+</fieldset>
 <label>Описание<input id="plan-description" maxlength="2000" placeholder="Описание тарифа" style="width:100%"></label>
 <div class="toolbar"><button class="action primary" type="submit">Сохранить тариф</button><button class="action" type="button" id="plan-new">Новый тариф</button></div>
 </form>

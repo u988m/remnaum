@@ -6,7 +6,7 @@ import httpx
 from sqlalchemy import select
 
 from app.config import settings
-from app.db.models import Payment, Subscription, SubscriptionDetails, User
+from app.db.models import Payment, Subscription, SubscriptionDetails, TrialClaim, User
 from app.db.session import SessionLocal
 from app.services.remnawave import RemnawaveClient
 from app.services.referrals import pending_rewards_for_payment, grant_referral_reward
@@ -40,7 +40,7 @@ async def provision_paid_payment(payment_id: int) -> bool:
         if payment.status != "paid":
             raise ValueError("Payment has not been verified as paid")
 
-        user = await session.get(User, payment.user_id)
+        user = await session.get(User, payment.user_id, with_for_update=True)
         if user is None:
             raise RuntimeError("Payment owner not found")
         snapshot = json.loads(payment.payload or "{}").get("tariff") or {}
@@ -77,7 +77,16 @@ async def provision_paid_payment(payment_id: int) -> bool:
         if panel_user:
             panel_user_id = _panel_identity(panel_user)
             description = str(panel_user.get("description") or "")
-            if marker not in description:
+            markers = {part.strip() for part in description.split("|")}
+            if marker not in markers:
+                first_purchase = subscription is None
+                if subscription is not None and await session.scalar(
+                    select(TrialClaim.id).where(TrialClaim.user_id == user.id, TrialClaim.status == "completed")
+                ):
+                    previous_payment = await session.scalar(select(Payment.id).where(
+                        Payment.user_id == user.id, Payment.status == "succeeded"
+                    ).limit(1))
+                    first_purchase = previous_payment is None
                 expire_value = panel_user.get("expireAt")
                 if isinstance(expire_value, str):
                     current_expiry = datetime.fromisoformat(expire_value.replace("Z", "+00:00"))
@@ -93,6 +102,7 @@ async def provision_paid_payment(payment_id: int) -> bool:
                     hwid_device_limit=device_limit,
                     expire_at=new_expiry,
                     description=new_description,
+                    active_internal_squads=snapshot.get("internal_squads") if first_purchase else None,
                 )
             else:
                 await panel.update_user(
@@ -103,7 +113,12 @@ async def provision_paid_payment(payment_id: int) -> bool:
                 )
             panel_user = _unwrap(await panel.get_user(panel_user_id))
         else:
+            if subscription is not None:
+                raise RuntimeError("Panel account missing for existing subscription; check before retrying renewal")
             expire_at = datetime.now(timezone.utc) + timedelta(days=total_days)
+            squads = snapshot.get("internal_squads", settings.remnawave_internal_squad_ids)
+            if not squads:
+                raise RuntimeError("No Internal Squads configured for VPN issuance")
             created = await panel.create_user(
                 username,
                 expire_at,
@@ -111,7 +126,7 @@ async def provision_paid_payment(payment_id: int) -> bool:
                 traffic_limit_bytes=traffic_bytes,
                 traffic_limit_strategy="NO_RESET",
                 hwid_device_limit=device_limit,
-                active_internal_squads=settings.remnawave_internal_squad_ids or None,
+                active_internal_squads=squads,
                 description=marker,
             )
             panel_user = _unwrap(created)
