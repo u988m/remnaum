@@ -633,6 +633,93 @@ def rotate_postgres_password(password: str, *, path: Path = ENV_PATH) -> None:
             raise
 
 
+def check_installer_postgres_connection() -> tuple[bool, bool]:
+    """Probe the actual PostgreSQL credentials, not pg_isready alone.
+
+    Never print subprocess output: external error messages may contain secrets.
+    The helper returns (connected, bad_password), nothing sensitive.
+    """
+    result = subprocess.run(
+        ["docker", "compose", "run", "--rm", "--no-deps", "-T", "--entrypoint",
+         "python", "app", "-m", "app.db.check_connection"],
+        cwd=ROOT, capture_output=True, text=True, timeout=60,
+    )
+    return result.returncode == 0, (
+        "PostgreSQL отклонил пароль из DATABASE_URL" in result.stderr
+    )
+
+
+def ensure_install_postgres_connection(cfg: dict[str, str]) -> None:
+    """Protect a surviving PostgreSQL volume during a fresh source reinstall.
+
+    The database volume can survive deletion of /opt/remnaum. Never remove it,
+    silently change role credentials, or start an app with an unverified login.
+    """
+    # Existing volumes are preserved by compose up; start only the DB before app.
+    run(["docker", "compose", "build", "app"])
+    run(["docker", "compose", "up", "-d", "--no-deps", "postgres"])
+    backups.wait_for_postgres(ROOT)
+    connected, bad_password = check_installer_postgres_connection()
+    if connected:
+        return
+    if not bad_password:
+        raise RuntimeError(
+            "PostgreSQL не принял подключение приложения. Проверьте DATABASE_URL, "
+            "логи postgres и сеть Docker. Контейнер приложения не заменён."
+        )
+    # A re-created .env does not imply an empty database. Encryption secrets
+    # from the old installation may also be needed for existing store settings.
+    print(
+        "\n⚠️ Найдена база PostgreSQL со старым паролем. "
+        "Удаление папки Remnaum не удаляет Docker volumes.\n"
+        "Данные сохранятся, но зашифрованные настройки прежнего магазина могут "
+        "потребовать старый APP_SECRET_KEY или резервную копию."
+    )
+    answer = prompt(
+        "Установить пароль из новой .env для существующей роли PostgreSQL? (д/Н)",
+        default="Н",
+    ).lower()
+    if answer not in ("д", "да", "y", "yes"):
+        raise RuntimeError(
+            "Установка остановлена без изменения пароля или данных PostgreSQL. "
+            "Восстановите прежнюю .env/бэкап либо запустите remnaum и выберите "
+            "пункт 4 для смены пароля."
+        )
+    password = cfg["POSTGRES_PASSWORD"]
+    validate_postgres_password(password)
+    local_postgres_url(cfg["DATABASE_URL"], password)
+    with backups._lock(".deploy.lock"), backups._lock():
+        # Take the old verifier before touching the password, to roll back
+        # even if the original plaintext password is already lost.
+        verifier = backups.postgres_admin(
+            "SELECT COALESCE(rolpassword, '') FROM pg_authid WHERE rolname = 'remnaum';\n"
+        )
+        if not verifier:
+            raise RuntimeError("Роль remnaum не найдена; старую базу не изменяли.")
+        try:
+            backups.set_postgres_password(password)
+            connected, _ = check_installer_postgres_connection()
+            if not connected:
+                raise RuntimeError(
+                    "Проверка PostgreSQL после смены пароля не прошла; "
+                    "прежний пароль будет восстановлен."
+                )
+        except (Exception, KeyboardInterrupt):
+            old_verifier = "'" + verifier.replace("'", "''") + "'"
+            try:
+                backups.postgres_admin(
+                    "SET standard_conforming_strings = on;\n"
+                    f"ALTER ROLE remnaum PASSWORD {old_verifier};\n"
+                )
+            except Exception:
+                raise RuntimeError(
+                    "Не удалось откатить пароль PostgreSQL. Сохраните volume и "
+                    "восстановите пароль вручную; данные не удалены."
+                ) from None
+            raise
+    print("✅ Пароль роли PostgreSQL синхронизирован с .env без удаления данных.")
+
+
 def change_postgres_password() -> None:
     password = prompt("Новый пароль PostgreSQL", hidden=True)
     validate_postgres_password(password)
@@ -963,6 +1050,7 @@ def main() -> int:
 
     ui.section(4, 5, "Сборка и запуск Docker")
     run(["docker", "compose", "config", "--quiet"])
+    ensure_install_postgres_connection(cfg)
     if sys.stdout.isatty():
         code = ui.animated_call(
             ["docker", "compose", "up", "-d", "--build"],
