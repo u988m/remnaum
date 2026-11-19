@@ -81,26 +81,54 @@
 <section id="configuration-view" class="dashboard-view" hidden>
   <h1>Настройки</h1>
   <div class="settings-list">
-    <button type="button" data-open-tab="operations"><strong>Интеграции и лимиты</strong><span>Вход, канал, Remnawave и дополнительные устройства</span></button>
+    <button type="button" data-open-tab="login"><strong>Вход в веб-приложение</strong><span>Telegram и Google</span></button>
+    <button type="button" data-open-tab="operations"><strong>Интеграции и лимиты</strong><span>Канал, Remnawave и дополнительные устройства</span></button>
     <button type="button" data-open-tab="campaigns"><strong>Рассылки и меню</strong><span>Отправить сообщение или обновить /start</span></button>
     <button type="button" data-open-tab="settings"><strong>Платёжные системы</strong><span>Способы оплаты и реквизиты</span></button>
     <button type="button" data-open-tab="trial"><strong>Пробный доступ</strong><span>Срок, трафик и число устройств</span></button>
     <button type="button" data-open-tab="notifications"><strong>Уведомления</strong><span>Подписка, триал и трафик</span></button>
   </div>
 </section>
+<section class="dashboard-view" id="login-view" hidden>
+  <button class="provider-back" type="button" data-back-tab="configuration">← Настройки</button>
+  <h1>Вход в веб-приложение</h1>
+  <div class="settings-list">
+    <button type="button" data-open-tab="login-telegram"><strong>Telegram</strong><span>Вход через аккаунт Telegram</span></button>
+    <button type="button" data-open-tab="login-google"><strong>Google</strong><span>OAuth и привязка профиля</span></button>
+  </div>
+</section>
+<section class="dashboard-view" id="login-telegram-view" hidden>
+  <button class="provider-back" type="button" data-back-tab="login">← Способы входа</button>
+  <h1>Вход через Telegram</h1>
+  <form class="dashboard-panel login-settings-form" id="login-telegram-form">
+    <label class="check"><input type="checkbox" name="enabled"> Разрешить вход через Telegram в браузере</label>
+    <label>Домен для BotFather /setdomain <input id="telegram-browser-domain" type="text" readonly></label>
+    <p class="muted" id="telegram-login-state"></p>
+    <div class="settings-footer">
+      <button type="submit" class="primary-btn">Сохранить</button>
+      <p id="login-telegram-status" class="muted" role="status"></p>
+    </div>
+  </form>
+</section>
+<section class="dashboard-view" id="login-google-view" hidden>
+  <button class="provider-back" type="button" data-back-tab="login">← Способы входа</button>
+  <h1>Вход через Google</h1>
+  <form class="dashboard-panel login-settings-form" id="login-google-form">
+    <label class="check"><input type="checkbox" name="enabled"> Разрешить вход через Google</label>
+    <label>Google Client ID <input name="client_id" maxlength="255"></label>
+    <label>Google Client Secret <input name="client_secret" type="password" maxlength="512" autocomplete="new-password"></label>
+    <label>Redirect URI для Google <input id="google-callback" readonly></label>
+    <p class="muted" id="google-login-state"></p>
+    <div class="settings-footer">
+      <button type="submit" class="primary-btn">Сохранить</button>
+      <p id="login-google-status" class="muted" role="status"></p>
+    </div>
+  </form>
+</section>
 <section class="dashboard-view" id="operations-view" hidden>
-  <button class="provider-back" type="button" data-back-tab="configuration">← Назад</button>
+  <button class="provider-back" type="button" data-back-tab="configuration">← Настройки</button>
   <h1>Интеграции и лимиты</h1>
   <form class="operations-form" id="operations-form">
-    <fieldset>
-      <legend>Вход в веб-приложение</legend>
-      <label class="check"><input type="checkbox" name="telegram_login"> Telegram</label>
-      <label class="check"><input type="checkbox" name="google_login"> Google</label>
-      <label>Google Client ID <input name="google_client_id" maxlength="255"></label>
-      <label>Google Client Secret <input name="google_client_secret" type="password" autocomplete="new-password"></label>
-      <label>Redirect URI для Google <input id="google-callback" readonly></label>
-      <p class="muted" id="auth-status"></p>
-    </fieldset>
     <fieldset>
       <legend>Подписка на канал</legend>
       <label>Канал (@username или ID) <input name="required_channel" maxlength="33"></label>

@@ -1080,16 +1080,13 @@ matchMedia("(min-width: 851px)").addEventListener("change", event => {
 });
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&adminSidebar.classList.contains("is-open"))setAdminMenu(false);});
 const operationsForm = $("operations-form");
-const secretFields = new Set(["google_client_secret", "panel_token", "panel_webhook_secret"]);
+const secretFields = new Set(["panel_token", "panel_webhook_secret"]);
 async function loadOperations() {
   const data = await api("/admin/api/operations");
   for (const field of operationsForm.elements) {
     if (field.type === "checkbox") field.checked = data[field.name];
     else if (field.name) field.value = secretFields.has(field.name) ? "" : data[field.name] ?? "";
   }
-  $("google-callback").value = data.google_callback_url;
-  $("auth-status").textContent = "Telegram " + (data.telegram_configured ? "настроен" : "требует бота") +
-    " · Google " + (data.google_configured ? "настроен" : "требует реквизиты");
   $("panel-configuration-status").textContent = "API " + (data.panel_configured ? "настроен" : "требует реквизиты") +
     " · Вебхук " + (data.panel_webhook_configured ? "настроен" : "не настроен");
 }
@@ -1111,6 +1108,48 @@ operationsForm.onsubmit = async event => {
     event.submitter.disabled = false;
   }
 };
+
+function setupLoginForm(provider, fillDetails) {
+  const form = $("login-" + provider + "-form");
+  const status = $("login-" + provider + "-status");
+
+  const fill = data => {
+    form.elements.enabled.checked = data[provider + "_login"];
+    fillDetails(data, form);
+  };
+  async function load() {
+    const data = await api("/admin/api/operations");
+    fill(data);
+  }
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const payload = Object.fromEntries(new FormData(form));
+    payload.enabled = form.elements.enabled.checked;
+    event.submitter.disabled = true;
+    try {
+      await adminApi("PUT", "/admin/api/login/" + provider, payload);
+      if (form.elements.client_secret) form.elements.client_secret.value = "";
+      status.textContent = "Настройки входа сохранены.";
+    } catch (error) {
+      status.textContent = error.message;
+    } finally {
+      event.submitter.disabled = false;
+    }
+  };
+  return load;
+}
+const loadTelegramLogin = setupLoginForm("telegram", data => {
+  $("telegram-browser-domain").value = data.browser_origin ? new URL(data.browser_origin).hostname : "";
+  $("telegram-login-state").textContent = data.telegram_configured ? "Бот подключён." : "Подключите Telegram-бота.";
+});
+const loadGoogleLogin = setupLoginForm("google", (data, form) => {
+  form.elements.client_id.value = data.google_client_id;
+  form.elements.client_secret.value = "";
+  $("google-callback").value = data.google_callback_url;
+  $("google-login-state").textContent = data.google_configured
+    ? "Реквизиты сохранены. Пустое поле сохраняет текущий Client Secret."
+    : "Добавьте Redirect URI в настройках OAuth-клиента Google.";
+});
 
 async function launchCampaign(button, payload, prompt) {
   if (!window.confirm(prompt)) return;
@@ -1166,6 +1205,9 @@ contactForm.onsubmit = async event => {
 };
 
 const tabs = {
+  login: {sections: ["login-view"]},
+  "login-telegram": {sections: ["login-telegram-view"], load: loadTelegramLogin},
+  "login-google": {sections: ["login-google-view"], load: loadGoogleLogin},
   operations: {sections: ["operations-view"], load: loadOperations},
   campaigns: {sections: ["campaigns-view"]},
   tickets: {sections: ["tickets-view"], load: frame => Promise.all([
@@ -1205,7 +1247,8 @@ function canonicalTab(requested) {
 function parentFor({tab, panel}) {
   if (panel) return tab;
   if (providerByTab[tab]) return "settings";
-  if (["settings", "trial", "notifications", "operations", "campaigns"].includes(tab)) return "configuration";
+  if (["login-telegram", "login-google"].includes(tab)) return "login";
+  if (["settings", "login", "trial", "notifications", "operations", "campaigns"].includes(tab)) return "configuration";
   return null;
 }
 

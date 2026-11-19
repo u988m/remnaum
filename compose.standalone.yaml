@@ -21,6 +21,7 @@ services:
     environment:
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?Set PUBLIC_DOMAIN in .env}
       WEBAPP_DOMAIN: ${WEBAPP_DOMAIN:?Set WEBAPP_DOMAIN in .env}
+      BROWSER_SITE: "${BROWSER_DOMAIN:+, ${BROWSER_DOMAIN}}"
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

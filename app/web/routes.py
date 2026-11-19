@@ -38,7 +38,7 @@ from app.services.users import BLOCKED_MESSAGE, BlockedCustomer, customer_is_blo
 
 from app.bot.membership import membership_required
 from app.services.store_operations import get_operations
-from app.web.browser_auth import app_origin, on_app_host, web_credentials
+from app.web.browser_auth import app_origin, on_app_host, on_miniapp_host, web_credentials
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -172,7 +172,7 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: st
 
 @router.get("/api/v1/config")
 async def public_config():
-    return {"app": settings.app_name, "webapp_url": settings.webapp_root_url}
+    return {"app": settings.app_name, "webapp_url": settings.webapp_root_url, "browser_webapp_url": app_origin()}
 
 
 @router.get("/payments/return", response_class=HTMLResponse)
@@ -295,7 +295,7 @@ async def _webapp_user(init_data: str | dict):
 
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def mini_app_root(request: Request):
-    if not on_app_host(request):
+    if not (on_app_host(request) or on_miniapp_host(request)):
         raise HTTPException(404)
     return await mini_app_page()
 
@@ -1408,9 +1408,9 @@ WebCredentials = Annotated[str | dict | None, Depends(web_credentials)]
 
 
 class OperationsPayload(BaseModel):
-    telegram_login: bool
-    google_login: bool
-    google_client_id: str = Field(max_length=255)
+    telegram_login: bool = True
+    google_login: bool = False
+    google_client_id: str = Field(default="", max_length=255)
     google_client_secret: str = Field(default="", max_length=512)
     required_channel: str = Field(pattern=r"^(?:@[a-zA-Z0-9_]{5,32}|-100[0-9]{5,16})?$")
     channel_url: str = Field(max_length=300)
@@ -1444,6 +1444,7 @@ async def admin_operations(x_telegram_init_data: WebCredentials):
         "panel_configured": bool((values["panel_url"] or settings.remnawave_base_url)
                                  and (values.get("panel_token") or settings.remnawave_api_token)),
         "panel_webhook_configured": bool(values.get("panel_webhook_secret") or settings.remnawave_webhook_secret),
+        "browser_origin": app_origin(),
         "google_callback_url": app_origin() + "/auth/google/callback",
         "google_configured": bool(values["google_client_id"] and values.get("google_client_secret")),
         "telegram_configured": bool(bot_username() and settings.telegram_bot_token),
@@ -1476,12 +1477,39 @@ async def admin_save_operations(data: OperationsPayload, x_telegram_init_data: W
                 raise HTTPException(422, "Не удалось подключиться к панели. Проверьте адрес и токен.") from exc
     secrets = {"google_client_secret", "panel_token", "panel_webhook_secret"}
     try:
-        await save_operations(data.model_dump(exclude=secrets), {
+        await save_operations(data.model_dump(exclude=secrets, exclude_unset=True), {
             key: getattr(data, key).strip() for key in secrets
         })
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(422, str(exc)) from exc
     return await admin_operations(x_telegram_init_data)
+
+
+class TelegramLoginSettings(BaseModel):
+    enabled: bool
+
+
+class GoogleLoginSettings(TelegramLoginSettings):
+    client_id: Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]
+    client_secret: Annotated[str, StringConstraints(strip_whitespace=True, max_length=512)] = ""
+
+
+@router.put("/admin/api/login/telegram")
+async def admin_save_telegram_login(data: TelegramLoginSettings, x_telegram_init_data: WebCredentials):
+    await _require_telegram_admin(x_telegram_init_data)
+    await save_operations({"telegram_login": data.enabled}, {})
+    return {"enabled": data.enabled}
+
+
+@router.put("/admin/api/login/google")
+async def admin_save_google_login(data: GoogleLoginSettings, x_telegram_init_data: WebCredentials):
+    await _require_telegram_admin(x_telegram_init_data)
+    try:
+        await save_operations({"google_login": data.enabled, "google_client_id": data.client_id},
+                              {"google_client_secret": data.client_secret})
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"enabled": data.enabled}
 
 
 class CampaignPayload(BaseModel):

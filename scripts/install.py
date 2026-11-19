@@ -216,11 +216,15 @@ def mode_files(mode: str, network: str = "") -> str:
     raise ValueError("Unsupported deployment mode")
 
 
+def public_domains(cfg: dict[str, str]) -> list[str]:
+    return list(dict.fromkeys(cfg[key] for key in ("PUBLIC_DOMAIN", "WEBAPP_DOMAIN", "BROWSER_DOMAIN") if cfg.get(key)))
+
+
 def generate_proxy_snippets(cfg: dict[str, str]) -> None:
     """Write both Docker-proxy and host-proxy examples, without modifying Panel."""
     folder = ROOT / "generated"
     folder.mkdir(mode=0o700, exist_ok=True)
-    domains_list = list(dict.fromkeys([cfg["PUBLIC_DOMAIN"], cfg["WEBAPP_DOMAIN"]]))
+    domains_list = public_domains(cfg)
     caddy_domains = ", ".join(f"https://{name}" for name in domains_list)
     nginx_domains = " ".join(domains_list)
     for variant, upstream in (
@@ -256,9 +260,9 @@ def generate_proxy_snippets(cfg: dict[str, str]) -> None:
     print("Proxy examples generated in generated/ for both Docker and host proxies")
 
 
-def caddy_site_block(cfg: dict[str, str]) -> str:
-    domains = list(dict.fromkeys([cfg["PUBLIC_DOMAIN"], cfg["WEBAPP_DOMAIN"]]))
-    if not all(valid_domain(domain) for domain in domains):
+def caddy_site_block(cfg: dict[str, str], *, domains: list[str] | None = None) -> str:
+    domains = public_domains(cfg) if domains is None else domains
+    if not domains or not all(valid_domain(domain) for domain in domains):
         raise ValueError("Проверьте домены Caddy")
     return (
         "\n# Remnaum: автоматически добавленный магазин VPN\n"
@@ -296,9 +300,13 @@ def offer_panel_caddy_autoconfig(cfg: dict[str, str]) -> bool:
                     and m.get("RW") is True for m in mounts)):
         return False
     previous = caddyfile.read_bytes()
-    domains = [cfg["PUBLIC_DOMAIN"], cfg["WEBAPP_DOMAIN"]]
-    if any(domain.encode() in previous for domain in domains):
-        print("В текущем Caddyfile уже найдены домены магазина; проверьте конфигурацию вручную.")
+    domains = public_domains(cfg)
+    configured = previous.decode("utf-8", errors="replace")
+    existing_domains = {domain for domain in domains if re.search(
+        rf"(?<![\w.-]){re.escape(domain)}(?![\w.-])", configured, re.IGNORECASE,
+    )}
+    domains = [domain for domain in domains if domain not in existing_domains]
+    if not domains:
         return False
     answer = prompt("Добавить домены в существующий Caddy Remnawave с резервной копией? (Д/н)", default="Д")
     if answer.lower() not in ("д", "да", "y", "yes"):
@@ -307,7 +315,7 @@ def offer_panel_caddy_autoconfig(cfg: dict[str, str]) -> bool:
     backup = caddyfile.with_name("Caddyfile.remnaum.bak." + datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
     shutil.copy2(caddyfile, backup)
     # Write in place so Docker's bind mount keeps pointing to the correct inode.
-    append = caddy_site_block(cfg).encode()
+    append = caddy_site_block(cfg, domains=domains).encode()
     try:
         with caddyfile.open("wb") as handle:
             handle.write(previous.rstrip() + b"\n" + append)
@@ -869,12 +877,32 @@ def config_for_install(existing: dict[str, str], mode: str,
         cfg["DATABASE_URL"] = (f"postgresql+asyncpg://remnaum:{cfg['POSTGRES_PASSWORD']}"
                                "@postgres:5432/remnaum")
 
-    for key, label in (("PUBLIC_DOMAIN", "Домен вебхуков Telegram/Remnawave (без https://)"),
-                       ("WEBAPP_DOMAIN", "Домен Mini App и админки (без https://)")):
-        if not valid_domain(cfg.get(key, "")) or key not in existing:
-            cfg[key] = prompt(label)
-        if not valid_domain(cfg[key]):
-            raise ValueError(f"Invalid {key}: use a real DNS hostname")
+    public = existing.get("PUBLIC_DOMAIN", "").strip().lower()
+    if not valid_domain(public):
+        public = prompt("Домен вебхуков, например webhook.ваш-домен (без https://)").lower()
+    if not valid_domain(public):
+        raise ValueError("Укажите действительный DNS-адрес для вебхуков.")
+
+    # Derive defaults from a conventional webhook name without guessing a public suffix.
+    label, _, zone = public.partition(".")
+    if label not in {"webhook", "hook", "hooks"} or not valid_domain(zone):
+        zone = public
+    cfg["PUBLIC_DOMAIN"] = public
+    used = {public}
+    for key, label, prefix in (
+        ("WEBAPP_DOMAIN", "Домен Telegram Mini App (без https://)", "miniapp"),
+        ("BROWSER_DOMAIN", "Поддомен браузерной версии (без https://)", "web"),
+    ):
+        address = existing.get(key, "").strip().lower()
+        if not valid_domain(address) or address in used:
+            default = f"{prefix}.{zone}"
+            if default in used:
+                default = f"browser.{zone}"
+            address = prompt(label, default=default if valid_domain(default) else "").lower()
+        if not valid_domain(address) or address in used:
+            raise ValueError("Укажите отдельный действительный DNS-адрес для " + label.split(" (")[0].lower() + ".")
+        cfg[key] = address
+        used.add(address)
 
     if mode == "standalone":
         if not cfg.get("ACME_EMAIL") or cfg["ACME_EMAIL"].endswith("@example.com"):
@@ -947,7 +975,7 @@ def config_for_install(existing: dict[str, str], mode: str,
         raise ValueError("ADMIN_IDS must be comma-separated Telegram numeric IDs")
     panel_url = urlsplit(cfg.get("REMNAWAVE_BASE_URL", ""))
     panel_api_url(cfg.get("REMNAWAVE_BASE_URL", ""))
-    if any(name == panel_url.hostname for name in (cfg["PUBLIC_DOMAIN"], cfg["WEBAPP_DOMAIN"])):
+    if panel_url.hostname in public_domains(cfg):
         raise ValueError("Do not reuse the Panel's domain for the Remnaum bot/Mini App")
     if cfg.get("TELEGRAM_TERMS_URL") and not cfg["TELEGRAM_TERMS_URL"].startswith("https://"):
         raise ValueError("Terms URL must use HTTPS")
@@ -957,8 +985,9 @@ def config_for_install(existing: dict[str, str], mode: str,
 
     cfg["DEPLOY_MODE"] = mode
     cfg["COMPOSE_FILE"] = mode_files(mode, cfg.get("REMNAUM_PROXY_NETWORK", "") if mode == "panel" else "")
-    cfg["PUBLIC_BASE_URL"] = "https://" + cfg["WEBAPP_DOMAIN"]
-    cfg["WEBAPP_URL"] = cfg["PUBLIC_BASE_URL"]
+    cfg["WEBAPP_URL"] = "https://" + cfg["WEBAPP_DOMAIN"]
+    cfg["BROWSER_WEBAPP_URL"] = "https://" + cfg["BROWSER_DOMAIN"]
+    cfg["PUBLIC_BASE_URL"] = cfg["BROWSER_WEBAPP_URL"]
     cfg["TELEGRAM_WEBHOOK_URL"] = "https://" + cfg["PUBLIC_DOMAIN"] + "/telegram/webhook"
     cfg["TELEGRAM_USE_WEBHOOK"] = "true"
     for key in ("APP_SECRET_KEY", "POSTGRES_PASSWORD",
@@ -1090,7 +1119,10 @@ def main() -> int:
     ui.ok("Remnaum запущен. База создана без тестовых пользователей.")
 
     print("Telegram webhook: " + cfg["TELEGRAM_WEBHOOK_URL"])
-    print("Mini App: " + cfg["WEBAPP_URL"])
+    print("Telegram Mini App: " + cfg["WEBAPP_URL"])
+    print("Веб-приложение в браузере: " + cfg["BROWSER_WEBAPP_URL"])
+    print("Для браузерного входа через Telegram укажите " + cfg["BROWSER_DOMAIN"] + " в BotFather → /setdomain.")
+    print("DNS: направьте " + ", ".join(public_domains(cfg)) + " на сервер Remnaum.")
     print("Remnawave events: https://" + cfg["PUBLIC_DOMAIN"] + "/webhooks/remnawave")
     if mode != "panel" or local_panel_for_url(cfg["REMNAWAVE_BASE_URL"]) is None:
         print("Для удалённой панели параметры вебхука находятся в .env — настройте исходящие события на сервере панели.")

@@ -49,6 +49,7 @@ jobs:
               assert "caddy" in services and "nginx" in services, services
               assert {str(p["published"]) for p in services["caddy"]["ports"]} >= {"80","443"}
               assert not services["app"].get("ports")
+              assert services["caddy"]["environment"]["BROWSER_SITE"] == ", web.example.com"
           else:
               assert "caddy" not in services and "nginx" not in services
               ports = services["app"]["ports"]
@@ -125,8 +126,10 @@ jobs:
                   return urllib.request.urlopen(req, timeout=5)
               except urllib.error.HTTPError as exc:
                   return exc
-          assert request('/store').status == 200
+          assert request('/store', host='web.example.com').status == 200
           assert request('/').status == 200
+          assert request('/', host='web.example.com').status == 200
+          assert request('/auth', host='web.example.com').status == 200
           assert request('/', host='webhook.example.com').status == 404
           assert request('/app').status == 200
           assert request('/admin').status == 200
@@ -135,8 +138,8 @@ jobs:
           assert request('/static/miniapp.css').status == 200
           assert request('/static/admin.js').status == 200
           assert request('/static/store.css').status == 200
-          assert request('/api/v1/store/catalog').status == 200
-          assert request('/api/v1/store/me').status == 401
+          assert request('/api/v1/store/catalog', host='web.example.com').status == 200
+          assert request('/api/v1/store/me', host='web.example.com').status == 401
           assert request('/admin/api/referrals').status == 401
           assert request('/admin/api/trial').status == 401
           assert request('/admin/api/promos').status == 401
