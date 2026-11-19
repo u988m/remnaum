@@ -1,19 +1,23 @@
+import asyncio
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
 import logging
+from math import ceil
 from pathlib import Path
 from html import escape
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
-from sqlalchemy import func, select
+from sqlalchemy import Date, cast, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.bot.runtime import bot, dispatcher
 from app.config import settings
-from app.db.models import Payment, Subscription, User
+from app.db.models import Payment, Subscription, TariffPlan, User
 from app.db.session import SessionLocal
 from app.services.payment_providers import get_provider
+from app.services.remnawave import RemnawaveClient
 from app.services.payment_service import PaymentProviderUnavailable, TermsAcceptanceRequired, settle_payment
 from app.services.tariffs import format_traffic
 from app.services.subscriptions import provision_paid_payment
@@ -210,8 +214,6 @@ async def payment_webhook(provider: str, request: Request, background_tasks: Bac
     return {"ok": True}
 
 
-from datetime import datetime, timezone
-
 from fastapi import Header, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -258,27 +260,40 @@ async def mini_app_page():
     return HTMLResponse((Path(__file__).parent / "templates" / "miniapp.html").read_text(encoding="utf-8"))
 
 
+async def _webapp_subscription_data(telegram_id: int) -> dict | None:
+    subscription = await get_user_subscription(telegram_id)
+    if not subscription:
+        return None
+    expiry = subscription.get("expires_at")
+    if expiry and expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    status = subscription["status"]
+    if status == "active" and expiry and expiry <= now:
+        status = "expired"
+    return {
+        "plan_id": subscription.get("plan_id"),
+        "status": status,
+        "expires_at": expiry.isoformat() if expiry else None,
+        "traffic_gb": subscription["traffic_gb"],
+        "device_limit": subscription["device_limit"],
+        "subscription_url": subscription["subscription_url"],
+        "days_left": max(0, ceil((expiry - now).total_seconds() / 86400)) if expiry else None,
+    }
+
+
+@router.get("/api/v1/webapp/subscription")
+async def webapp_subscription(x_telegram_init_data: str | None = Header(default=None)):
+    identity = _require_telegram_identity(x_telegram_init_data)
+    return {"subscription": await _webapp_subscription_data(int(identity["id"]))}
+
+
 @router.get("/api/v1/webapp/bootstrap")
 async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=None)):
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     identity = await _webapp_user(x_telegram_init_data)
     pricing = await get_store_tariff_pricing()
-    subscription = await get_user_subscription(int(identity["id"]))
-    subscription_data = None
-    if subscription:
-        expiry = subscription.get("expires_at")
-        if expiry and expiry.tzinfo is None:
-            expiry = expiry.replace(tzinfo=timezone.utc)
-        days_left = max(0, (expiry - datetime.now(timezone.utc)).days) if expiry else None
-        subscription_data = {
-            "status": subscription["status"],
-            "expires_at": expiry.isoformat() if expiry else None,
-            "traffic_gb": subscription["traffic_gb"],
-            "device_limit": subscription["device_limit"],
-            "subscription_url": subscription["subscription_url"],
-            "days_left": days_left,
-        }
     payment_methods = await _get_public_checkout_methods()
     return {
         "user": {"id": identity["id"], "first_name": identity.get("first_name", "")},
@@ -296,7 +311,7 @@ async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=Non
             "traffic_default": min(max(100, settings.tariff_min_traffic_gb), settings.tariff_max_traffic_gb),
             "devices_default": min(max(1, settings.tariff_min_devices), settings.tariff_max_devices),
         },
-        "subscription": subscription_data,
+        "subscription": await _webapp_subscription_data(int(identity["id"])),
     }
 
 
@@ -346,26 +361,116 @@ async def admin_dashboard_page():
 @router.get("/admin/api/overview")
 async def admin_overview(x_telegram_init_data: str | None = Header(default=None)):
     identity = await _require_telegram_admin(x_telegram_init_data)
+    now = datetime.now(timezone.utc)
+    first_day = now.date() - timedelta(days=29)
+    from_time = datetime.combine(first_day, datetime.min.time(), timezone.utc)
+    paid_statuses = ("paid", "succeeded")
+    latest = (
+        select(Subscription.user_id, func.max(Subscription.id).label("id"))
+        .group_by(Subscription.user_id).subquery()
+    )
     async with SessionLocal() as session:
         users = await session.scalar(select(func.count(User.id))) or 0
-        active = await session.scalar(select(func.count(Subscription.id)).where(Subscription.status == "active")) or 0
-        succeeded = await session.scalar(select(func.count(Payment.id)).where(Payment.status == "succeeded")) or 0
-        pending = await session.scalar(select(func.count(Payment.id)).where(Payment.status == "pending")) or 0
-        paid_statuses = ("paid", "succeeded")
-        revenue = await session.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(
-            Payment.currency == "RUB", Payment.status.in_(paid_statuses),
-        )) or 0
-        stars_received = await session.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(
-            Payment.currency == "XTR", Payment.status.in_(paid_statuses),
-        )) or 0
+        active_groups = (await session.execute(
+            select(Subscription.paid_tariff, func.count())
+            .join(latest, latest.c.id == Subscription.id)
+            .where(Subscription.status == "active", Subscription.expires_at > now)
+            .group_by(Subscription.paid_tariff)
+        )).all()
+        plan_ids = [int(key) for key, _ in active_groups if key and key.isascii() and key.isdecimal()]
+        plans = dict((await session.execute(
+            select(TariffPlan.id, TariffPlan.title).where(TariffPlan.id.in_(plan_ids))
+        )).all()) if plan_ids else {}
+        counts = dict((await session.execute(
+            select(Payment.status, func.count()).where(Payment.status.in_(("succeeded", "pending")))
+            .group_by(Payment.status)
+        )).all())
+        totals = dict((await session.execute(
+            select(Payment.currency, func.sum(Payment.amount))
+            .where(Payment.currency.in_(("RUB", "XTR")), Payment.status.in_(paid_statuses))
+            .group_by(Payment.currency)
+        )).all())
+        payment_day = cast(func.timezone("UTC", Payment.created_at), Date)
+        daily = dict((await session.execute(
+            select(payment_day, func.sum(Payment.amount)).where(
+                Payment.currency == "RUB", Payment.status.in_(paid_statuses), Payment.created_at >= from_time,
+            ).group_by(payment_day)
+        )).all())
+
+    plan_breakdown = []
+    for key, count in active_groups:
+        if key and key.isascii() and key.isdecimal():
+            name = plans.get(int(key), f"Тариф №{key}")
+        else:
+            name = "Гибкий тариф" if key == "flexible" else "Без привязки к тарифу"
+        plan_breakdown.append({"name": name, "count": count})
     return {
         "admin_name": identity.get("first_name", ""),
         "users": users,
-        "active_subscriptions": active,
-        "successful_payments": succeeded,
-        "pending_payments": pending,
-        "revenue_rub_minor": int(revenue),
-        "stars_received": int(stars_received),
+        "active_subscriptions": sum(count for _, count in active_groups),
+        "successful_payments": counts.get("succeeded", 0),
+        "pending_payments": counts.get("pending", 0),
+        "revenue_rub_minor": int(totals.get("RUB", 0)),
+        "stars_received": int(totals.get("XTR", 0)),
+        "active_plans": sorted(plan_breakdown, key=lambda plan: (-plan["count"], plan["name"])),
+        "revenue_days": [
+            {"date": day.isoformat(), "amount_minor": int(daily.get(day, 0))}
+            for day in (first_day + timedelta(days=offset) for offset in range(30))
+        ],
+    }
+
+
+@router.get("/admin/api/panel-overview")
+async def admin_panel_overview(x_telegram_init_data: str | None = Header(default=None)):
+    await _require_telegram_admin(x_telegram_init_data)
+    if not settings.remnawave_base_url or not settings.remnawave_api_token:
+        return {"status": "not_configured"}
+
+    client = RemnawaveClient()
+
+    async def read(path: str) -> dict:
+        try:
+            async with asyncio.timeout(5):
+                data = await client.request("GET", path)
+            value = data.get("response") if isinstance(data, dict) else None
+            return value if isinstance(value, dict) else {}
+        except Exception:
+            return {}
+
+    stats, metadata, bandwidth, nodes = await asyncio.gather(
+        read("/api/system/stats"), read("/api/system/metadata"),
+        read("/api/system/stats/bandwidth"), read("/api/system/nodes/metrics"),
+    )
+    if not stats:
+        return {"status": "unavailable"}
+
+    def record(parent, key):
+        item = parent.get(key)
+        return item if isinstance(item, dict) else {}
+
+    users = record(stats, "users")
+    status_counts = record(users, "statusCounts")
+    memory = record(stats, "memory")
+    total, used = memory.get("total"), memory.get("used")
+    version = metadata.get("version")
+    node_items = nodes.get("nodes")
+    return {
+        "status": "available",
+        "version": version if isinstance(version, str) else None,
+        "users": users.get("totalUsers"),
+        "online": record(stats, "onlineStats").get("onlineNow"),
+        "active": status_counts.get("ACTIVE"),
+        "expired": status_counts.get("EXPIRED"),
+        "disabled": status_counts.get("DISABLED"),
+        "limited": status_counts.get("LIMITED"),
+        "nodes_online": record(stats, "nodes").get("totalOnline"),
+        "memory_percent": round(100 * used / total, 1) if type(total) is int and total > 0 and type(used) is int else None,
+        "traffic_7_days": record(bandwidth, "bandwidthLastSevenDays").get("current"),
+        "traffic_30_days": record(bandwidth, "bandwidthLast30Days").get("current"),
+        "nodes": [
+            {"name": node.get("nodeName"), "online": node.get("usersOnline")}
+            for node in node_items[:30] if isinstance(node, dict)
+        ] if isinstance(node_items, list) else [],
     }
 
 
@@ -405,6 +510,26 @@ async def admin_users(
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
+def _payment_summary(payment: Payment) -> dict:
+    try:
+        order = json.loads(payment.payload or "{}")
+    except (TypeError, ValueError):
+        order = {}
+    order = order if isinstance(order, dict) else {}
+    tariff = order.get("tariff")
+    tariff = tariff if isinstance(tariff, dict) else {}
+    plan_id = order.get("plan_id")
+    return {
+        "id": payment.id, "provider": payment.provider, "amount": payment.amount,
+        "currency": payment.currency, "status": payment.status,
+        "created_at": payment.created_at.isoformat(),
+        "plan_id": plan_id if type(plan_id) is int and plan_id > 0 else None,
+        "plan_name": tariff.get("name") if isinstance(tariff.get("name"), str) else None,
+        "duration_days": tariff.get("duration_days") if type(tariff.get("duration_days")) is int else None,
+        "extra_devices": tariff.get("extra_devices") if type(tariff.get("extra_devices")) is int else 0,
+    }
+
+
 @router.get("/admin/api/payments")
 async def admin_payments(
     limit: int = 20,
@@ -417,21 +542,16 @@ async def admin_payments(
     async with SessionLocal() as session:
         total = await session.scalar(select(func.count(Payment.id))) or 0
         result = await session.execute(
-            select(Payment, User.telegram_id)
+            select(Payment, User.telegram_id, User.username)
             .join(User, User.id == Payment.user_id)
             .order_by(Payment.created_at.desc(), Payment.id.desc())
             .limit(limit)
             .offset(offset)
         )
-        items = [{
-            "id": payment.id,
-            "telegram_id": telegram_id,
-            "provider": payment.provider,
-            "amount": payment.amount,
-            "currency": payment.currency,
-            "status": payment.status,
-            "created_at": payment.created_at.isoformat(),
-        } for payment, telegram_id in result.all()]
+        items = [
+            _payment_summary(payment) | {"telegram_id": telegram_id, "username": username}
+            for payment, telegram_id, username in result.all()
+        ]
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
@@ -775,15 +895,11 @@ async def webapp_purchases(x_telegram_init_data: str | None = Header(default=Non
             .where(User.telegram_id == int(identity["id"]))
             .order_by(Payment.created_at.desc(), Payment.id.desc()).limit(20)
         )).all()
-        return {"items": [{
-            "id": p.id, "provider": p.provider, "amount": p.amount,
-            "currency": p.currency, "status": p.status, "created_at": p.created_at.isoformat(),
-        } for p in payments]}
+        return {"items": [_payment_summary(payment) for payment in payments]}
 
 
 @router.get("/api/v1/webapp/devices")
 async def webapp_hwid_devices(x_telegram_init_data: str | None = Header(default=None)):
-    from app.services.remnawave import RemnawaveClient
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     identity = await _webapp_user(x_telegram_init_data)

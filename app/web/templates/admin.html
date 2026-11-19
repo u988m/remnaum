@@ -5,52 +5,82 @@
 <link rel="stylesheet" href="/static/theme.css">
 <link rel="stylesheet" href="/static/admin.css"></head><body><main>
 <header class="admin-header">
+<button id="admin-menu-open" type="button" class="action" aria-label="Открыть разделы" aria-expanded="false" aria-controls="admin-sidebar" hidden>☰</button>
 <div class="brand-logo"><span id="admin-shop-mark" aria-hidden="true">R</span><img id="admin-shop-logo" alt="" hidden></div>
 <div class="brand-block"><div class="brand" id="admin-shop-name">Remnaum</div><small>Управление магазином</small></div>
 </header>
 <div id="loading" class="section access-loading" role="status">Проверяем права владельца…</div>
 <div id="dashboard" hidden>
-<div class="admin-mobile-bar"><button id="admin-menu-open" type="button" class="action" aria-expanded="false" aria-controls="admin-sidebar">☰ Меню</button></div>
 <button type="button" class="admin-menu-backdrop" id="admin-menu-backdrop" aria-label="Закрыть меню" hidden></button>
 <aside class="admin-sidebar" id="admin-sidebar" aria-label="Навигация админки">
-<div class="sidebar-heading"><span>Разделы</span><button type="button" id="admin-menu-close" aria-label="Закрыть меню">✕</button></div>
+<div class="sidebar-heading"><span>Управление</span><button type="button" id="admin-menu-close" aria-label="Закрыть меню">✕</button></div>
 <nav class="admin-tabs" aria-label="Разделы управления">
+  <p class="sidebar-category">Магазин</p>
   <button aria-current="page" data-tab="overview" type="button">Обзор</button>
-  <button data-tab="plans" type="button">Тарифы</button>
   <button data-tab="users" type="button">Клиенты</button>
   <button data-tab="payments" type="button">Платежи</button>
+  <button data-tab="plans" type="button">Тарифы и сквады</button>
   <p class="sidebar-category">Продвижение</p>
   <button data-tab="bonuses" type="button">Промокоды</button>
-  <button data-tab="referrals" type="button">Реферальная программа</button>
-  <p class="sidebar-category">Магазин</p>
-  <button data-tab="brand" type="button">Внешний вид</button>
-  <details id="settings-accordion" class="settings-accordion">
-    <summary><svg class="admin-sidebar-icon" aria-hidden="true"><use href="#ai-wallet"/></svg> Настройки</summary>
-    <div class="settings-nav-items">
-      <button data-tab="settings" type="button">Способы оплаты</button>
-      <button data-tab="trial" type="button">Пробный доступ</button>
-      <button data-tab="pricing" type="button">Служебная формула цен</button>
-    </div>
-  </details>
+  <button data-tab="referrals" type="button">Рефералы</button>
+  <p class="sidebar-category">Система</p>
+  <button data-tab="configuration" type="button">Настройки</button>
 </nav>
 <a class="admin-return-link" href="/app">← В магазин</a>
 </aside>
 <div class="admin-workspace">
-<section id="overview-view">
-  <h1>Обзор</h1>
-  <p class="muted" id="welcome"></p>
-  <div class="cards overview-metrics">
-    <div class="card"><span>Пользователи</span><b id="users-count">—</b></div>
-    <div class="card"><span>Активные подписки</span><b id="active-count">—</b></div>
-    <div class="card"><span>Поступления в рублях</span><b id="revenue-count">—</b></div>
-    <div class="card"><span>Получено Stars</span><b id="stars-count">—</b></div>
-    <div class="card"><span>Выданные заказы</span><b id="paid-count">—</b></div>
-    <div class="card"><span>Ожидают оплаты</span><b id="pending-count">—</b></div>
+<section id="overview-view" class="dashboard-view">
+  <div class="dashboard-heading">
+    <h1>Обзор</h1>
+    <button class="action" id="overview-refresh" type="button">Обновить обзор</button>
   </div>
-  <section class="overview-recent">
+  <div class="overview-metrics">
+    <div class="overview-stat"><span>Пользователи</span><b id="users-count">—</b></div>
+    <div class="overview-stat"><span>Активные подписки</span><b id="active-count">—</b></div>
+    <div class="overview-stat"><span>Без активной подписки</span><b id="inactive-count">—</b></div>
+    <div class="overview-stat"><span>Выданные заказы</span><b id="paid-count">—</b></div>
+    <div class="overview-stat"><span>Ожидают оплаты</span><b id="pending-count">—</b></div>
+    <div class="overview-stat"><span>Получено Stars</span><b id="stars-count">—</b></div>
+  </div>
+  <section class="dashboard-panel" aria-labelledby="overview-revenue-title">
+    <div class="dashboard-heading">
+      <div><h2 id="overview-revenue-title">Выручка</h2><p class="muted">Оплаченные заказы в рублях по дате выставления, UTC</p></div>
+      <div class="overview-total"><span>За всё время</span><b id="revenue-count">—</b></div>
+    </div>
+    <div class="chart-controls">
+      <div class="chart-periods" aria-label="Период выручки">
+        <button type="button" data-revenue-period="7" aria-pressed="false">7 дней</button>
+        <button type="button" data-revenue-period="14" aria-pressed="true">14 дней</button>
+        <button type="button" data-revenue-period="30" aria-pressed="false">30 дней</button>
+      </div>
+      <strong id="overview-period-total">—</strong>
+    </div>
+    <div class="chart" id="revenue-chart" aria-hidden="true"></div>
+    <label class="chart-detail">Сумма за дату<select id="revenue-day"></select><output id="revenue-day-amount">—</output></label>
+  </section>
+  <section class="dashboard-panel">
+    <h2>Активные подписки по тарифам</h2>
+    <div id="overview-plans" class="dashboard-list"></div>
+  </section>
+  <section class="dashboard-panel">
+    <div class="dashboard-heading"><h2>Remnawave</h2><span id="panel-version" class="status-chip" hidden></span></div>
+    <p id="panel-status" class="muted" role="status">Загружаем данные панели…</p>
+    <dl id="panel-metrics" class="overview-metrics" hidden></dl>
+    <div id="panel-nodes" class="dashboard-list"></div>
+  </section>
+  <section class="dashboard-panel">
     <h2>Последние платежи</h2>
     <div id="dashboard-payments" class="overview-payment-list" role="status">Загружаем историю…</div>
   </section>
+</section>
+<section id="configuration-view" class="dashboard-view" hidden>
+  <h1>Настройки</h1>
+  <div class="settings-list">
+    <button type="button" data-open-tab="settings"><strong>Платёжные системы</strong><span>Telegram Stars, ЮKassa, ЮMoney, Crypto Pay и Platega</span></button>
+    <button type="button" data-open-tab="brand"><strong>Оформление и поддержка</strong><span>Название, изображения и контакт магазина</span></button>
+    <button type="button" data-open-tab="trial"><strong>Пробный доступ</strong><span>Срок, трафик и число устройств</span></button>
+    <button type="button" data-open-tab="pricing"><strong>Формула цен</strong><span>Расчёт для старых гибких тарифов</span></button>
+  </div>
 </section>
 <section class="section" id="users-view" hidden><div class="toolbar"><h2>Клиенты и подписки</h2><button class="action" id="users-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>Telegram ID</th><th>Username</th><th>Подписка</th><th>До</th><th>Регистрация</th><th>Действие</th></tr></thead><tbody id="users-table"></tbody></table></div><div id="customer-detail" class="section" hidden aria-live="polite"><div class="toolbar"><h2 id="customer-title">Карточка клиента</h2><button class="action" id="customer-close">Закрыть</button></div><p class="muted" id="customer-summary"></p><h3>Подписки</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Статус</th><th>Действует до</th><th>Создана</th></tr></thead><tbody id="customer-subscriptions"></tbody></table></div><h3>Платежи</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="customer-payments"></tbody></table></div></div><div class="toolbar"><button class="action" id="users-prev">Назад</button><span id="users-page" class="muted">Страница 1</span><button class="action" id="users-next">Далее</button></div></section>
 <section class="section" id="payments-view" hidden><div class="toolbar"><h2>История платежей</h2><button class="action" id="payments-refresh">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Клиент</th><th>Провайдер</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody id="payments-table"></tbody></table></div><div class="toolbar"><button class="action" id="payments-prev">Назад</button><span id="payments-page" class="muted">Страница 1</span><button class="action" id="payments-next">Далее</button></div></section>
@@ -76,7 +106,7 @@
       <label>Устройств включено<input id="plan-devices" type="number" value="1" min="1" required></label>
       <label>Сортировка<input id="plan-order" type="number" value="0" min="0" max="10000" required></label>
       <label>Цена, ₽<input id="plan-rub" type="number" min="0" max="1000000" step="0.01" required></label>
-      <label>За доп. устройство, ₽<input id="plan-extra-rub" type="number" min="0" max="1000000" step="0.01"><small>Пусто — доп. устройства выключены</small></label>
+      <label>За доп. устройство, ₽<input id="plan-extra-rub" type="number" min="0" max="1000000" step="0.01"><small>Пусто — доп. устройства за рубли недоступны</small></label>
       <label>Цена, Stars<input id="plan-stars" type="number" min="1" max="1000000" required></label>
       <label>За доп. устройство, Stars<input id="plan-extra-stars" type="number" min="0" max="1000000"><small>Пусто — Stars только за базовый тариф</small></label>
       <label>Бейдж<select id="plan-badge"><option value="">Без бейджа</option><option>Популярный</option><option>Выгодно</option></select></label>
@@ -113,6 +143,7 @@
 </form>
 </section>
 <section class="section" id="trial-view" hidden>
+<button class="provider-back" type="button" data-open-tab="configuration">← Настройки</button>
 <h2>Пробный доступ</h2><p class="muted">Один пробный доступ для каждого нового покупателя. Настройте срок, трафик и устройства.</p>
 <form id="trial-form">
 <label><input id="trial-enabled" type="checkbox"> Включить пробный доступ</label>
@@ -131,6 +162,7 @@
 </form>
 <div id="promo-admin-list"></div></section>
 <section class="section" id="brand-view" hidden>
+<button class="provider-back" type="button" data-open-tab="configuration">← Настройки</button>
 <h1>Магазин</h1>
 <div class="brand-image-settings">
   <div class="image-preview logo-preview"><img id="brand-logo-preview" alt="Логотип магазина" hidden><span id="brand-logo-placeholder">Логотип</span></div>
@@ -172,15 +204,9 @@
 </form>
 </section>
 <section class="section" id="payment-settings-view" hidden>
-  <div class="section-heading"><h1>Способы оплаты</h1></div>
+  <button class="provider-back" type="button" data-open-tab="configuration">← Настройки</button>
+  <h1>Платёжные системы</h1>
   <div id="method-list" class="provider-grid" aria-label="Платёжные провайдеры"></div>
-  <div class="payment-terms">
-    <div><h2>Условия продажи</h2><p class="muted" id="payment-terms-state"></p></div>
-  </div>
-  <div class="toolbar payment-diagnostics">
-    <button class="action" id="payment-diagnostics-refresh" type="button">Обновить</button>
-    <p class="muted" id="payment-diagnostics-status" role="status"></p>
-  </div>
 </section>
 <section class="section payment-provider-view" id="payment-telegram_stars-view" hidden>
   <button class="provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
@@ -301,6 +327,7 @@
   </div>
 </section>
 <section class="section" id="pricing-view" hidden>
+<button class="provider-back" type="button" data-open-tab="configuration">← Настройки</button>
 <h2>Служебная формула цен</h2>
 <p class="muted">Настройка для прежних заказов. Новые покупки используют только опубликованные тарифы администратора. Рубли указываются в копейках; Stars — целыми единицами.</p>
 <div id="pricing-fields" class="grid"></div>

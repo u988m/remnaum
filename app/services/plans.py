@@ -12,6 +12,7 @@ from app.config import settings
 
 
 EXTRA_PRICE_FIELDS = ("extra_device_price_rub_minor", "extra_device_price_stars")
+MAX_PAYMENT_AMOUNT = 2_147_483_647
 
 
 @dataclass(frozen=True)
@@ -23,14 +24,24 @@ class PlanQuote(TariffQuote):
     stars: int | None
 
 
+def extra_device_limits(plan: TariffPlan) -> tuple[int, int]:
+    slots = min(1000, max(0, settings.tariff_max_devices - plan.device_limit))
+    limits = []
+    for base_price, unit_price in (
+        (plan.price_rub_minor, plan.extra_device_price_rub_minor),
+        (plan.price_stars, plan.extra_device_price_stars),
+    ):
+        if unit_price is None:
+            limits.append(0)
+        elif unit_price == 0:
+            limits.append(slots)
+        else:
+            limits.append(min(slots, (MAX_PAYMENT_AMOUNT - base_price) // unit_price))
+    return limits[0], limits[1]
+
+
 def max_extra_devices(plan: TariffPlan) -> int:
-    unit_price = plan.extra_device_price_rub_minor
-    if unit_price is None:
-        return 0
-    by_device_limit = min(1000, max(0, settings.tariff_max_devices - plan.device_limit))
-    if unit_price == 0:
-        return by_device_limit
-    return min(by_device_limit, (2_147_483_647 - plan.price_rub_minor) // unit_price)
+    return max(extra_device_limits(plan))
 
 
 def plan_revision(plan: TariffPlan) -> str:
@@ -51,16 +62,18 @@ def quote_plan(plan: TariffPlan | None, extra_devices: int = 0, revision: str | 
         raise ValueError("Недопустимое количество дополнительных устройств")
     unit_minor = plan.extra_device_price_rub_minor
     stars_unit = plan.extra_device_price_stars
-    amount = plan.price_rub_minor + extra_devices * (unit_minor or 0)
-    stars = plan.price_stars + extra_devices * (stars_unit or 0)
+    rub_limit, stars_limit = extra_device_limits(plan)
+    amount = plan.price_rub_minor + extra_devices * (unit_minor or 0) if extra_devices <= rub_limit else 0
+    stars = plan.price_stars + extra_devices * (stars_unit or 0) if extra_devices <= stars_limit else None
     return PlanQuote(
         plan.duration_days, plan.traffic_gb, plan.device_limit + extra_devices,
         amount, "RUB", plan.title, plan.device_limit, extra_devices, unit_minor,
-        None if (extra_devices and stars_unit is None) or stars > 2_147_483_647 else stars,
+        stars,
     )
 
 
 def plan_to_dict(p: TariffPlan) -> dict:
+    rub_limit, stars_limit = extra_device_limits(p)
     return {
         "id": p.id, "title": p.title, "name": p.title, "description": p.description,
         "duration_days": p.duration_days, "days": p.duration_days, "traffic_gb": p.traffic_gb,
@@ -71,7 +84,8 @@ def plan_to_dict(p: TariffPlan) -> dict:
         "extra_device_price_rub": (p.extra_device_price_rub_minor / 100
                                    if p.extra_device_price_rub_minor is not None else None),
         "extra_device_price_stars": p.extra_device_price_stars, "badge": p.badge,
-        "is_featured": p.is_featured, "max_extra_devices": max_extra_devices(p),
+        "is_featured": p.is_featured, "max_extra_devices": max(rub_limit, stars_limit),
+        "max_extra_devices_rub": rub_limit, "max_extra_devices_stars": stars_limit,
         "revision": plan_revision(p),
     }
 

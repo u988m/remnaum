@@ -1,4 +1,5 @@
 """Set TEST_POSTGRES_URL to an asyncpg SQLAlchemy URL to run in an isolated schema."""
+import asyncio
 import json
 import os
 import unittest
@@ -17,6 +18,7 @@ from app.db.models import Payment, Subscription, TariffPlan, TermsAcceptance, Us
 from app.db.session import initialize_schema
 from app.services.payment_providers import PaymentLink, VerifiedPayment
 from app.services import payment_service, plans, squads, subscriptions, tariffs, trials
+from app.web import routes
 
 A, B = str(uuid4()), str(uuid4())
 ACTIVE_EXPIRY = datetime.now(timezone.utc) + timedelta(days=10)
@@ -57,6 +59,60 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
             {"uuid": key, "name": name} for key, name in ids
         ]}}
         return await squads.refresh_catalog()
+
+    async def test_repeated_monthly_orders_extend_once_and_charge_stars_per_device(self):
+        async with self.engine.begin() as conn:
+            await initialize_schema(conn)
+        await self.sync((A, "Basic"))
+        plan = await plans.save_plan(PLAN | {"extra_device_price_stars": 5, "internal_squads": [A]})
+        self.assertEqual(plan["max_extra_devices_rub"], 0)
+        self.assertGreaterEqual(plan["max_extra_devices_stars"], 2)
+        async with self.sessions.begin() as session:
+            user = User(telegram_id=21)
+            session.add(user)
+            await session.flush()
+            session.add(Subscription(user_id=user.id, panel_user_id="9", paid_tariff=str(plan["id"]),
+                                     status="active", expires_at=ACTIVE_EXPIRY))
+
+        panel_user = {
+            "id": 9, "status": "ACTIVE", "expireAt": ACTIVE_EXPIRY.isoformat(),
+            "activeInternalSquads": [A], "description": "Internal note | remnaum-payment:200",
+        }
+        self.panel.get_user_by_username.return_value = self.panel.get_user.return_value = {"response": panel_user}
+
+        async def apply_panel_update(panel_id, **values):
+            self.assertEqual(panel_id, 9)
+            self.assertEqual(values["hwid_device_limit"], 3)
+            panel_user.update(expireAt=values["expire_at"].isoformat(), description=values["description"])
+        self.panel.update_user.side_effect = apply_panel_update
+
+        orders = []
+        with patch.object(payment_service, "get_terms_url", return_value=""), \
+             patch.object(subscriptions, "RemnawaveClient", return_value=self.panel):
+            for index in range(2):
+                order, stars = await payment_service.create_stars_payment_for_user(
+                    21, plan_id=plan["id"], extra_devices=2, revision=plan["revision"],
+                )
+                self.assertEqual(stars, 20)
+                await payment_service.settle_payment(VerifiedPayment(order.id, f"tg-{index}", stars, "XTR"), "telegram_stars")
+                orders.append(order.id)
+            applied = await asyncio.gather(*(subscriptions.provision_paid_payment(order) for order in orders))
+            self.assertEqual(applied, [True, True])
+            self.assertFalse(await subscriptions.provision_paid_payment(orders[0]))
+
+        result = await subscriptions.get_user_subscription(21)
+        self.assertEqual(result["expires_at"], ACTIVE_EXPIRY + timedelta(days=60))
+        self.assertEqual((result["device_limit"], result["plan_id"]), (3, plan["id"]))
+        self.assertEqual(panel_user["description"].count("remnaum-payment:"), 1)
+        self.assertTrue(panel_user["description"].startswith("Internal note | "))
+
+        with patch.object(routes, "SessionLocal", self.sessions), \
+             patch.object(routes, "_require_telegram_admin", return_value={"first_name": "Owner"}):
+            overview = await routes.admin_overview("valid")
+        self.assertEqual(overview["active_subscriptions"], 1)
+        self.assertEqual(overview["active_plans"], [{"name": "Basic", "count": 1}])
+        self.assertEqual(overview["stars_received"], 40)
+        self.assertEqual(len(overview["revenue_days"]), 30)
 
     async def test_purchase_edit_renew_and_catalog_failures(self):
         async with self.engine.begin() as conn:

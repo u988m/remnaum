@@ -2,27 +2,176 @@ const tg=window.Telegram?.WebApp;tg?.ready?.();tg?.expand?.();const $=id=>docume
 async function api(path){const r=await fetch(path,{headers:{"X-Telegram-Init-Data":tg?.initData||""}});const d=await r.json();if(!r.ok)throw Error(d.detail||"Ошибка запроса");return d}
 function cell(value){const td=document.createElement("td");td.textContent=value??"—";return td}
 function row(target,values){const tr=document.createElement("tr");values.forEach(v=>tr.appendChild(cell(v)));$(target).appendChild(tr)}
-async function overview(){
-  const d=await api("/admin/api/overview");
-  $("users-count").textContent=d.users;
-  $("active-count").textContent=d.active_subscriptions;
-  $("paid-count").textContent=d.successful_payments;
-  $("pending-count").textContent=d.pending_payments;
-  $("revenue-count").textContent=(d.revenue_rub_minor/100).toLocaleString("ru-RU",{style:"currency",currency:"RUB"});
-  $("stars-count").textContent=d.stars_received.toLocaleString("ru-RU")+" ⭐";
-  try {
-    const payments=await api("/admin/api/payments?limit=5&offset=0");
-    const list=$("dashboard-payments");list.replaceChildren();
-    if(!payments.items.length){list.textContent="Платежей пока нет.";return}
-    for(const payment of payments.items){
-      const card=document.createElement("div");card.className="overview-payment";
-      const title=document.createElement("strong");title.textContent="#"+payment.id+" · "+(providerLabels[payment.provider] || payment.provider);
-      const summary=document.createElement("span");
-      summary.textContent=formatPaymentAmount(payment)+" · "+paymentStatus(payment.status);
-      card.append(title,summary);list.append(card);
-    }
-  } catch { $("dashboard-payments").textContent="Не удалось загрузить последние платежи."; }
+const dashNumber = new Intl.NumberFormat("ru-RU");
+const dashRubles = new Intl.NumberFormat("ru-RU", {style: "currency", currency: "RUB"});
+const dashDate = new Intl.DateTimeFormat("ru-RU", {day: "numeric", month: "short", timeZone: "UTC"});
+let revenueDays = [];
+let revenuePeriod = 14;
+
+function setDailyRevenue() {
+  const item = revenueDays.find(day => day.date === $("revenue-day").value);
+  $("revenue-day-amount").value = item ? dashRubles.format(item.amount_minor / 100) : "—";
 }
+$("revenue-day").onchange = setDailyRevenue;
+
+function renderRevenue() {
+  const points = revenueDays.slice(-revenuePeriod);
+  const peak = Math.max(1, ...points.map(point => point.amount_minor));
+  const chart = $("revenue-chart"), day = $("revenue-day");
+  chart.replaceChildren();
+  chart.style.gridTemplateColumns = `repeat(${Math.max(1, points.length)}, minmax(0, 1fr))`;
+  day.replaceChildren();
+  for (const point of points) {
+    const label = dashDate.format(new Date(point.date + "T00:00:00Z"));
+    const bar = document.createElement("span");
+    bar.style.height = Math.max(2, 100 * point.amount_minor / peak) + "%";
+    bar.title = label + " · " + dashRubles.format(point.amount_minor / 100);
+    chart.append(bar);
+    day.add(new Option(label, point.date));
+  }
+  if (points.length) day.value = points.at(-1).date;
+  day.disabled = !points.length;
+  $("overview-period-total").textContent = points.length
+    ? dashRubles.format(points.reduce((sum, point) => sum + point.amount_minor, 0) / 100) : "—";
+  setDailyRevenue();
+}
+for (const button of document.querySelectorAll("[data-revenue-period]")) {
+  button.onclick = () => {
+    revenuePeriod = Number(button.dataset.revenuePeriod);
+    for (const item of document.querySelectorAll("[data-revenue-period]")) {
+      item.setAttribute("aria-pressed", String(item === button));
+    }
+    renderRevenue();
+  };
+}
+
+function renderOverview(data) {
+  for (const [id, value] of Object.entries({
+    "users-count": data.users, "active-count": data.active_subscriptions,
+    "inactive-count": Math.max(0, data.users - data.active_subscriptions),
+    "paid-count": data.successful_payments, "pending-count": data.pending_payments,
+  })) $(id).textContent = dashNumber.format(value);
+  $("stars-count").textContent = dashNumber.format(data.stars_received) + " ⭐";
+  $("revenue-count").textContent = dashRubles.format(data.revenue_rub_minor / 100);
+  revenueDays = data.revenue_days || [];
+  renderRevenue();
+  const list = $("overview-plans");
+  list.replaceChildren();
+  for (const plan of data.active_plans || []) {
+    const row = document.createElement("div");
+    row.className = "dashboard-line";
+    const name = document.createElement("strong");
+    name.textContent = plan.name;
+    const count = document.createElement("span");
+    count.textContent = dashNumber.format(plan.count);
+    row.append(name, count);
+    list.append(row);
+  }
+  if (!list.childElementCount) list.textContent = "Активных подписок пока нет.";
+}
+
+function renderRecentPayments(items) {
+  const list = $("dashboard-payments");
+  list.replaceChildren();
+  for (const payment of items) {
+    const card = document.createElement("article");
+    card.className = "overview-payment";
+    const heading = document.createElement("div");
+    heading.className = "dashboard-line";
+    const title = document.createElement("strong");
+    title.textContent = "Заказ №" + payment.id;
+    const status = document.createElement("span");
+    status.className = "status-chip";
+    status.dataset.status = payment.status;
+    status.textContent = paymentStatus(payment.status);
+    heading.append(title, status);
+    const detail = document.createElement("p");
+    detail.className = "muted";
+    detail.textContent = [
+      payment.username ? "@" + payment.username : "Telegram " + payment.telegram_id,
+      new Date(payment.created_at).toLocaleString("ru-RU"),
+    ].join(" · ");
+    const summary = document.createElement("div");
+    summary.className = "dashboard-line payment-total";
+    const method = document.createElement("span");
+    method.className = "muted";
+    method.textContent = [
+      providerLabels[payment.provider] || payment.provider,
+      payment.plan_name || (payment.duration_days ? payment.duration_days + " дн." : ""),
+    ].filter(Boolean).join(" · ");
+    const amount = document.createElement("strong");
+    amount.textContent = formatPaymentAmount(payment);
+    summary.append(method, amount);
+    card.append(heading, detail, summary);
+    list.append(card);
+  }
+  if (!items.length) list.textContent = "Платежей пока нет.";
+}
+
+function formatBytes(value) {
+  const bytes = Number(value);
+  if (value == null || value === "" || !Number.isFinite(bytes) || bytes < 0) return "—";
+  const unit = Math.min(4, Math.floor(Math.log2(Math.max(1, bytes)) / 10));
+  return new Intl.NumberFormat("ru-RU", {maximumFractionDigits: 2}).format(bytes / 1024 ** unit)
+    + " " + ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"][unit];
+}
+
+function renderPanel(data) {
+  const status = $("panel-status"), stats = $("panel-metrics"), list = $("panel-nodes");
+  stats.replaceChildren();
+  list.replaceChildren();
+  stats.hidden = data.status !== "available";
+  status.hidden = !stats.hidden;
+  $("panel-version").hidden = stats.hidden || !data.version;
+  $("panel-version").textContent = data.version ? "v" + data.version.replace(/^v/, "") : "";
+  if (stats.hidden) {
+    status.textContent = data.status === "not_configured" ? "Панель не подключена." : "Данные панели временно недоступны.";
+    return;
+  }
+  for (const [name, value] of Object.entries({
+    "Онлайн": data.online, "Активных": data.active, "Всего в панели": data.users,
+    "Истекло": data.expired, "Отключено": data.disabled, "Достигли лимита": data.limited,
+    "Нод онлайн": data.nodes_online, "Память": data.memory_percent == null ? null : data.memory_percent + "%",
+    "Трафик за 7 дней": formatBytes(data.traffic_7_days), "Трафик за 30 дней": formatBytes(data.traffic_30_days),
+  })) {
+    const block = document.createElement("div");
+    block.className = "overview-stat";
+    const title = document.createElement("dt");
+    title.textContent = name;
+    const number = document.createElement("dd");
+    number.textContent = value ?? "—";
+    block.append(title, number);
+    stats.append(block);
+  }
+  for (const node of data.nodes || []) {
+    const line = document.createElement("div"), label = document.createElement("strong"), value = document.createElement("span");
+    line.className = "dashboard-line";
+    label.textContent = node.name || "Нода";
+    value.textContent = "Онлайн: " + (node.online ?? "—");
+    line.append(label, value);
+    list.append(line);
+  }
+}
+
+async function overview() {
+  const refresh = $("overview-refresh");
+  if (refresh.disabled) return;
+  refresh.disabled = true;
+  try {
+    await Promise.all([
+      api("/admin/api/overview").then(renderOverview).catch(error => {
+        $("status").textContent = error.message;
+      }),
+      api("/admin/api/payments?limit=5&offset=0").then(data => renderRecentPayments(data.items)).catch(() => {
+        $("dashboard-payments").textContent = "Не удалось загрузить последние платежи.";
+      }),
+      api("/admin/api/panel-overview").then(renderPanel).catch(() => renderPanel({status: "unavailable"})),
+    ]);
+  } finally {
+    refresh.disabled = false;
+  }
+}
+$("overview-refresh").onclick = overview;
 async function loadUsers(){const d=await api("/admin/api/users?limit="+pageSize+"&offset="+userOffset);$("users-table").replaceChildren();d.items.forEach(u=>{row("users-table",[u.telegram_id,u.username?"@"+u.username:"—",u.subscription_status,u.expires_at?new Date(u.expires_at).toLocaleDateString():"—",new Date(u.created_at).toLocaleDateString()]);const tr=$("users-table").lastElementChild;const button=document.createElement("button");button.className="action";button.textContent="Подробнее";button.onclick=()=>showCustomer(u.telegram_id);tr.appendChild(cell(button.textContent));tr.lastElementChild.replaceChildren(button)});$("users-page").textContent="Показано "+(d.total?userOffset+1:0)+"–"+Math.min(userOffset+d.items.length,d.total)+" из "+d.total;$("users-prev").disabled=userOffset===0;$("users-next").disabled=userOffset+pageSize>=d.total}
 async function showCustomer(id){$("status").textContent="";try{const d=await api("/admin/api/users/"+encodeURIComponent(id));$("customer-title").textContent="Клиент "+d.telegram_id;$("customer-summary").textContent=(d.username?"@"+d.username+" · ":"")+"Зарегистрирован: "+new Date(d.created_at).toLocaleString();$("customer-subscriptions").replaceChildren();$("customer-payments").replaceChildren();d.subscriptions.forEach(x=>row("customer-subscriptions",[x.id,x.status,x.expires_at?new Date(x.expires_at).toLocaleString():"—",new Date(x.created_at).toLocaleString()]));d.payments.forEach(x=>row("customer-payments",[x.id,providerLabels[x.provider]||x.provider,formatPaymentAmount(x),paymentStatus(x.status),new Date(x.created_at).toLocaleString()]));$("customer-detail").hidden=false;$("customer-detail").scrollIntoView({behavior:"smooth",block:"nearest"})}catch(e){$("status").textContent=e.message}}
 $("customer-close").onclick=()=>{$("customer-detail").hidden=true};
@@ -372,17 +521,7 @@ async function loadPaymentSettings() {
     button.addEventListener("click", () => openTab(providerTabs[provider]));
     list.appendChild(button);
   }
-  $("payment-terms-state").textContent = data.terms_url ? "Опубликованы" : "Ссылка не указана";
 }
-$("payment-diagnostics-refresh").onclick=async()=>{
-  const button = $("payment-diagnostics-refresh");
-  const status = $("payment-diagnostics-status");
-  button.disabled = true;
-  status.textContent = "";
-  try { await loadPaymentSettings(); }
-  catch (error) { status.textContent = error.message; }
-  finally { button.disabled = false; }
-};
 document.querySelectorAll("[data-copy-webhook]").forEach(button=>{
   button.addEventListener("click",async()=>{
     const provider = button.dataset.copyWebhook;
@@ -497,8 +636,7 @@ $("referral-form").onsubmit=async e=>{
 };
 const sidebarIconNames = {
   overview:"grid", plans:"tag", users:"users", payments:"card",
-  bonuses:"ticket", referrals:"gift", brand:"palette", trial:"clock",
-  pricing:"calc", settings:"wallet",
+  bonuses:"ticket", referrals:"gift", configuration:"wallet",
 };
 for(const button of document.querySelectorAll(".admin-tabs [data-tab]")){
   const icon=document.createElementNS("http://www.w3.org/2000/svg","svg");
@@ -513,6 +651,8 @@ const adminSidebar=$("admin-sidebar"), adminMenuOpen=$("admin-menu-open"), admin
 let adminReturnFocus=null;
 function setAdminMenu(open) {
   adminSidebar.classList.toggle("is-open",open);
+  document.body.classList.toggle("drawer-open", open);
+  document.querySelector(".admin-workspace").inert = open;
   adminBackdrop.hidden=!open;
   adminMenuOpen.setAttribute("aria-expanded",String(open));
   if(open){adminReturnFocus=document.activeElement; adminSidebar.querySelector('[data-tab][aria-current="page"]')?.focus();}
@@ -521,6 +661,9 @@ function setAdminMenu(open) {
 adminMenuOpen.onclick=()=>setAdminMenu(true);
 $("admin-menu-close").onclick=()=>setAdminMenu(false);
 adminBackdrop.onclick=()=>setAdminMenu(false);
+matchMedia("(min-width: 851px)").addEventListener("change", event => {
+  if (event.matches && adminSidebar.classList.contains("is-open")) setAdminMenu(false);
+});
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&adminSidebar.classList.contains("is-open"))setAdminMenu(false);});
 const tabs = {
   overview: {sections: ["overview-view"], load: overview},
@@ -532,6 +675,7 @@ const tabs = {
   brand: {sections: ["brand-view"], load: loadBrand},
   trial: {sections: ["trial-view"], load: loadTrialSettings},
   pricing: {sections: ["pricing-view"], load: loadPricing},
+  configuration: {sections: ["configuration-view"]},
   settings: {sections: ["payment-settings-view"], load: loadPaymentSettings},
 };
 const providerByTab = Object.fromEntries(Object.entries(providerTabs).map(([name, tab]) => [tab, name]));
@@ -546,8 +690,8 @@ async function openTab(requested, {updateHistory = true} = {}) {
   if (!Object.hasOwn(tabs, key)) key = "overview";
   const tab = tabs[key];
   const provider = providerByTab[key];
-  const parentTab = provider ? "settings" : key;
-  if (["settings", "trial", "pricing"].includes(parentTab)) $("settings-accordion").open = true;
+  const parentTab = provider || ["settings", "brand", "trial", "pricing"].includes(key)
+    ? "configuration" : key;
 
   $("status").textContent = "";
   for (const item of Object.values(tabs)) {
@@ -577,18 +721,16 @@ window.addEventListener("popstate", () => openTab(tabFromLocation(), {updateHist
 async function start() {
   try {
     if (!tg?.initData) throw Error("Откройте панель через Telegram Mini App");
-    const d = await api("/admin/api/overview");
-    $("welcome").textContent = d.admin_name ? "Здравствуйте, " + d.admin_name : "Состояние магазина";
+    try {
+      const profile = await api("/admin/api/store-profile");
+      renderStoreMark(profile.name, profile.logo_image_url);
+    } catch {
+      await api("/admin/api/overview");
+    }
     $("loading").hidden = true;
     $("dashboard").hidden = false;
-    const initial = tabFromLocation();
-    await openTab(initial, {updateHistory:false});
-    if (initial !== "brand") {
-      try {
-        const profile = await api("/admin/api/store-profile");
-        renderStoreMark(profile.name, profile.logo_image_url);
-      } catch { /* Keep the default wordmark if the profile is unavailable. */ }
-    }
+    adminMenuOpen.hidden = false;
+    await openTab(tabFromLocation(), {updateHistory:false});
   } catch (error) {
     $("loading").textContent = error.message;
   }
