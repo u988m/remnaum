@@ -84,6 +84,7 @@ jobs:
           if [ "${{ matrix.mode }}" = panel-network ]; then
             docker compose exec -T app python -c "import socket; assert socket.gethostbyname('remnaum-api')"
           fi
+          test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT version_num FROM alembic_version;')" = "0001_legacy_baseline"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM users;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM payments;')" = "0"
           test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc 'SELECT COUNT(*) FROM subscriptions;')" = "0"
