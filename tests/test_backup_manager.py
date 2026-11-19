@@ -332,8 +332,8 @@ class BackupTests(unittest.TestCase):
             connection.getresponse.return_value.status = 200
             connection.getresponse.return_value.read.return_value = b'{"ok":true}'
 
-            with patch.object(backup, "_bot_token", return_value="example-token"), \\
-                 patch.object(backup.http.client, "HTTPSConnection", return_value=connection), \\
+            with patch.object(backup, "_bot_token", return_value="example-token"), \
+                 patch.object(backup.http.client, "HTTPSConnection", return_value=connection), \
                  patch.object(Path, "read_bytes", side_effect=AssertionError("must stream")):
                 backup.send_to_telegram(archive, "123456789")
 
@@ -351,7 +351,7 @@ class BackupTests(unittest.TestCase):
             archive.write_bytes(b"encrypted")
             connection = MagicMock()
             connection.getresponse.return_value.status = 503
-            with patch.object(backup, "_bot_token", return_value="example-token"), \\
+            with patch.object(backup, "_bot_token", return_value="example-token"), \
                  patch.object(backup.http.client, "HTTPSConnection", return_value=connection):
                 with self.assertRaisesRegex(RuntimeError, "HTTP 503"):
                     backup.send_to_telegram(archive, "123456789")
