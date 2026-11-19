@@ -3,7 +3,9 @@ import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from redis import asyncio as aioredis
+from sqlalchemy import text
 from fastapi.staticfiles import StaticFiles
 
 from app.bot.runtime import bot, dispatcher, setup_bot
@@ -88,3 +90,21 @@ app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "stat
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "remnaum"}
+
+
+@app.get("/ready")
+async def readiness():
+    """Readiness is separate from liveness: do not restart on transient DB outages."""
+    try:
+        async with asyncio.timeout(3):
+            async with engine.connect() as connection:
+                await connection.execute(text("SELECT 1"))
+            redis_client = aioredis.from_url(settings.redis_url)
+            try:
+                await redis_client.ping()
+            finally:
+                await redis_client.aclose()
+    except Exception as exc:
+        log.warning("Readiness check failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Dependencies unavailable") from exc
+    return {"status": "ready", "service": "remnaum"}
