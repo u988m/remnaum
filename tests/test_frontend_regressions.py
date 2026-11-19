@@ -30,6 +30,16 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('id="admin-sidebar"', admin)
         self.assertIn('id="admin-menu-backdrop"', admin)
         self.assertIn('function setAdminMenu(open)', admin_js)
+        for section in ("referrals-view", "trial-view", "pricing-view", "payment-settings-view",
+                        "payment-telegram_stars-view", "payment-yookassa-view",
+                        "payment-yoomoney-view", "payment-cryptopay-view"):
+            self.assertIn('id="' + section + '"', admin)
+        for tab in ("referrals", "trial", "pricing", "pay-stars",
+                    "pay-yookassa", "pay-yoomoney", "pay-cryptopay"):
+            self.assertIn('data-tab="' + tab + '"', admin)
+        self.assertIn('async function savePaymentProvider(provider)', admin_js)
+        self.assertIn('methods:{[provider]:$("method-" + provider).checked}', admin_js)
+        self.assertNotIn('id="payment-settings-save"', admin)
         self.assertIn('fillPaymentOptions()', mini_js)
         self.assertNotIn('async function adminApi(', mini_js)
         self.assertNotIn('id="referral-form"', mini)

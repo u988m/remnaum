@@ -20,11 +20,20 @@
   <p class="sidebar-category">УПРАВЛЕНИЕ</p>
   <button data-tab="plans" type="button">Тарифы</button>
   <button data-tab="users" type="button">Пользователи</button>
-  <button data-tab="payments" type="button">Платежи</button>
+  <button data-tab="payments" type="button">История платежей</button>
+  <p class="sidebar-category">МАРКЕТИНГ</p>
+  <button data-tab="bonuses" type="button">Промокоды</button>
+  <button data-tab="referrals" type="button">Реферальная программа</button>
   <p class="sidebar-category">МАГАЗИН</p>
-  <button data-tab="bonuses" type="button">Бонусы</button>
-  <button data-tab="brand" type="button">Магазин</button>
-  <button data-tab="settings" type="button">Настройки</button>
+  <button data-tab="brand" type="button">Внешний вид</button>
+  <button data-tab="trial" type="button">Пробный доступ</button>
+  <button data-tab="pricing" type="button">Формула цен</button>
+  <p class="sidebar-category">ПЛАТЁЖНЫЕ СИСТЕМЫ</p>
+  <button data-tab="settings" type="button">Способы оплаты</button>
+  <button data-tab="pay-stars" type="button">Telegram Stars</button>
+  <button data-tab="pay-yookassa" type="button">YooKassa</button>
+  <button data-tab="pay-yoomoney" type="button">YooMoney</button>
+  <button data-tab="pay-cryptopay" type="button">Crypto Pay</button>
 </nav>
 <a class="admin-return-link" href="/app">← В магазин</a>
 </aside>
@@ -163,19 +172,53 @@
 </form>
 </section>
 <section class="section" id="payment-settings-view" hidden>
-<h2>Способы оплаты</h2>
-<p class="muted">Включите нужные способы оплаты и укажите их реквизиты. Покупатели увидят только доступные варианты.</p>
-<div id="method-list"></div>
-<h3>Реквизиты внешних провайдеров</h3>
-<div class="grid">
-<label>YooKassa Shop ID<input id="pay-yookassa-id"></label>
-<label>YooKassa Secret<input id="pay-yookassa-secret" type="password"></label>
-<label>YooMoney Receiver<input id="pay-yoomoney-receiver"></label>
-<label>YooMoney Secret<input id="pay-yoomoney-secret" type="password"></label>
-<label>Crypto Pay API token<input id="pay-crypto-token" type="password"></label>
-</div>
-<button class="action primary" id="payment-settings-save">Сохранить способы оплаты</button>
-<p class="muted" id="provider-status"></p>
+  <div class="section-heading"><h1>Способы оплаты</h1></div>
+  <p class="muted">Каждый провайдер настраивается отдельно. Выключенный способ оплаты не показывается покупателям.</p>
+  <div id="method-list" class="provider-grid" aria-label="Платёжные провайдеры"></div>
+  <p class="muted">Реквизиты хранятся в зашифрованном виде. Сохранённые секреты не отображаются повторно.</p>
+</section>
+<section class="section payment-provider-view" id="payment-telegram_stars-view" hidden>
+  <button class="action provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
+  <h1>Telegram Stars</h1>
+  <p class="muted">Оплата внутри Telegram. Дополнительные реквизиты не требуются.</p>
+  <p class="provider-state" id="provider-telegram_stars-state" role="status">Проверяем настройки…</p>
+  <label class="provider-toggle"><input type="checkbox" id="method-telegram_stars"> Принимать Telegram Stars</label>
+  <button class="action primary provider-save" type="button" data-save-provider="telegram_stars">Сохранить Stars</button>
+</section>
+<section class="section payment-provider-view" id="payment-yookassa-view" hidden>
+  <button class="action provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
+  <h1>YooKassa</h1>
+  <p class="muted">Подключите магазин YooKassa для оплаты в рублях.</p>
+  <p class="provider-state" id="provider-yookassa-state" role="status">Проверяем настройки…</p>
+  <label class="provider-toggle"><input type="checkbox" id="method-yookassa"> Включить YooKassa</label>
+  <div class="provider-fields">
+    <label>ID магазина<input id="pay-yookassa-id" autocomplete="off" placeholder="Shop ID"></label>
+    <label>Секретный ключ<input id="pay-yookassa-secret" type="password" autocomplete="new-password" placeholder="Оставьте пустым, чтобы сохранить старый"></label>
+  </div>
+  <button class="action primary provider-save" type="button" data-save-provider="yookassa">Сохранить YooKassa</button>
+</section>
+<section class="section payment-provider-view" id="payment-yoomoney-view" hidden>
+  <button class="action provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
+  <h1>YooMoney</h1>
+  <p class="muted">Настройте получателя и секрет уведомлений.</p>
+  <p class="provider-state" id="provider-yoomoney-state" role="status">Проверяем настройки…</p>
+  <label class="provider-toggle"><input type="checkbox" id="method-yoomoney"> Включить YooMoney</label>
+  <div class="provider-fields">
+    <label>Номер кошелька<input id="pay-yoomoney-receiver" autocomplete="off" placeholder="Номер кошелька"></label>
+    <label>Секрет уведомлений<input id="pay-yoomoney-secret" type="password" autocomplete="new-password" placeholder="Оставьте пустым, чтобы сохранить старый"></label>
+  </div>
+  <button class="action primary provider-save" type="button" data-save-provider="yoomoney">Сохранить YooMoney</button>
+</section>
+<section class="section payment-provider-view" id="payment-cryptopay-view" hidden>
+  <button class="action provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
+  <h1>Crypto Pay</h1>
+  <p class="muted">Введите API-токен приложения Crypto Pay.</p>
+  <p class="provider-state" id="provider-cryptopay-state" role="status">Проверяем настройки…</p>
+  <label class="provider-toggle"><input type="checkbox" id="method-cryptopay"> Включить Crypto Pay</label>
+  <div class="provider-fields">
+    <label>API-токен<input id="pay-crypto-token" type="password" autocomplete="new-password" placeholder="Оставьте пустым, чтобы сохранить старый"></label>
+  </div>
+  <button class="action primary provider-save" type="button" data-save-provider="cryptopay">Сохранить Crypto Pay</button>
 </section>
 <section class="section" id="pricing-view" hidden>
 <h2>Цены индивидуального конструктора</h2>

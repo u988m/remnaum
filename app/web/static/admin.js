@@ -286,27 +286,75 @@ $("brand-form").onsubmit=async e=>{
     });$("admin-shop-name").textContent=$("brand-name").value;$("status").textContent="Оформление сохранено";
   }catch(e){$("status").textContent=e.message}
 };
-const paymentNames=["telegram_stars","yookassa","yoomoney","cryptopay"];
-async function loadPaymentSettings(){
-  const d=await adminApi("GET","/admin/api/payment-settings");
-  $("method-list").replaceChildren();
-  paymentNames.forEach(name=>{
-    const label=document.createElement("label");label.style.display="block";label.style.margin="10px";
-    const check=document.createElement("input");check.type="checkbox";check.id="method-"+name;check.checked=!!d.methods[name];
-    label.append(check,document.createTextNode(" "+name));$("method-list").appendChild(label);
-  });
-  $("provider-status").textContent=Object.keys(d.configured).map(k=>k+": "+(d.configured[k]?"настроен":"не настроен")).join(" · ");
-}
-$("payment-settings-save").onclick=async()=>{
-  try{const methods={};paymentNames.forEach(n=>methods[n]=$("method-"+n).checked);
-    const credentials={yookassa:{shop_id:$("pay-yookassa-id").value,secret_key:$("pay-yookassa-secret").value},
-    yoomoney:{receiver:$("pay-yoomoney-receiver").value,notification_secret:$("pay-yoomoney-secret").value},
-    cryptopay:{api_token:$("pay-crypto-token").value}};
-    await adminApi("PUT","/admin/api/payment-settings",{methods,credentials});
-    ["pay-yookassa-secret","pay-yoomoney-secret","pay-crypto-token"].forEach(k=>$(k).value="");
-    $("status").textContent="Платёжные настройки сохранены";await loadPaymentSettings();
-  }catch(e){$("status").textContent=e.message}
+const providerLabels = {
+  telegram_stars: "Telegram Stars", yookassa: "YooKassa",
+  yoomoney: "YooMoney", cryptopay: "Crypto Pay",
 };
+const providerTabs = {
+  telegram_stars: "pay-stars", yookassa: "pay-yookassa",
+  yoomoney: "pay-yoomoney", cryptopay: "pay-cryptopay",
+};
+const providerCredentials = {
+  yookassa: {shop_id:"pay-yookassa-id", secret_key:"pay-yookassa-secret"},
+  yoomoney: {receiver:"pay-yoomoney-receiver", notification_secret:"pay-yoomoney-secret"},
+  cryptopay: {api_token:"pay-crypto-token"},
+};
+const providerSecretInputs = ["pay-yookassa-secret","pay-yoomoney-secret","pay-crypto-token"];
+async function loadPaymentSettings() {
+  const d = await adminApi("GET", "/admin/api/payment-settings");
+  const grid = $("method-list");
+  grid.replaceChildren();
+  for (const [provider, label] of Object.entries(providerLabels)) {
+    const enabled = Boolean(d.methods?.[provider]);
+    const configured = Boolean(d.configured?.[provider]);
+    const status = !configured ? "Нужны реквизиты" : enabled ? "Активен" : "Выключен";
+    $("method-" + provider).checked = enabled;
+    $("provider-" + provider + "-state").textContent =
+      configured ? (enabled ? "Подключён и включён" : "Настроен, но выключен") : "Не настроен";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "provider-tile";
+    button.dataset.openTab = providerTabs[provider];
+    const nameElement = document.createElement("strong");
+    nameElement.textContent = label;
+    const statusElement = document.createElement("span");
+    statusElement.textContent = status;
+    const arrow = document.createElement("span");
+    arrow.setAttribute("aria-hidden", "true");
+    arrow.textContent = "→";
+    button.append(nameElement, statusElement, arrow);
+    button.addEventListener("click", () => openTab(providerTabs[provider]));
+    grid.appendChild(button);
+  }
+}
+async function savePaymentProvider(provider) {
+  if (!Object.hasOwn(providerLabels,provider)) throw Error("Неизвестная платёжная система");
+  const button = document.querySelector('[data-save-provider="' + provider + '"]');
+  button.disabled = true;
+  try {
+    const values = {};
+    for (const [key,id] of Object.entries(providerCredentials[provider] || {})) {
+      // Sending an empty field never overwrites an encrypted secret in the API.
+      const value = $(id).value.trim();
+      if (value) values[key] = value;
+    }
+    const credentials = Object.keys(values).length ? {[provider]:values} : {};
+    await adminApi("PUT","/admin/api/payment-settings",{
+      methods:{[provider]:$("method-" + provider).checked},
+      credentials,
+    });
+    for (const id of providerSecretInputs) $(id).value = "";
+    $("status").textContent = providerLabels[provider] + ": настройки сохранены";
+    await loadPaymentSettings();
+  } catch(error) {
+    $("status").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+document.querySelectorAll("[data-save-provider]").forEach(button=>{
+  button.addEventListener("click",()=>savePaymentProvider(button.dataset.saveProvider));
+});
 const pricingKeys=["rub_per_day_minor","rub_per_gb_minor","rub_per_device_minor","stars_per_day","stars_per_gb","stars_per_device","currency"];
 async function loadPricing(){
   const data=await adminApi("GET","/admin/api/tariff-pricing");
@@ -378,16 +426,20 @@ const tabs = {
   plans: {sections: ["plans-view"], load: loadPlans},
   users: {sections: ["users-view"], load: loadUsers},
   payments: {sections: ["payments-view"], load: loadPayments},
-  bonuses: {sections: ["promos-view", "referrals-view"], load: () => Promise.all([loadPromos(), loadReferrals()])},
+  bonuses: {sections: ["promos-view"], load: loadPromos},
+  referrals: {sections: ["referrals-view"], load: loadReferrals},
   brand: {sections: ["brand-view"], load: loadBrand},
-  settings: {
-    sections: ["payment-settings-view", "pricing-view", "trial-view"],
-    load: () => Promise.all([loadPaymentSettings(), loadPricing(), loadTrialSettings()]),
-  },
+  trial: {sections: ["trial-view"], load: loadTrialSettings},
+  pricing: {sections: ["pricing-view"], load: loadPricing},
+  settings: {sections: ["payment-settings-view"], load: loadPaymentSettings},
+  "pay-stars": {sections: ["payment-telegram_stars-view"], load: loadPaymentSettings},
+  "pay-yookassa": {sections: ["payment-yookassa-view"], load: loadPaymentSettings},
+  "pay-yoomoney": {sections: ["payment-yoomoney-view"], load: loadPaymentSettings},
+  "pay-cryptopay": {sections: ["payment-cryptopay-view"], load: loadPaymentSettings},
 };
 
 async function openTab(requested) {
-  const legacy = {promos: "bonuses", referrals: "bonuses", trial: "settings", tariffs: "settings"};
+  const legacy = {promos: "bonuses", tariffs: "pricing", payment_methods: "settings"};
   const key = Object.hasOwn(legacy, requested) ? legacy[requested] : requested;
   const tab = Object.hasOwn(tabs, key) ? tabs[key] : tabs.overview;
   $("status").textContent = "";

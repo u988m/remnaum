@@ -160,3 +160,29 @@ main { max-width:1480px;padding:16px clamp(14px,3vw,36px) 44px; }
 }
 @media (max-width:390px) { .card { min-height:120px; }.card b { font-size:1.7rem; } }
 @media (prefers-reduced-motion:reduce) { .admin-sidebar { transition:none; } }
+
+/* Owner settings are task-based, not one giant form. */
+.admin-sidebar { scrollbar-width:thin; scrollbar-color:var(--color-border-strong) transparent; }
+.admin-tabs .sidebar-category { margin:18px 11px 8px; }
+.admin-tabs button { min-height:47px; width:100%; }
+.admin-workspace { overflow-x:clip; }
+.admin-workspace > .section { margin-top:0; }
+.provider-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:12px;margin:22px 0; }
+.provider-tile { width:100%; display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;gap:11px;padding:20px;text-align:left;background:var(--color-surface-raised);border:1px solid var(--color-border);border-radius:20px;color:var(--color-text); }
+.provider-tile strong { font-size:1.05rem; }
+.provider-tile span:nth-child(2) { grid-column:1; color:var(--color-muted);font-size:.84rem; }
+.provider-tile span:last-child { grid-column:2;grid-row:1/3;align-self:center;font-size:1.35rem; }
+.payment-provider-view { max-width:800px; }
+.payment-provider-view h1 { margin:17px 0 12px; }
+.payment-provider-view .provider-state { display:inline-block;padding:5px 11px;margin:20px 0 4px;border:1px solid var(--color-border-strong);border-radius:var(--radius-pill);color:var(--color-muted);font-size:.8rem; }
+.payment-provider-view .provider-toggle { display:flex;align-items:center;gap:12px;min-height:64px;margin:15px 0;border:1px solid var(--color-border);border-radius:16px;padding:15px;font-size:1rem; }
+.payment-provider-view .provider-toggle input { width:19px;height:19px;flex:none; }
+.payment-provider-view .provider-fields { display:grid;gap:12px;margin:16px 0;max-width:650px; }
+.payment-provider-view .provider-fields label { margin:0;font-size:.88rem; }
+.provider-save { margin-top:15px;min-width:190px; }
+.provider-back { width:auto; }
+@media (max-width:850px) {
+ .admin-sidebar { overscroll-behavior:contain; }
+ .payment-provider-view { padding:18px; }
+ .provider-grid { grid-template-columns:1fr; }
+}
