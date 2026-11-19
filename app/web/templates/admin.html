@@ -189,13 +189,16 @@
   <div class="section-heading"><h1>Способы оплаты</h1></div>
   <p class="muted">Каждый провайдер настраивается отдельно. Выключенный способ оплаты не показывается покупателям.</p>
   <div id="method-list" class="provider-grid" aria-label="Платёжные провайдеры"></div>
-  <p class="muted">Реквизиты хранятся в зашифрованном виде. Сохранённые секреты не отображаются повторно.</p>
+  <p class="muted">Проверка здесь показывает только настройки. Реальное получение оплаты подтверждается в истории платежей после тестовой транзакции.</p>
+  <button class="action" id="payment-diagnostics-refresh" type="button">Проверить настройки</button>
+  <p class="muted" id="payment-diagnostics-status" role="status"></p>
 </section>
 <section class="section payment-provider-view" id="payment-telegram_stars-view" hidden>
   <button class="action provider-back" type="button" data-open-tab="settings">← Способы оплаты</button>
   <h1>Telegram Stars</h1>
   <p class="muted">Оплата внутри Telegram. Дополнительные реквизиты не требуются.</p>
   <p class="provider-state" id="provider-telegram_stars-state" role="status">Проверяем настройки…</p>
+  Для реального теста потребуется счёт в Stars.
   <label class="provider-toggle"><input type="checkbox" id="method-telegram_stars"> Принимать Telegram Stars</label>
   <button class="action primary provider-save" type="button" data-save-provider="telegram_stars">Сохранить Stars</button>
 </section>
@@ -204,6 +207,7 @@
   <h1>YooKassa</h1>
   <p class="muted">Подключите магазин YooKassa для оплаты в рублях.</p>
   <p class="provider-state" id="provider-yookassa-state" role="status">Проверяем настройки…</p>
+  <div class="provider-webhook"><label>Webhook URL<input id="provider-yookassa-webhook" type="text" readonly placeholder="Требуется HTTPS-адрес сервера"></label><button type="button" class="action provider-copy-webhook" data-copy-webhook="yookassa">Скопировать URL</button></div>
   <label class="provider-toggle"><input type="checkbox" id="method-yookassa"> Включить YooKassa</label>
   <div class="provider-fields">
     <label>ID магазина<input id="pay-yookassa-id" autocomplete="off" placeholder="Shop ID"></label>
@@ -216,6 +220,7 @@
   <h1>YooMoney</h1>
   <p class="muted">Настройте получателя и секрет уведомлений.</p>
   <p class="provider-state" id="provider-yoomoney-state" role="status">Проверяем настройки…</p>
+  <div class="provider-webhook"><label>Webhook URL<input id="provider-yoomoney-webhook" type="text" readonly placeholder="Требуется HTTPS-адрес сервера"></label><button type="button" class="action provider-copy-webhook" data-copy-webhook="yoomoney">Скопировать URL</button></div>
   <label class="provider-toggle"><input type="checkbox" id="method-yoomoney"> Включить YooMoney</label>
   <div class="provider-fields">
     <label>Номер кошелька<input id="pay-yoomoney-receiver" autocomplete="off" placeholder="Номер кошелька"></label>
@@ -228,6 +233,7 @@
   <h1>Crypto Pay</h1>
   <p class="muted">Введите API-токен приложения Crypto Pay.</p>
   <p class="provider-state" id="provider-cryptopay-state" role="status">Проверяем настройки…</p>
+  <div class="provider-webhook"><label>Webhook URL<input id="provider-cryptopay-webhook" type="text" readonly placeholder="Требуется HTTPS-адрес сервера"></label><button type="button" class="action provider-copy-webhook" data-copy-webhook="cryptopay">Скопировать URL</button></div>
   <label class="provider-toggle"><input type="checkbox" id="method-cryptopay"> Включить Crypto Pay</label>
   <div class="provider-fields">
     <label>API-токен<input id="pay-crypto-token" type="password" autocomplete="new-password" placeholder="Оставьте пустым, чтобы сохранить старый"></label>

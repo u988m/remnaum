@@ -49,6 +49,30 @@ async def admin_get_payment_settings(x_telegram_init_data: str | None = Header(d
     return public_payment_settings(methods, credentials)
 
 
+@router.get("/admin/api/payment-diagnostics")
+async def admin_payment_diagnostics(x_telegram_init_data: str | None = Header(default=None)):
+    """Configuration-only readiness; no token, password or network probe is exposed."""
+    await _require_telegram_admin(x_telegram_init_data)
+    methods, credentials = await get_store_payment_settings()
+    configured = public_payment_settings(methods, credentials)["configured"]
+    base = settings.public_base_url.rstrip("/")
+    paths = {
+        "yookassa": "/webhooks/payments/yookassa",
+        "yoomoney": "/webhooks/payments/yoomoney",
+        "cryptopay": "/webhooks/payments/cryptopay",
+    }
+    return {
+        "providers": {
+            name: {
+                "enabled": bool(methods.get(name)),
+                "configured": bool(configured.get(name) and (bot is not None if name == "telegram_stars" else True)),
+                "webhook_url": base + paths[name] if name in paths and base.startswith("https://") else None,
+            } for name in ("telegram_stars", "yookassa", "yoomoney", "cryptopay")
+        },
+        "verification": "configuration_only",
+    }
+
+
 @router.put("/admin/api/payment-settings")
 async def admin_update_payment_settings(
     data: PaymentSettingsUpdate,

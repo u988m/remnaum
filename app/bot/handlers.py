@@ -434,6 +434,8 @@ async def send_stars_invoice(message: Message, telegram_id: int, **order) -> Non
 async def stars_pre_checkout_handler(query: PreCheckoutQuery) -> None:
     try:
         payment_id = int(query.invoice_payload.removeprefix("remnaum:"))
+        if not await is_payment_method_enabled("telegram_stars"):
+            raise ValueError("Stars checkout disabled")
         valid = await validate_stars_pre_checkout(
             telegram_id=query.from_user.id,
             payment_id=payment_id,

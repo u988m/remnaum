@@ -347,6 +347,31 @@ async function loadPaymentSettings() {
     grid.appendChild(button);
   }
 }
+async function loadPaymentDiagnostics() {
+  try {
+    const d=await api("/admin/api/payment-diagnostics");
+    for (const [name,info] of Object.entries(d.providers||{})) {
+      const state=$("provider-"+name+"-state");
+      if (state) state.textContent=info.enabled && info.configured
+        ? "Настройки заполнены. Сделайте тестовый платёж."
+        : info.enabled ? "Не хватает настроек провайдера" : "Выключен";
+      const webhook=$("provider-"+name+"-webhook");
+      if (webhook) webhook.value=info.webhook_url||"";
+    }
+    $("payment-diagnostics-status").textContent="Проверены локальные настройки. Подтверждение оплаты проверяйте в истории.";
+  } catch(error) {
+    $("payment-diagnostics-status").textContent=error.message;
+  }
+}
+$("payment-diagnostics-refresh").onclick=()=>loadPaymentDiagnostics();
+document.querySelectorAll("[data-copy-webhook]").forEach(button=>{
+  button.addEventListener("click",async()=>{
+    const url=$("provider-"+button.dataset.copyWebhook+"-webhook")?.value;
+    if(!url){$("status").textContent="Укажите HTTPS-адрес для вебхуков.";return}
+    try { await navigator.clipboard.writeText(url); $("status").textContent="Webhook URL скопирован."; }
+    catch { $("status").textContent="Выделите URL и скопируйте вручную."; }
+  });
+});
 async function savePaymentProvider(provider) {
   if (!Object.hasOwn(providerLabels,provider)) throw Error("Неизвестная платёжная система");
   const button = document.querySelector('[data-save-provider="' + provider + '"]');
@@ -366,6 +391,7 @@ async function savePaymentProvider(provider) {
     for (const id of providerSecretInputs) $(id).value = "";
     $("status").textContent = providerLabels[provider] + ": настройки сохранены";
     await loadPaymentSettings();
+    await loadPaymentDiagnostics();
   } catch(error) {
     $("status").textContent = error.message;
   } finally {
@@ -466,11 +492,11 @@ const tabs = {
   brand: {sections: ["brand-view"], load: loadBrand},
   trial: {sections: ["trial-view"], load: loadTrialSettings},
   pricing: {sections: ["pricing-view"], load: loadPricing},
-  settings: {sections: ["payment-settings-view"], load: loadPaymentSettings},
-  "pay-stars": {sections: ["payment-telegram_stars-view"], load: loadPaymentSettings},
-  "pay-yookassa": {sections: ["payment-yookassa-view"], load: loadPaymentSettings},
-  "pay-yoomoney": {sections: ["payment-yoomoney-view"], load: loadPaymentSettings},
-  "pay-cryptopay": {sections: ["payment-cryptopay-view"], load: loadPaymentSettings},
+  settings: {sections: ["payment-settings-view"], load: async()=>{await loadPaymentSettings();await loadPaymentDiagnostics();}},
+  "pay-stars": {sections: ["payment-telegram_stars-view"], load: async()=>{await loadPaymentSettings();await loadPaymentDiagnostics();}},
+  "pay-yookassa": {sections: ["payment-yookassa-view"], load: async()=>{await loadPaymentSettings();await loadPaymentDiagnostics();}},
+  "pay-yoomoney": {sections: ["payment-yoomoney-view"], load: async()=>{await loadPaymentSettings();await loadPaymentDiagnostics();}},
+  "pay-cryptopay": {sections: ["payment-cryptopay-view"], load: async()=>{await loadPaymentSettings();await loadPaymentDiagnostics();}},
 };
 
 async function openTab(requested) {
