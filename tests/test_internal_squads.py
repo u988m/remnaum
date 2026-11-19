@@ -14,6 +14,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
+from app.services import store_operations
 from app.db.base import Base
 from app.db.models import DeviceAlias, Payment, Referral, ReferralReward, Subscription, SubscriptionDetails, TariffPlan, TermsAcceptance, User
 from app.db.session import initialize_schema
@@ -44,7 +45,7 @@ class SquadLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.engine = engine
         self.sessions = async_sessionmaker(engine, expire_on_commit=False)
         with ExitStack() as stack:
-            for module in (customer_admin, devices, payment_service, plans, squads, subscriptions, tariffs, trials, users):
+            for module in (customer_admin, devices, payment_service, plans, squads, subscriptions, tariffs, trials, users, store_operations):
                 stack.enter_context(patch.object(module, "SessionLocal", self.sessions))
             stack.enter_context(patch.object(settings, "remnawave_base_url", "https://panel.test"))
             stack.enter_context(patch.object(settings, "remnawave_api_token", "test"))

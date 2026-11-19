@@ -74,7 +74,7 @@ class PremiumMenuTests(unittest.TestCase):
             ["🛒 Тарифы", "🎁 Бонусы"],
             ["🧾 Покупки", "💬 Поддержка"],
         ])
-        self.assertEqual(ordinary.inline_keyboard[0][0].web_app.url, "https://miniapp.example.com/app")
+        self.assertEqual(ordinary.inline_keyboard[0][0].web_app.url, "https://miniapp.example.com")
         callbacks = [b.callback_data for r in ordinary.inline_keyboard for b in r if b.callback_data]
         self.assertCountEqual(callbacks, [
             "menu:plans", "menu:subscription", "menu:purchases",
@@ -248,7 +248,8 @@ class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
         )
         message = SimpleNamespace(edit_text=AsyncMock())
         callback = SimpleNamespace(message=message, answer=AsyncMock(), data="plan:select:4:2")
-        with patch("app.bot.handlers.get_plan", AsyncMock(return_value=plan)):
+        with patch("app.bot.handlers.get_plan", AsyncMock(return_value=plan)), \
+             patch("app.bot.handlers.get_operations", AsyncMock(return_value={"extra_devices_max": 1000})):
             await fixed_plan_handler(callback)
         review = message.edit_text.call_args.args[0]
         self.assertIn("Безлимит", review)

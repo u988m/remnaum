@@ -167,3 +167,13 @@ class RemnawaveClient:
     async def delete_hwid_device(self, user_id: int | str, hwid: str) -> Any:
         identity = {"userId": int(user_id)} if str(user_id).isdigit() else {"userUuid": str(user_id)}
         return await self.request("POST", "/api/hwid/devices/delete", json={**identity, "hwid": hwid})
+
+
+async def panel_client(client_type=RemnawaveClient, *, session=None):
+    from app.services.store_operations import get_operations
+
+    policy = await get_operations(session=session, credentials=True)
+    return client_type(
+        base_url=policy["panel_url"] or settings.remnawave_base_url,
+        token=policy.get("panel_token") or settings.remnawave_api_token,
+    )

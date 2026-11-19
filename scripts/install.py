@@ -958,7 +958,7 @@ def config_for_install(existing: dict[str, str], mode: str,
     cfg["DEPLOY_MODE"] = mode
     cfg["COMPOSE_FILE"] = mode_files(mode, cfg.get("REMNAUM_PROXY_NETWORK", "") if mode == "panel" else "")
     cfg["PUBLIC_BASE_URL"] = "https://" + cfg["WEBAPP_DOMAIN"]
-    cfg["WEBAPP_URL"] = cfg["PUBLIC_BASE_URL"] + "/app"
+    cfg["WEBAPP_URL"] = cfg["PUBLIC_BASE_URL"]
     cfg["TELEGRAM_WEBHOOK_URL"] = "https://" + cfg["PUBLIC_DOMAIN"] + "/telegram/webhook"
     cfg["TELEGRAM_USE_WEBHOOK"] = "true"
     for key in ("APP_SECRET_KEY", "POSTGRES_PASSWORD",

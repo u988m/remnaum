@@ -16,6 +16,11 @@
     <strong id="store-name">Remnaum</strong>
   </header>
   <div id="loading" class="loading" role="status">Открываем магазин…</div>
+  <p class="loading" id="login-options" hidden><a href="/auth">Войти в веб-приложение</a></p>
+  <div class="loading" id="channel-options" hidden>
+    <a id="required-channel" target="_blank" rel="noopener noreferrer">Открыть канал</a>
+    <button type="button" class="secondary-btn" id="check-channel">Проверить подписку</button>
+  </div>
   <div id="app" hidden>
     <section class="page" id="page-shop" data-page-panel="shop" hidden>
       <div class="page-heading">
@@ -80,8 +85,33 @@
     <section class="page" id="page-support" data-page-panel="support" hidden>
       <section class="panel" id="account-support">
         <h1>Поддержка</h1>
+        <button class="secondary-btn full" data-go-page="tickets" type="button">Открыть тикеты</button>
         <p class="muted" id="support-text">Контакт поддержки пока не указан.</p>
         <a class="primary-btn full" id="support-link" target="_blank" rel="noopener" hidden>Связаться с поддержкой →</a>
+      </section>
+    </section>
+    <section class="page" id="page-tickets" data-page-panel="tickets" hidden>
+      <h1>Тикеты поддержки</h1>
+      <section class="panel ticket-workspace" id="user-tickets">
+        <form data-ticket-create>
+          <label>Тема <input name="subject" required maxlength="120"></label>
+          <label>Сообщение <textarea name="body" required maxlength="3000"></textarea></label>
+          <button class="primary-btn" type="submit">Создать тикет</button>
+        </form>
+    <div data-ticket-list></div>
+    <div><button type="button" class="secondary-btn" data-ticket-prev>Назад</button>
+      <button type="button" class="secondary-btn" data-ticket-next>Далее</button></div>
+    <section data-ticket-detail hidden>
+      <h2 data-ticket-heading></h2>
+      <div data-ticket-body></div>
+      <form data-ticket-reply>
+        <label>Ответ <textarea name="body" required maxlength="3000"></textarea></label>
+        <button class="primary-btn" type="submit">Отправить</button>
+      </form>
+
+    </section>
+    <p data-ticket-status role="status"></p>
+
       </section>
     </section>
     <section class="page" id="page-bonuses" data-page-panel="bonuses" hidden>
@@ -125,12 +155,26 @@
         <strong>Админ-панель</strong><span>Управление магазином</span>
       </button>
       <div class="profile-actions">
+        <button class="profile-action" type="button" data-go-page="theme"><strong>Тема</strong><span>Настроить цвета</span></button>
+        <a class="profile-action" id="google-link" href="/auth/google?link=true" hidden>Привязать Google</a>
+        <form id="browser-logout" action="/auth/logout" method="post" hidden>
+          <button class="profile-action" type="submit">Выйти</button>
+        </form>
         <button class="profile-action" type="button" data-go-page="shop"><strong>Все тарифы</strong><span>Выбрать подписку</span></button>
         <button class="profile-action" type="button" data-go-page="purchases"><strong>Покупки</strong><span>История и статусы оплаты</span></button>
         <button class="profile-action" type="button" data-go-page="notifications"><strong>Уведомления</strong><span>Напоминания и сообщения об окончании</span></button>
         <button class="profile-action" type="button" data-go-page="guide"><strong>Инструкция</strong><span>Как подключить VPN</span></button>
         <button class="profile-action" type="button" data-go-page="support"><strong><svg class="profile-icon" aria-hidden="true"><use href="#i-help"/></svg>Помощь</strong><span>Связаться с поддержкой</span></button>
       </div>
+    </section>
+    <section class="page" id="page-theme" data-page-panel="theme" hidden>
+      <h1>Цвета темы</h1>
+      <form class="panel" id="theme-form">
+        <div class="swatch-fields" id="theme-colors"></div>
+        <button class="primary-btn" type="submit">Сохранить</button>
+        <button class="secondary-btn" id="theme-reset" type="button">Сбросить</button>
+        <p id="theme-status" role="status"></p>
+      </form>
     </section>
     <section class="page" id="page-notifications" data-page-panel="notifications" hidden>
       <h1>Уведомления</h1>
@@ -191,7 +235,7 @@
         <div><strong id="order-devices-label">Доп. устройства</strong><p class="muted" id="order-unit" hidden></p></div>
         <div class="stepper">
           <button type="button" id="order-minus" aria-label="Убрать одно устройство">−</button>
-          <output id="order-extra" aria-live="polite">0</output>
+          <input id="order-extra" type="number" inputmode="numeric" step="1" value="0" aria-labelledby="order-devices-label">
           <button type="button" id="order-plus" aria-label="Добавить одно устройство">+</button>
         </div>
       </div>
@@ -228,6 +272,7 @@
 <symbol id="i-gift" viewBox="0 0 24 24"><rect x="3" y="9" width="18" height="12" rx="2"/><path d="M12 9v12M3 13h18M12 9c-7 0-7-7-3-7 2 0 3 3 3 7Zm0 0c7 0 7-7 3-7-2 0-3 3-3 7Z"/></symbol>
 <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-5 3-8 8-8s8 3 8 8"/></symbol>
 </svg>
+<script src="/static/tickets.js"></script>
 <script src="/static/miniapp.js" defer></script>
 </body>
 </html>

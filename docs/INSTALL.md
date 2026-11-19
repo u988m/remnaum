@@ -66,7 +66,7 @@ curl -fsSL https://raw.githubusercontent.com/u988m/remnaum/main/bootstrap.sh | s
 
 1. В мастере укажите токен бота, Telegram ID администратора и API Remnawave.
 2. Убедитесь, что публичные HTTPS-адреса магазина работают.
-3. Для Mini App откройте [@BotFather](https://t.me/BotFather) и укажите адрес `https://miniapp.example.com/app`.
+3. Для Mini App откройте [@BotFather](https://t.me/BotFather) и укажите адрес `https://miniapp.example.com`.
 4. Вебхук Remnawave на **том же сервере** мастер может предложить настроить с сохранением существующих получателей. Для **удалённой панели** вебхук и общий секрет необходимо настроить на стороне панели отдельно.
 
 Адрес вебхука Remnawave: `https://webhook.example.com/webhooks/remnawave`. Не публикуйте секреты и токены. [Настройка удалённого вебхука →](#вебхук-remnawave)
@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/u988m/remnaum/main/bootstrap.sh | s
 
 | Адрес | Что проверить |
 | --- | --- |
-| `https://miniapp.example.com/app` | Mini App открывается |
+| `https://miniapp.example.com` | Mini App открывается |
 | `https://miniapp.example.com/store` | Веб-магазин доступен |
 | `https://miniapp.example.com/admin` | Владелец может войти |
 | `https://miniapp.example.com/health` | API отвечает |
@@ -167,7 +167,7 @@ sudo sh install.sh --mode panel --proxy-network ИМЯ_СЕТИ
 Откройте [@BotFather](https://t.me/BotFather), выберите вашего бота и укажите URL Mini App:
 
 ```text
-https://miniapp.example.com/app
+https://miniapp.example.com
 ```
 
 Для внешнего сайта `/store` отдельно настройте домен входа через Telegram Login Widget в BotFather.
@@ -198,7 +198,7 @@ https://webhook.example.com/webhooks/remnawave
 
 | Адрес | Назначение |
 | --- | --- |
-| `https://miniapp.example.com/app` | Mini App |
+| `https://miniapp.example.com` | Mini App |
 | `https://miniapp.example.com/store` | Веб-магазин |
 | `https://miniapp.example.com/admin` | Админка |
 | `https://miniapp.example.com/health` | Проверка API |
@@ -327,7 +327,7 @@ systemctl status remnaum-update-check.timer
 | Домен не открывается | DNS, HTTPS, настройки существующего прокси или логи Caddy |
 | Ошибка 502 | Доступность FastAPI и правильный адрес проксирования |
 | Бот не отвечает | Токен, Telegram webhook и `docker compose logs --tail=100 app` |
-| Mini App пустой | HTTPS, адрес `/app`, настройки BotFather |
+| Mini App пустой | HTTPS, домен Mini App, настройки BotFather |
 | Не создаётся VPN | API-токен Remnawave, UUID групп, подтверждение платежа |
 
 **Не запускайте** `docker compose down -v` на работающем магазине — эта команда удаляет тома данных. Не публикуйте содержимое `.env` и секреты из логов.
@@ -349,3 +349,34 @@ systemctl status remnaum-update-check.timer
 </table>
 
 [← Вернуться в README](../README.md)
+
+## Веб-вход, проверка канала и операции бота
+
+Веб-приложение открывается на корне `WEBAPP_DOMAIN`. Ранее выданные ссылки
+на `/app` продолжают открываться. Для браузерного входа Telegram привяжите
+этот домен к боту через BotFather (`/setdomain`).
+
+В админке откройте «Настройки» → «Интеграции и лимиты». Для Google создайте
+OAuth-клиент типа Web application и добавьте показанный в форме Redirect URI.
+Войдите через Telegram в браузере и выберите «Привязать Google» в профиле.
+После привязки Google открывает тот же профиль с покупками и подпиской.
+Вход в админку подтверждается через Telegram.
+
+Для обязательной подписки добавьте бота в администраторы канала и сохраните ID
+канала или его @username вместе со ссылкой для вступления. Telegram доставляет
+события об отписке через polling или webhook. Доступ к функциям магазина
+проверяется по текущему статусу участника.
+
+В этой же форме можно изменить подключение Remnawave и указать максимум
+дополнительных устройств на заказ (от 0 до 1000). Для нового URL нужен токен
+этой панели. Оставьте поля секретов пустыми, чтобы сохранить текущие значения.
+Если меняете секрет вебхука, укажите то же значение на стороне Remnawave.
+
+В «Рассылках и меню» можно отправить текст или обновить отслеживаемое меню
+`/start` у доступных пользователей. Бот пришлёт итог в Telegram. Удаление
+прежнего сообщения зависит от ограничений Telegram. Если удалить меню уже
+нельзя, бот попробует убрать его кнопки.
+
+Пользователи могут открыть тикет или выбрать прямой контакт, заданный в
+«Оформлении и поддержке». Ответы хранятся в тикете. Telegram-уведомления
+получают пользователи и администраторы, доступные боту.

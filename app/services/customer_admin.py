@@ -11,7 +11,7 @@ from app.db.models import (
     SubscriptionDetails, TariffDraft, TariffPlan, TermsAcceptance, TrialClaim, User,
 )
 from app.db.session import SessionLocal
-from app.services.remnawave import RemnawaveClient
+from app.services.remnawave import RemnawaveClient, panel_client
 from app.services.squads import fetch_catalog, require_available
 from app.services.subscriptions import _panel_identity, _unwrap, matches_panel_account, resolve_panel_user
 
@@ -62,7 +62,7 @@ async def set_customer_block(telegram_id: int, blocked: bool) -> None:
         if (user.blocked_at is not None) == blocked:
             return
         subscription = await _latest_subscription(session, user.id)
-        panel = RemnawaveClient()
+        panel = await panel_client(RemnawaveClient, session=session)
         if subscription or (panel.base_url and panel.token):
             account = await resolve_panel_user(panel, telegram_id, subscription)
             if blocked and account:
@@ -88,7 +88,7 @@ async def save_customer_subscription(
             raise ValueError("Тариф не найден.")
         squads = plan.internal_squads or []
         require_available(squads, await fetch_catalog())
-        panel = RemnawaveClient()
+        panel = await panel_client(RemnawaveClient, session=session)
         subscription = await _latest_subscription(session, user.id)
         account = await resolve_panel_user(panel, telegram_id, subscription)
         traffic_bytes = traffic_gb * 1024 ** 3
@@ -136,7 +136,7 @@ async def remove_customer(telegram_id: int, *, delete_account: bool) -> None:
     async with SessionLocal.begin() as session:
         user = await _locked_customer(session, telegram_id)
         subscription = await _latest_subscription(session, user.id)
-        panel = RemnawaveClient()
+        panel = await panel_client(RemnawaveClient, session=session)
         if subscription or (panel.base_url and panel.token):
             account = await resolve_panel_user(panel, telegram_id, subscription)
             await _remove_panel_user(panel, account)

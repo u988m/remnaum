@@ -14,6 +14,7 @@ class User(Base):
     display_name: Mapped[str | None] = mapped_column(String(80))
     telegram_photo_url: Mapped[str | None] = mapped_column(Text)
     blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    bot_blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -256,3 +257,40 @@ class SquadPolicy(Base):
     __tablename__ = "squad_policies"
     mode: Mapped[str] = mapped_column(String(16), primary_key=True)
     squads: Mapped[list[str]] = mapped_column(JSON)
+
+
+class StoreOperationsSettings(Base):
+    __tablename__ = "store_operations_settings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    data: Mapped[dict] = mapped_column(JSON)
+    encrypted_credentials: Mapped[str] = mapped_column(Text)
+
+
+class GoogleIdentity(Base):
+    __tablename__ = "google_identities"
+    subject: Mapped[str] = mapped_column(String(255), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+
+
+class SupportTicket(Base):
+    __tablename__ = "support_tickets"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    subject: Mapped[str] = mapped_column(String(120))
+    closed: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SupportReply(Base):
+    __tablename__ = "support_replies"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("support_tickets.id", ondelete="CASCADE"), index=True)
+    from_admin: Mapped[bool] = mapped_column()
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserTheme(Base):
+    __tablename__ = "user_themes"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    colors: Mapped[dict] = mapped_column(JSON)

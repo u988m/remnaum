@@ -74,9 +74,9 @@ main {
     font-size: .75rem;
 }
 .status-pill[data-status="active"] {
-    color: #c7e7db;
-    background: #1a2a25;
-    border-color: #3b5a50;
+    color: var(--color-success);
+    background: color-mix(in srgb, var(--color-success) 10%, var(--color-surface));
+    border-color: color-mix(in srgb, var(--color-success) 28%, var(--color-border));
 }
 .full { width: 100%; margin-top: 12px; }
 .check { display: flex; align-items: start; gap: 8px; color: var(--color-muted); }
@@ -184,9 +184,9 @@ main {
 .profile-actions .profile-action { border: 0; background: transparent; border-radius: 0; }
 .profile-actions .profile-action + .profile-action { border-top: 1px solid var(--color-border); }
 .profile-actions .profile-action:focus-visible { outline-offset: -3px; }
-.admin-entry { border-color: #3b5750; background: #14241f; }
-.admin-entry strong { color: #a4dfca; }
-.record-badge:is([data-status="paid"], [data-status="succeeded"]) { color: #a4dfca; border-color: #34584e; }
+.admin-entry { border-color: color-mix(in srgb, var(--color-success) 28%, var(--color-border)); background: color-mix(in srgb, var(--color-success) 10%, var(--color-surface)); }
+.admin-entry strong { color: var(--color-success); }
+.record-badge:is([data-status="paid"], [data-status="succeeded"]) { color: var(--color-success); border-color: color-mix(in srgb, var(--color-success) 28%, var(--color-border)); }
 .purchase-title { gap: 8px; }
 #repeat-plan { padding-inline: 10px; }
 
@@ -228,22 +228,22 @@ main {
 .bonus-heading { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: center; gap: 10px; }
 .bonus-heading h2 { font-size: 1.15rem; }
 .bonus-heading p { font-size: .86rem; margin-top: 4px; }
-.bonus-icon { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid #3a534a; border-radius: 13px; background: #202d29; color: #c6e7da; }
-.bonus-card { background: linear-gradient(145deg, #191d1b, var(--color-surface) 64%); }
+.bonus-icon { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid color-mix(in srgb, var(--color-success) 28%, var(--color-border)); border-radius: 13px; background: color-mix(in srgb, var(--color-success) 10%, var(--color-surface)); color: var(--color-success); }
+.bonus-card { background: linear-gradient(145deg, color-mix(in srgb, var(--color-success) 10%, var(--color-surface)), var(--color-surface) 64%); }
 #account-referrals .ref-link { padding: 9px 10px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-input); }
 .device-summary { display: grid; gap: 10px; }
 .device-summary h1 { font-size: clamp(1.2rem, 6vw, 1.8rem); }
 
-.device-summary progress { width: 100%; height: 9px; accent-color: #96cbbb; }
+.device-summary progress { width: 100%; height: 9px; accent-color: var(--color-success); }
 .device-summary #device-upgrade { margin-top: 0; }
 .device-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .device-card { display: flex; flex-direction: column; align-items: start; gap: 6px; }
 .device-card p { font-size: .82rem; }
-.device-client { color: #bcd9cf; }
+.device-client { color: var(--color-success); }
 .device-actions { display: flex; flex-wrap: wrap; width: 100%; gap: 7px; }
 .device-card .device-actions { margin-top: auto; padding-top: 5px; }
 .device-actions button { padding-inline: 8px; flex: 1 0 auto; font-size: .85rem; }
-.device-actions .danger-btn { color: #f2acac; border-color: #604345; background: #271b1c; }
+.device-actions .danger-btn { color: var(--color-danger); border-color: color-mix(in srgb, var(--color-danger) 32%, var(--color-border)); background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface)); }
 .device-dialog {
     width: min(calc(100% - 30px), 440px);
     max-height: calc(100dvh - 38px);
@@ -253,7 +253,7 @@ main {
     background: var(--color-surface);
     color: var(--color-text);
 }
-.device-dialog::backdrop { background: rgb(0 0 0 / .70); }
+.device-dialog::backdrop { background: var(--color-overlay); }
 #device-form { display: grid; gap: 10px; }
 #device-name-field input { margin-top: 5px; }
 #device-editor-description { overflow-wrap: anywhere; }
@@ -297,11 +297,11 @@ html:has(.order-dialog[open], .device-dialog[open]) { overflow: hidden; }
     padding: 0;
     border: 1px solid var(--color-border-strong);
     border-radius: 22px;
-    background: #111212;
+    background: var(--color-surface);
     color: var(--color-text);
     overflow: hidden;
 }
-.order-dialog::backdrop { background: rgb(0 0 0 / .70); }
+.order-dialog::backdrop { background: var(--color-overlay); }
 .order-sheet { display: grid; grid-template-rows: auto minmax(0, 1fr); max-height: inherit; }
 .order-heading {
     display: grid;
@@ -364,7 +364,7 @@ html:has(.order-dialog[open], .device-dialog[open]) { overflow: hidden; }
 .payment-choice strong, .payment-choice-price { font-size: .84rem; }
 .payment-choice-price { color: var(--color-muted); }
 .payment-choice input { width: 16px; height: 16px; margin: 0; }
-.payment-choice-mark { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--color-border-strong); border-radius: 8px; color: #cce3dc; font-size: .75rem; font-weight: 750; }
+.payment-choice-mark { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--color-border-strong); border-radius: 8px; color: var(--color-success); font-size: .75rem; font-weight: 750; }
 #order-pay { display: flex; justify-content: space-between; gap: 8px; min-height: 48px; }
 #order-pay strong { font-variant-numeric: tabular-nums; text-align: right; }
 .order-body .status { font-size: .87rem; }
@@ -373,3 +373,5 @@ html:has(.order-dialog[open], .device-dialog[open]) { overflow: hidden; }
 @media (min-width: 560px) {
     .order-dialog { inset: 0; margin: auto; }
 }
+
+.stepper input { width: 4.5rem; text-align: center; }

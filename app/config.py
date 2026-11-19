@@ -1,4 +1,5 @@
 import re
+from urllib.parse import urlsplit, urlunsplit
 
 from functools import lru_cache
 
@@ -80,6 +81,13 @@ class Settings(BaseSettings):
                 if not self.telegram_webhook_url.startswith("https://"):
                     raise ValueError("TELEGRAM_WEBHOOK_URL must be HTTPS in production")
         return self
+
+    @property
+    def webapp_root_url(self) -> str:
+        url = urlsplit(self.webapp_url)
+        if url.path.rstrip("/") == "/app":
+            return urlunsplit((url.scheme, url.netloc, "", url.query, url.fragment))
+        return self.webapp_url
 
     @property
     def remnawave_internal_squad_ids(self) -> list[str]:

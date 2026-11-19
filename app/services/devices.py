@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from app.config import settings
 from app.db.models import DeviceAlias, Subscription, SubscriptionDetails, User
 from app.db.session import SessionLocal
-from app.services.remnawave import RemnawaveClient
+from app.services.remnawave import RemnawaveClient, panel_client
 from app.services.subscriptions import PanelAccountConflict, _panel_identity, resolve_panel_user
 from app.services.users import BlockedCustomer
 
@@ -91,7 +91,7 @@ async def get_customer_devices(telegram_id: int) -> dict:
         user, subscription, limit = await _customer_subscription(session, telegram_id)
         if not subscription or not subscription.panel_user_id:
             return {"has_subscription": bool(subscription), "limit": limit, "total": 0, "items": []}
-        _, records = await _panel_devices(RemnawaveClient(), user, subscription)
+        _, records = await _panel_devices(await panel_client(RemnawaveClient, session=session), user, subscription)
         aliases = dict((await session.execute(select(DeviceAlias.device_id, DeviceAlias.name)
                         .where(DeviceAlias.user_id == user.id))).all())
     items = [_public_device(key, record, aliases.get(key, "")) for key, record in records.items()]
@@ -110,7 +110,7 @@ async def change_customer_device(telegram_id: int, device_id: str, *, name: str 
         user, subscription, _ = await _customer_subscription(session, telegram_id, lock=True)
         if not subscription or not subscription.panel_user_id:
             raise DeviceNotFound()
-        panel = RemnawaveClient()
+        panel = await panel_client(RemnawaveClient, session=session)
         panel_id, records = await _panel_devices(panel, user, subscription)
         record = records.get(device_id)
         if not record:

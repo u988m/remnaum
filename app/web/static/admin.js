@@ -1076,7 +1076,66 @@ matchMedia("(min-width: 851px)").addEventListener("change", event => {
   if (event.matches && adminSidebar.classList.contains("is-open")) setAdminMenu(false);
 });
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&adminSidebar.classList.contains("is-open"))setAdminMenu(false);});
+const operationsForm = $("operations-form");
+const secretFields = new Set(["google_client_secret", "panel_token", "panel_webhook_secret"]);
+async function loadOperations() {
+  const data = await api("/admin/api/operations");
+  for (const field of operationsForm.elements) {
+    if (field.type === "checkbox") field.checked = data[field.name];
+    else if (field.name) field.value = secretFields.has(field.name) ? "" : data[field.name] ?? "";
+  }
+  $("google-callback").value = data.google_callback_url;
+  $("auth-status").textContent = "Telegram " + (data.telegram_configured ? "настроен" : "требует бота") +
+    " · Google " + (data.google_configured ? "настроен" : "требует реквизиты");
+  $("panel-configuration-status").textContent = "API " + (data.panel_configured ? "настроен" : "требует реквизиты") +
+    " · Вебхук " + (data.panel_webhook_configured ? "настроен" : "не настроен");
+}
+operationsForm.onsubmit = async event => {
+  event.preventDefault();
+  event.submitter.disabled = true;
+  try {
+    const data = {};
+    for (const field of operationsForm.elements) {
+      if (!field.name) continue;
+      data[field.name] = field.type === "checkbox" ? field.checked : field.type === "number" ? field.valueAsNumber : field.value.trim();
+    }
+    await adminApi("PUT", "/admin/api/operations", data);
+    await loadOperations();
+    $("operations-status").textContent = "Настройки сохранены.";
+  } catch (error) {
+    $("operations-status").textContent = error.message;
+  } finally {
+    event.submitter.disabled = false;
+  }
+};
+
+async function launchCampaign(button, payload, prompt) {
+  if (!window.confirm(prompt)) return;
+  button.disabled = true;
+  try {
+    await adminApi("POST", "/admin/api/campaigns", payload);
+    $("campaign-status").textContent = "Задача запущена. Итог придёт в Telegram.";
+    if (payload.action === "broadcast") $("broadcast-form").reset();
+  } catch (error) {
+    $("campaign-status").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+$("broadcast-form").onsubmit = event => {
+  event.preventDefault();
+  launchCampaign(event.submitter, {action: "broadcast", text: event.currentTarget.elements.text.value},
+    "Отправить это сообщение всем доступным пользователям?");
+};
+$("refresh-all-menus").onclick = event =>
+  launchCampaign(event.currentTarget, {action: "refresh"}, "Заменить текущее меню у всех доступных пользователей?");
+const loadAdminTickets = ticketPanel($("tickets-view"), (path, data, method) =>
+  adminApi(method || "GET", "/admin/api/tickets" + path, data), {admin: true});
+
 const tabs = {
+  operations: {sections: ["operations-view"], load: loadOperations},
+  campaigns: {sections: ["campaigns-view"]},
+  tickets: {sections: ["tickets-view"], load: loadAdminTickets},
   overview: {sections: ["overview-view"], load: overview},
   plans: {sections: ["plans-view"], load: loadPlans},
   users: {sections: ["users-view"], load: loadUsers},
@@ -1111,7 +1170,7 @@ function canonicalTab(requested) {
 function parentFor({tab, panel}) {
   if (panel) return tab;
   if (providerByTab[tab]) return "settings";
-  if (["settings", "brand", "trial", "notifications"].includes(tab)) return "configuration";
+  if (["settings", "brand", "trial", "notifications", "operations", "campaigns", "tickets"].includes(tab)) return "configuration";
   return null;
 }
 
@@ -1200,7 +1259,7 @@ function goAdminBack(fallback = null) {
   if (activeFrame.depth) history.back();
   else if (parent) openTab(parent, {replace: true});
   else if (fromProfile) {
-    if (document.referrer && new URL(document.referrer).pathname === "/app") history.back();
+    if (document.referrer && ["/", "/app"].includes(new URL(document.referrer).pathname)) history.back();
     else location.assign(document.querySelector(".admin-return-link").href);
   }
 }
@@ -1214,7 +1273,6 @@ window.addEventListener("popstate", event => {
 
 async function start() {
   try {
-    if (!tg?.initData) throw Error("Откройте панель через Telegram Mini App");
     try {
       const profile = await api("/admin/api/store-profile");
       renderStoreMark(profile.name, profile.logo_image_url);
@@ -1229,7 +1287,7 @@ async function start() {
     $("loading").hidden = true;
     $("dashboard").hidden = false;
     adminMenuOpen.hidden = false;
-    document.querySelector(".admin-return-link").href = "/app?section=account" + location.hash;
+    document.querySelector(".admin-return-link").href = "/?section=account" + location.hash;
     const initial = history.state?.adminPanel || {
       tab: canonicalTab(new URLSearchParams(location.search).get("tab")), panel: null, record: null, depth: 0, id: 0,
     };
@@ -1239,6 +1297,12 @@ async function start() {
     await renderAdminFrame(initial);
   } catch (error) {
     $("loading").textContent = error.message;
+    if (!tg?.initData) {
+      const link = document.createElement("a");
+      link.href = "/auth";
+      link.textContent = "Войти через Telegram";
+      $("loading").append(document.createElement("br"), link);
+    }
   }
 }
 

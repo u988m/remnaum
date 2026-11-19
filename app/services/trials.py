@@ -12,7 +12,7 @@ from app.services.squads import mode_squads, require_available, fetch_catalog
 from app.config import settings
 from app.db.models import Payment, Subscription, SubscriptionDetails, TrialClaim, TrialSettings, User
 from app.db.session import SessionLocal
-from app.services.remnawave import RemnawaveClient
+from app.services.remnawave import RemnawaveClient, panel_client
 from app.services.subscriptions import _panel_identity, _unwrap
 
 DEFAULT_TRIAL = {"enabled": False, "days": 3, "traffic_gb": 10, "device_limit": 1}
@@ -71,8 +71,6 @@ async def trial_eligible(telegram_id: int) -> bool:
 
 
 async def claim_trial(telegram_id: int) -> dict:
-    if not settings.remnawave_base_url or not settings.remnawave_api_token:
-        raise RuntimeError("Remnawave API is not configured")
     async with SessionLocal() as session:
         user = await session.scalar(
             select(User).where(User.telegram_id == telegram_id).with_for_update()
@@ -91,7 +89,9 @@ async def claim_trial(telegram_id: int) -> dict:
         )):
             raise ValueError("Trial is available only before your first purchase")
 
-        panel = RemnawaveClient()
+        panel = await panel_client(RemnawaveClient, session=session)
+        if not panel.base_url or not panel.token:
+            raise RuntimeError("Remnawave API is not configured")
         username = f"tg_{telegram_id}"
         marker = f"remnaum-trial:{telegram_id}"
         existing = None

@@ -9,6 +9,7 @@ from app.db.models import InternalSquadCatalog, TariffPlan, SelectedPlan, Tariff
 from app.db.session import SessionLocal
 from app.services.tariffs import TariffQuote
 from app.config import settings
+from app.services.store_operations import DEFAULTS, get_operations
 
 
 EXTRA_PRICE_FIELDS = ("extra_device_price_rub_minor", "extra_device_price_stars")
@@ -24,8 +25,7 @@ class PlanQuote(TariffQuote):
     stars: int | None
 
 
-def extra_device_limits(plan: TariffPlan) -> tuple[int, int]:
-    slots = min(1000, max(0, settings.tariff_max_devices - plan.device_limit))
+def extra_device_limits(plan: TariffPlan, slots: int) -> tuple[int, int]:
     limits = []
     for base_price, unit_price in (
         (plan.price_rub_minor, plan.extra_device_price_rub_minor),
@@ -40,8 +40,8 @@ def extra_device_limits(plan: TariffPlan) -> tuple[int, int]:
     return limits[0], limits[1]
 
 
-def max_extra_devices(plan: TariffPlan) -> int:
-    return max(extra_device_limits(plan))
+def max_extra_devices(plan: TariffPlan, slots: int) -> int:
+    return max(extra_device_limits(plan, slots))
 
 
 def plan_revision(plan: TariffPlan) -> str:
@@ -53,16 +53,17 @@ def plan_revision(plan: TariffPlan) -> str:
     return sha256(json.dumps(terms).encode()).hexdigest()[:20]
 
 
-def quote_plan(plan: TariffPlan | None, extra_devices: int = 0, revision: str | None = None) -> PlanQuote:
+def quote_plan(plan: TariffPlan | None, extra_devices: int = 0, revision: str | None = None, *,
+               slots: int = DEFAULTS["extra_devices_max"]) -> PlanQuote:
     if plan is None or not plan.is_active:
         raise ValueError("Тариф недоступен")
     if revision is not None and revision != plan_revision(plan):
         raise ValueError("Условия тарифа изменились. Выберите тариф заново.")
-    if type(extra_devices) is not int or not 0 <= extra_devices <= max_extra_devices(plan):
+    if type(extra_devices) is not int or not 0 <= extra_devices <= max_extra_devices(plan, slots):
         raise ValueError("Недопустимое количество дополнительных устройств")
     unit_minor = plan.extra_device_price_rub_minor
     stars_unit = plan.extra_device_price_stars
-    rub_limit, stars_limit = extra_device_limits(plan)
+    rub_limit, stars_limit = extra_device_limits(plan, slots)
     amount = plan.price_rub_minor + extra_devices * (unit_minor or 0) if extra_devices <= rub_limit else 0
     stars = plan.price_stars + extra_devices * (stars_unit or 0) if extra_devices <= stars_limit else None
     return PlanQuote(
@@ -72,8 +73,8 @@ def quote_plan(plan: TariffPlan | None, extra_devices: int = 0, revision: str | 
     )
 
 
-def plan_to_dict(p: TariffPlan) -> dict:
-    rub_limit, stars_limit = extra_device_limits(p)
+def plan_to_dict(p: TariffPlan, slots: int) -> dict:
+    rub_limit, stars_limit = extra_device_limits(p, slots)
     return {
         "id": p.id, "title": p.title, "name": p.title, "description": p.description,
         "duration_days": p.duration_days, "days": p.duration_days, "traffic_gb": p.traffic_gb,
@@ -99,7 +100,7 @@ def validate_plan(data: dict) -> None:
     bounds = {
         "duration_days": (1, settings.tariff_max_days),
         "traffic_gb": (0, settings.tariff_max_traffic_gb),
-        "device_limit": (1, settings.tariff_max_devices),
+        "device_limit": (1, 1000),
         "price_rub_minor": (0, 100_000_000),
         "price_stars": (1, 1_000_000),
         "extra_device_price_rub_minor": (0, 100_000_000),
@@ -127,7 +128,8 @@ async def list_plans(active_only: bool = True) -> list[dict]:
             query = query.where(TariffPlan.is_active.is_(True))
         query = query.order_by(TariffPlan.sort_order, TariffPlan.id)
         plans = (await session.scalars(query)).all()
-        return [plan_to_dict(p) if active_only else plan_to_dict(p) | {"internal_squads": p.internal_squads}
+        slots = (await get_operations(session=session))["extra_devices_max"]
+        return [plan_to_dict(p, slots) if active_only else plan_to_dict(p, slots) | {"internal_squads": p.internal_squads}
                 for p in plans]
 
 
@@ -157,7 +159,8 @@ async def save_plan(data: dict, plan_id: int | None = None) -> dict:
         session.add(plan)
         await session.commit()
         await session.refresh(plan)
-        return plan_to_dict(plan) | {"internal_squads": plan.internal_squads}
+        slots = (await get_operations(session=session))["extra_devices_max"]
+        return plan_to_dict(plan, slots) | {"internal_squads": plan.internal_squads}
 
 
 async def choose_plan(telegram_id: int, plan_id: int) -> TariffQuote:

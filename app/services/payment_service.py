@@ -18,12 +18,13 @@ from app.services.tariffs import TariffQuote, calculate_store_price, calculate_s
 from app.services.store_settings import PROVIDER_LABELS, get_store_payment_settings, public_payment_settings
 from app.services.plans import PlanQuote, quote_plan, selected_plan_for_user
 from app.services.squads import fetch_catalog, mode_squads, require_available
-from app.services.remnawave import RemnawaveClient
+from app.services.remnawave import RemnawaveClient, panel_client
 from app.services.subscriptions import (
     has_panel_squads, matches_panel_account, paid_tariff_key, panel_expiry, resolve_panel_user,
 )
 from app.services.store_profile import get_terms_url
 from app.services.users import BlockedCustomer
+from app.services.store_operations import get_operations
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,10 @@ async def validate_checkout_access(session, user_id, telegram_id, tariff_key, se
         Subscription.user_id == user_id
     ).order_by(Subscription.created_at.desc(), Subscription.id.desc()).limit(1))
     try:
-        panel_user = await resolve_panel_user(RemnawaveClient(), telegram_id, current)
+        panel = await panel_client(RemnawaveClient, session=session)
+        if not panel.base_url or not panel.token:
+            raise RuntimeError("Магазин не подключён к Remnawave. Обратитесь в поддержку.")
+        panel_user = await resolve_panel_user(panel, telegram_id, current)
         missing = current is not None and not panel_user
         if missing and not allow_recreate:
             raise ValueError("Аккаунт Remnawave исчез после создания счёта. Оформите заказ заново.")
@@ -79,7 +83,8 @@ async def _payment_quote(
 ) -> tuple[TariffPlan | None, TariffQuote]:
     if plan_id is not None:
         plan = await session.get(TariffPlan, plan_id)
-        return plan, quote_plan(plan, extra_devices, revision)
+        slots = (await get_operations(session=session))["extra_devices_max"]
+        return plan, quote_plan(plan, extra_devices, revision, slots=slots)
 
     plan = await selected_plan_for_user(session, user_id)
     draft = await session.scalar(select(TariffDraft).where(TariffDraft.user_id == user_id))
@@ -124,8 +129,6 @@ async def create_payment_for_user(
     if not public_payment_settings(methods, credentials)["configured"][provider_name]:
         raise ValueError("Реквизиты выбранного способа оплаты недоступны. Обратитесь в поддержку магазина.")
     draft_quote = await ensure_tariff_draft(telegram_id) if plan_id is None else None
-    if not settings.remnawave_base_url or not settings.remnawave_api_token:
-        raise RuntimeError("Магазин не подключён к Remnawave. Обратитесь в поддержку.")
     async with SessionLocal() as session:
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id).with_for_update())
         if user is None:
@@ -263,8 +266,6 @@ async def create_stars_payment_for_user(
 ) -> tuple[Payment, int]:
     await require_checkout_terms(telegram_id)
     draft_quote = await ensure_tariff_draft(telegram_id) if plan_id is None else None
-    if not settings.remnawave_base_url or not settings.remnawave_api_token:
-        raise RuntimeError("Магазин не подключён к Remnawave. Обратитесь в поддержку.")
 
     async with SessionLocal() as session:
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id).with_for_update())

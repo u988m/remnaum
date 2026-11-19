@@ -78,11 +78,74 @@
 <section id="configuration-view" class="dashboard-view" hidden>
   <h1>Настройки</h1>
   <div class="settings-list">
+    <button type="button" data-open-tab="operations"><strong>Интеграции и лимиты</strong><span>Вход, канал, Remnawave и дополнительные устройства</span></button>
+    <button type="button" data-open-tab="campaigns"><strong>Рассылки и меню</strong><span>Отправить сообщение или обновить /start</span></button>
+    <button type="button" data-open-tab="tickets"><strong>Поддержка</strong><span>Обращения пользователей</span></button>
     <button type="button" data-open-tab="settings"><strong>Платёжные системы</strong><span>Способы оплаты и реквизиты</span></button>
     <button type="button" data-open-tab="brand"><strong>Оформление и поддержка</strong><span>Название, изображения и контакт магазина</span></button>
     <button type="button" data-open-tab="trial"><strong>Пробный доступ</strong><span>Срок, трафик и число устройств</span></button>
     <button type="button" data-open-tab="notifications"><strong>Уведомления</strong><span>Подписка, триал и трафик</span></button>
   </div>
+</section>
+<section class="section" id="operations-view" hidden>
+  <button class="provider-back" type="button" data-back-tab="configuration">← Назад</button>
+  <form id="operations-form">
+    <fieldset>
+      <legend>Вход в веб-приложение</legend>
+      <label class="check"><input type="checkbox" name="telegram_login"> Telegram</label>
+      <label class="check"><input type="checkbox" name="google_login"> Google</label>
+      <label>Google Client ID <input name="google_client_id" maxlength="255"></label>
+      <label>Google Client Secret <input name="google_client_secret" type="password" autocomplete="new-password"></label>
+      <label>Redirect URI для Google <input id="google-callback" readonly></label>
+      <p class="muted" id="auth-status"></p>
+    </fieldset>
+    <fieldset>
+      <legend>Подписка на канал</legend>
+      <label>Канал (@username или ID) <input name="required_channel" maxlength="33"></label>
+      <label>Ссылка для подписки <input name="channel_url" type="url" maxlength="300"></label>
+    </fieldset>
+    <fieldset>
+      <legend>Подключение к Remnawave</legend>
+      <label>URL панели <input name="panel_url" type="url" maxlength="500" placeholder="Из настроек сервера"></label>
+      <label>API-токен <input name="panel_token" type="password" autocomplete="new-password"></label>
+      <label>Секрет вебхука <input name="panel_webhook_secret" type="password" autocomplete="new-password"></label>
+      <p class="muted" id="panel-configuration-status"></p>
+    </fieldset>
+    <fieldset>
+      <legend>Дополнительные устройства</legend>
+      <label>Максимум на тариф <input name="extra_devices_max" type="number" min="0" max="1000" required></label>
+    </fieldset>
+    <button type="submit" class="action">Сохранить</button>
+    <p id="operations-status" role="status"></p>
+  </form>
+</section>
+<section class="section" id="campaigns-view" hidden>
+  <button class="provider-back" type="button" data-back-tab="configuration">← Назад</button>
+  <h2>Рассылки и меню</h2>
+  <form id="broadcast-form">
+    <label>Сообщение <textarea name="text" required maxlength="2000"></textarea></label>
+    <button class="action" type="submit">Отправить рассылку</button>
+  </form>
+  <button class="action" type="button" id="refresh-all-menus">Обновить /start у всех пользователей</button>
+  <p id="campaign-status" role="status"></p>
+</section>
+<section class="section ticket-workspace" id="tickets-view" hidden>
+  <button class="provider-back" type="button" data-back-tab="configuration">← Назад</button>
+  <h1>Тикеты поддержки</h1>
+    <div data-ticket-list></div>
+    <div><button type="button" class="secondary-btn" data-ticket-prev>Назад</button>
+      <button type="button" class="secondary-btn" data-ticket-next>Далее</button></div>
+    <section data-ticket-detail hidden>
+      <h2 data-ticket-heading></h2>
+      <div data-ticket-body></div>
+      <form data-ticket-reply>
+        <label>Ответ <textarea name="body" required maxlength="3000"></textarea></label>
+        <button class="primary-btn" type="submit">Отправить</button>
+      </form>
+      <button type="button" class="action" data-ticket-close></button>
+    </section>
+    <p data-ticket-status role="status"></p>
+
 </section>
 <section class="section" id="notifications-view" hidden>
   <button class="provider-back" type="button" data-back-tab="configuration">← Назад</button>
@@ -455,4 +518,5 @@
   <symbol id="ai-coins" viewBox="0 0 24 24"><circle cx="9" cy="14" r="6"/><path d="M15 8a6 6 0 0 1 6 6M15 2a6 6 0 0 1 6 6"/></symbol>
   <symbol id="ai-crypto" viewBox="0 0 24 24"><path d="M12 2 3 7v10l9 5 9-5V7zM3 7l9 5 9-5M12 12v10"/></symbol>
 </svg>
+<script src="/static/tickets.js"></script>
 <script src="/static/admin.js" defer></script></body></html>

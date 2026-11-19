@@ -4,12 +4,17 @@ import re
 from urllib.parse import urlsplit
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandStart
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message, PreCheckoutQuery, WebAppInfo, FSInputFile
+from aiogram.types import ChatMemberUpdated, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message, PreCheckoutQuery, WebAppInfo, FSInputFile
 
+from redis.exceptions import LockError
+
+from app.bot.membership import SUBSCRIBE_TEXT, active_member, membership_required, send_subscription_prompt
 from app.bot.menu import MenuMiddleware, current_menu, menu_session, remember_menu, remove_command
 from app.config import settings
+from app.services.store_operations import get_operations
+from app.services.users import customer_is_blocked, set_bot_blocked
 from app.services.tariffs import format_traffic
 from app.services.payment_service import (
     accept_current_terms,
@@ -49,9 +54,9 @@ router.callback_query.middleware(MenuMiddleware())
 
 def main_menu(*, has_documents: bool = False) -> InlineKeyboardMarkup:
     rows = []
-    has_webapp = settings.webapp_url.startswith("https://")
+    has_webapp = settings.webapp_root_url.startswith("https://")
     if has_webapp:
-        rows.append([InlineKeyboardButton(text="✨ Mini App", web_app=WebAppInfo(url=settings.webapp_url))])
+        rows.append([InlineKeyboardButton(text="✨ Mini App", web_app=WebAppInfo(url=settings.webapp_root_url))])
     rows.extend([
         [InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile"),
          InlineKeyboardButton(text="🔐 Подписка", callback_data="menu:subscription")],
@@ -290,8 +295,9 @@ async def fixed_plan_handler(callback: CallbackQuery) -> None:
     renewal = parts[-1] == "r"
     suffix = ":r" if renewal else ""
     plan = await get_plan(plan_id)
+    slots = (await get_operations())["extra_devices_max"]
     try:
-        quote = quote_plan(plan, extra_devices)
+        quote = quote_plan(plan, extra_devices, slots=slots)
     except ValueError as exc:
         await callback.answer(str(exc), show_alert=True)
         return
@@ -299,7 +305,7 @@ async def fixed_plan_handler(callback: CallbackQuery) -> None:
     controls = []
     if extra_devices:
         controls.append(InlineKeyboardButton(text="− Устройство", callback_data=f"plan:select:{plan_id}:{extra_devices - 1}{suffix}"))
-    if extra_devices < max_extra_devices(plan):
+    if extra_devices < max_extra_devices(plan, slots):
         controls.append(InlineKeyboardButton(text="+ Устройство", callback_data=f"plan:select:{plan_id}:{extra_devices + 1}{suffix}"))
     price = f"{quote.amount_minor / 100:.2f} ₽" if quote.amount_minor else ""
     if quote.stars is not None:
@@ -312,7 +318,7 @@ async def fixed_plan_handler(callback: CallbackQuery) -> None:
     ])
     if callback.message:
         details = [_plan_summary(quote)]
-        if max_extra_devices(plan):
+        if max_extra_devices(plan, slots):
             details.append(f"Устройств добавлено: {extra_devices}")
             addon_prices = []
             if quote.unit_minor is not None:
@@ -338,7 +344,8 @@ async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
     action, plan_id, extras, revision = callback.data.removesuffix(suffix)[5:].rsplit(":", 3)
     order = {"plan_id": int(plan_id), "extra_devices": int(extras), "revision": revision}
     try:
-        quote = quote_plan(await get_plan(order["plan_id"]), order["extra_devices"], revision)
+        slots = (await get_operations())["extra_devices_max"]
+        quote = quote_plan(await get_plan(order["plan_id"]), order["extra_devices"], revision, slots=slots)
         terms = await get_terms_url()
         if terms and action == "accept":
             await accept_current_terms(callback.from_user.id)
@@ -671,7 +678,8 @@ async def subscription_handler(callback: CallbackQuery) -> None:
         plan = await get_plan(subscription["plan_id"])
         if plan and plan.is_active:
             extras = max(0, (subscription.get("device_limit") or plan.device_limit) - plan.device_limit)
-            extras = min(extras, max_extra_devices(plan))
+            slots = (await get_operations())["extra_devices_max"]
+            extras = min(extras, max_extra_devices(plan, slots))
             rows.insert(0, [InlineKeyboardButton(
                 text="🔄 Продлить", callback_data=f"plan:select:{plan.id}:{extras}:r",
             )])
@@ -711,6 +719,9 @@ async def support_menu() -> tuple[str, InlineKeyboardMarkup]:
         except ValueError:
             pass
     rows = []
+    if urlsplit(settings.webapp_root_url).scheme == "https":
+        url = urlsplit(settings.webapp_root_url)._replace(query="section=tickets").geturl()
+        rows.append([InlineKeyboardButton(text="🎫 Тикеты поддержки", web_app=WebAppInfo(url=url))])
     if button_url:
         rows.append([InlineKeyboardButton(text="💬 Написать в поддержку", url=button_url)])
     rows.append([InlineKeyboardButton(text="← Меню", callback_data="menu:home")])
@@ -912,3 +923,45 @@ async def referral_handler(callback: CallbackQuery) -> None:
         )
     if callback.message:
         await edit_menu_message(callback.message, text.replace(chr(92) + "n", chr(10)), reply_markup=back_menu("menu:bonuses"))
+
+
+@router.callback_query(F.data.regexp(r"^channel:check(?::[0-9]{1,19})?$"))
+async def channel_check_handler(callback: CallbackQuery) -> None:
+    policy = await get_operations()
+    if await membership_required(callback.bot, callback.from_user.id, policy):
+        await callback.answer(SUBSCRIBE_TEXT, show_alert=True)
+        return
+    await callback.answer()
+    is_new_user = await get_or_create_user(callback.from_user)
+    inviter = callback.data.removeprefix("channel:check:")
+    if is_new_user and inviter.isdigit():
+        await register_referral(callback.from_user.id, int(inviter))
+    await send_home_menu(callback.message, callback.from_user.id, await get_store_profile())
+
+
+@router.my_chat_member()
+async def bot_membership_update(event: ChatMemberUpdated) -> None:
+    if event.chat.type == "private":
+        await set_bot_blocked(event.chat.id, not active_member(event.new_chat_member))
+
+
+@router.chat_member()
+async def required_channel_update(event: ChatMemberUpdated) -> None:
+    if active_member(event.new_chat_member) or not active_member(event.old_chat_member):
+        return
+    policy = await get_operations()
+    channel = policy["required_channel"].lower()
+    if channel not in {str(event.chat.id), "@" + (event.chat.username or "").lower()}:
+        return
+    telegram_id = event.new_chat_member.user.id
+    if await customer_is_blocked(telegram_id):
+        return
+    try:
+        async with menu_session(event.bot, telegram_id) as state:
+            if state.message_id is not None and await membership_required(event.bot, telegram_id, policy):
+                await send_subscription_prompt(event.bot, telegram_id, policy)
+    except TelegramForbiddenError:
+        await set_bot_blocked(telegram_id, True)
+    except LockError:
+        # Every subsequent interaction checks membership directly with Telegram.
+        return

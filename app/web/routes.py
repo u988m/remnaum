@@ -10,7 +10,7 @@ from math import ceil
 from pathlib import Path
 from html import escape
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Response
 from sqlalchemy import Date, cast, func, or_, select
 from aiogram.exceptions import TelegramAPIError
@@ -20,7 +20,7 @@ from app.config import settings
 from app.db.models import Payment, Subscription, TariffPlan, User
 from app.db.session import SessionLocal
 from app.services.payment_providers import get_provider
-from app.services.remnawave import RemnawaveClient
+from app.services.remnawave import RemnawaveClient, panel_client
 from app.services.payment_service import PaymentProviderUnavailable, TermsAcceptanceRequired, settle_payment
 from app.services.tariffs import format_traffic
 from app.services.subscriptions import provision_paid_payment
@@ -35,6 +35,10 @@ from app.services import customer_admin
 from app.services.devices import DeviceNotFound, DevicesUnavailable, change_customer_device, get_customer_devices
 from app.services.subscriptions import PanelAccountConflict
 from app.services.users import BLOCKED_MESSAGE, BlockedCustomer, customer_is_blocked, upsert_active_customer
+
+from app.bot.membership import membership_required
+from app.services.store_operations import get_operations
+from app.web.browser_auth import app_origin, on_app_host, web_credentials
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -70,14 +74,14 @@ async def _configured_provider(name: str):
 
 
 @router.get("/admin/api/payment-settings")
-async def admin_get_payment_settings(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_get_payment_settings(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     methods, credentials = await get_store_payment_settings()
     return public_payment_settings(methods, credentials) | {"presentation": await get_payment_presentation()}
 
 
 @router.get("/admin/api/payment-diagnostics")
-async def admin_payment_diagnostics(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_payment_diagnostics(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     """Configuration-only readiness; no token, password or network probe is exposed."""
     await _require_telegram_admin(x_telegram_init_data)
     methods, credentials = await get_store_payment_settings()
@@ -100,7 +104,7 @@ async def admin_payment_diagnostics(x_telegram_init_data: str | None = Header(de
 @router.put("/admin/api/payment-settings")
 async def admin_update_payment_settings(
     data: PaymentSettingsUpdate,
-    x_telegram_init_data: str | None = Header(default=None),
+    x_telegram_init_data: str | dict | None = Depends(web_credentials),
 ):
     await _require_telegram_admin(x_telegram_init_data)
     try:
@@ -135,13 +139,13 @@ async def admin_tariffs_page():
 
 
 @router.get("/admin/api/tariff-pricing")
-async def admin_get_tariff_pricing(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_get_tariff_pricing(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     return await get_store_tariff_pricing()
 
 
 @router.put("/admin/api/tariff-pricing")
-async def admin_update_tariff_pricing(data: TariffPricingUpdate, x_telegram_init_data: str | None = Header(default=None)):
+async def admin_update_tariff_pricing(data: TariffPricingUpdate, x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     try:
         return await update_store_tariff_pricing(data.pricing)
@@ -168,7 +172,7 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: st
 
 @router.get("/api/v1/config")
 async def public_config():
-    return {"app": settings.app_name, "webapp_url": settings.webapp_url}
+    return {"app": settings.app_name, "webapp_url": settings.webapp_root_url}
 
 
 @router.get("/payments/return", response_class=HTMLResponse)
@@ -256,7 +260,9 @@ from app.config import settings
 from app.bot.runtime import bot
 
 
-def _require_telegram_identity(init_data: str | None) -> dict:
+def _require_telegram_identity(init_data: str | dict | None) -> dict:
+    if isinstance(init_data, dict):
+        return init_data
     if not init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     try:
@@ -265,9 +271,19 @@ def _require_telegram_identity(init_data: str | None) -> dict:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
-async def _webapp_user(init_data: str):
+async def _check_webapp_membership(telegram_id: int):
+    policy = await get_operations()
+    if await membership_required(bot, telegram_id, policy):
+        raise HTTPException(403, {"message": "Подпишитесь на канал магазина и повторите проверку.",
+                                  "channel_url": policy["channel_url"]})
+
+
+async def _webapp_user(init_data: str | dict):
     identity = _require_telegram_identity(init_data)
     telegram_id = int(identity["id"])
+    await _check_webapp_membership(telegram_id)
+    if identity.get("browser_provider"):
+        return identity
     try:
         async with SessionLocal.begin() as session:
             await upsert_active_customer(session, telegram_id, identity.get("username"),
@@ -275,6 +291,13 @@ async def _webapp_user(init_data: str):
     except BlockedCustomer as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     return identity
+
+
+@router.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def mini_app_root(request: Request):
+    if not on_app_host(request):
+        raise HTTPException(404)
+    return await mini_app_page()
 
 
 @router.get("/app", response_class=HTMLResponse)
@@ -305,25 +328,30 @@ async def _webapp_subscription_data(telegram_id: int) -> dict | None:
 
 
 @router.get("/api/v1/webapp/subscription")
-async def webapp_subscription(x_telegram_init_data: str | None = Header(default=None)):
+async def webapp_subscription(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     identity = _require_telegram_identity(x_telegram_init_data)
+    await _check_webapp_membership(int(identity["id"]))
     if await customer_is_blocked(int(identity["id"])):
         raise HTTPException(status_code=403, detail=BLOCKED_MESSAGE)
     return {"subscription": await _webapp_subscription_data(int(identity["id"]))}
 
 
 @router.get("/api/v1/webapp/bootstrap")
-async def webapp_bootstrap(x_telegram_init_data: str | None = Header(default=None)):
+async def webapp_bootstrap(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     identity = await _webapp_user(x_telegram_init_data)
     pricing = await get_store_tariff_pricing()
     payment_methods = await _get_public_checkout_methods()
+    policy = await get_operations()
     return {
         "user": {"id": identity["id"], "first_name": identity.get("first_name", ""),
                  "photo_url": telegram_photo_url(identity.get("photo_url"))},
         "profile": await public_store_profile(),
-        "is_admin": int(identity["id"]) in settings.admin_id_set,
+        "is_admin": int(identity["id"]) in settings.admin_id_set and identity.get("browser_provider") != "google",
+        "browser_provider": identity.get("browser_provider"),
+        "channel_required": bool(policy["required_channel"]),
+        "google_link_available": identity.get("browser_provider") == "telegram" and policy["google_login"],
         "pricing": pricing,
         "stars_enabled": payment_methods["telegram_stars"],
         "payment_methods": payment_methods,
@@ -345,14 +373,15 @@ class WebAppTermsAcceptance(BaseModel):
 
 
 @router.get("/api/v1/webapp/notifications")
-async def webapp_get_notifications(x_telegram_init_data: str | None = Header(default=None)):
+async def webapp_get_notifications(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     identity = await _webapp_user(x_telegram_init_data)
     return await get_notification_preferences(int(identity["id"]))
 
 
 @router.put("/api/v1/webapp/notifications")
-async def webapp_save_notifications(data: NotificationPreferences, x_telegram_init_data: str | None = Header(default=None)):
+async def webapp_save_notifications(data: NotificationPreferences, x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     identity = _require_telegram_identity(x_telegram_init_data)
+    await _check_webapp_membership(int(identity["id"]))
     try:
         await save_notification_preferences(int(identity["id"]), data)
     except BlockedCustomer as exc:
@@ -367,7 +396,7 @@ class WebAppCheckout(BaseModel):
 
 
 @router.post("/api/v1/webapp/terms/accept")
-async def webapp_accept_terms(data: WebAppTermsAcceptance, x_telegram_init_data: str | None = Header(default=None)):
+async def webapp_accept_terms(data: WebAppTermsAcceptance, x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     identity = await _webapp_user(x_telegram_init_data)
@@ -381,7 +410,7 @@ async def webapp_accept_terms(data: WebAppTermsAcceptance, x_telegram_init_data:
 
 
 @router.post("/api/v1/webapp/checkout")
-async def webapp_create_checkout(data: WebAppCheckout, x_telegram_init_data: str | None = Header(default=None)):
+async def webapp_create_checkout(data: WebAppCheckout, x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     _require_telegram_identity(x_telegram_init_data)
     raise HTTPException(status_code=410, detail="Конструктор отключён. Выберите готовый тариф.")
 
@@ -389,19 +418,19 @@ async def webapp_create_checkout(data: WebAppCheckout, x_telegram_init_data: str
 async def _require_telegram_admin(init_data: str | None) -> dict:
     identity = _require_telegram_identity(init_data)
     telegram_id = int(identity["id"])
-    if telegram_id not in settings.admin_id_set:
+    if telegram_id not in settings.admin_id_set or identity.get("browser_provider") == "google":
         raise HTTPException(status_code=403, detail="Administrator access denied")
     return identity
 
 
 @router.get("/admin/api/notifications")
-async def admin_get_notifications(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_get_notifications(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     return await get_notification_settings()
 
 
 @router.put("/admin/api/notifications")
-async def admin_save_notifications(data: NotificationSettings, x_telegram_init_data: str | None = Header(default=None)):
+async def admin_save_notifications(data: NotificationSettings, x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     await save_notification_settings(data)
     return data
@@ -413,7 +442,7 @@ async def admin_dashboard_page():
 
 
 @router.get("/admin/api/overview")
-async def admin_overview(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_overview(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     identity = await _require_telegram_admin(x_telegram_init_data)
     now = datetime.now(timezone.utc)
     first_day = now.date() - timedelta(days=29)
@@ -476,12 +505,11 @@ async def admin_overview(x_telegram_init_data: str | None = Header(default=None)
 
 
 @router.get("/admin/api/panel-overview")
-async def admin_panel_overview(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_panel_overview(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
-    if not settings.remnawave_base_url or not settings.remnawave_api_token:
+    client = await panel_client(RemnawaveClient)
+    if not client.base_url or not client.token:
         return {"status": "not_configured"}
-
-    client = RemnawaveClient()
 
     async def read(path: str) -> dict:
         try:
@@ -533,7 +561,7 @@ async def admin_panel_overview(x_telegram_init_data: str | None = Header(default
 async def admin_users(
     limit: int = 20,
     offset: int = 0,
-    x_telegram_init_data: str | None = Header(default=None),
+    x_telegram_init_data: str | dict | None = Depends(web_credentials),
     q: str = "",
 ):
     await _require_telegram_admin(x_telegram_init_data)
@@ -601,7 +629,7 @@ def _payment_summary(payment: Payment) -> dict:
 async def admin_payments(
     limit: int = 20,
     offset: int = 0,
-    x_telegram_init_data: str | None = Header(default=None),
+    x_telegram_init_data: str | dict | None = Depends(web_credentials),
 ):
     await _require_telegram_admin(x_telegram_init_data)
     if limit < 1 or limit > 100 or offset < 0:
@@ -625,7 +653,7 @@ async def admin_payments(
 @router.get("/admin/api/users/{telegram_id}")
 async def admin_user_detail(
     telegram_id: int,
-    x_telegram_init_data: str | None = Header(default=None),
+    x_telegram_init_data: str | dict | None = Depends(web_credentials),
 ):
     await _require_telegram_admin(x_telegram_init_data)
     if telegram_id < 1:
@@ -676,7 +704,7 @@ async def admin_user_detail(
 
 
 @router.get("/admin/api/users/{telegram_id}/avatar")
-async def admin_customer_avatar(telegram_id: int, x_telegram_init_data: str | None = Header(default=None)):
+async def admin_customer_avatar(telegram_id: int, x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     async with SessionLocal() as session:
         registered = await session.scalar(select(User.id).where(User.telegram_id == telegram_id))
@@ -731,7 +759,7 @@ async def _customer_operation(operation, *args, **kwargs):
 
 @router.patch("/admin/api/users/{telegram_id}")
 async def admin_change_customer_profile(
-    telegram_id: int, data: CustomerProfileUpdate, x_telegram_init_data: str | None = Header(default=None),
+    telegram_id: int, data: CustomerProfileUpdate, x_telegram_init_data: str | dict | None = Depends(web_credentials),
 ):
     await _require_telegram_admin(x_telegram_init_data)
     return await _customer_operation(customer_admin.change_display_name, telegram_id, data.display_name)
@@ -739,7 +767,7 @@ async def admin_change_customer_profile(
 
 @router.put("/admin/api/users/{telegram_id}/block")
 async def admin_change_customer_block(
-    telegram_id: int, data: CustomerBlockUpdate, x_telegram_init_data: str | None = Header(default=None),
+    telegram_id: int, data: CustomerBlockUpdate, x_telegram_init_data: str | dict | None = Depends(web_credentials),
 ):
     await _require_telegram_admin(x_telegram_init_data)
     return await _customer_operation(customer_admin.set_customer_block, telegram_id, data.blocked)
@@ -747,7 +775,7 @@ async def admin_change_customer_block(
 
 @router.put("/admin/api/users/{telegram_id}/subscription")
 async def admin_save_customer_subscription(
-    telegram_id: int, data: CustomerSubscriptionUpdate, x_telegram_init_data: str | None = Header(default=None),
+    telegram_id: int, data: CustomerSubscriptionUpdate, x_telegram_init_data: str | dict | None = Depends(web_credentials),
 ):
     await _require_telegram_admin(x_telegram_init_data)
     return await _customer_operation(customer_admin.save_customer_subscription, telegram_id, **data.model_dump())
@@ -755,7 +783,7 @@ async def admin_save_customer_subscription(
 
 @router.delete("/admin/api/users/{telegram_id}/subscription")
 async def admin_remove_customer_subscription(
-    telegram_id: int, x_telegram_init_data: str | None = Header(default=None),
+    telegram_id: int, x_telegram_init_data: str | dict | None = Depends(web_credentials),
 ):
     await _require_telegram_admin(x_telegram_init_data)
     return await _customer_operation(customer_admin.remove_customer, telegram_id, delete_account=False)
@@ -763,7 +791,7 @@ async def admin_remove_customer_subscription(
 
 @router.delete("/admin/api/users/{telegram_id}")
 async def admin_remove_customer(
-    telegram_id: int, data: CustomerRemoval, x_telegram_init_data: str | None = Header(default=None),
+    telegram_id: int, data: CustomerRemoval, x_telegram_init_data: str | dict | None = Depends(web_credentials),
 ):
     await _require_telegram_admin(x_telegram_init_data)
     if data.confirm_telegram_id != telegram_id:
@@ -778,7 +806,10 @@ async def remnawave_webhook(request: Request, x_remnawave_signature: str | None 
 
     body = await request.body()
     try:
-        event = verify_remnawave_webhook(body, x_remnawave_signature, settings.remnawave_webhook_secret)
+        policy = await get_operations(credentials=True)
+        event = verify_remnawave_webhook(
+            body, x_remnawave_signature, policy.get("panel_webhook_secret") or settings.remnawave_webhook_secret,
+        )
         is_new = await record_and_reconcile(body, event)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
@@ -792,14 +823,14 @@ from app.services.plans import list_plans, save_plan
 
 
 @router.get("/admin/api/squad-policies")
-async def admin_squad_policies(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_squad_policies(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     async with SessionLocal() as session:
         return {mode: await mode_squads(session, mode) for mode in ("trial", "flexible")}
 
 
 @router.put("/admin/api/squad-policies/{mode}")
-async def save_squad_policy(mode: str, selected: list[str], x_telegram_init_data: str | None = Header(default=None)):
+async def save_squad_policy(mode: str, selected: list[str], x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     if mode not in ("trial", "flexible"):
         raise HTTPException(404)
@@ -814,13 +845,13 @@ async def save_squad_policy(mode: str, selected: list[str], x_telegram_init_data
 
 
 @router.get("/admin/api/internal-squads")
-async def admin_internal_squads(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_internal_squads(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     return await get_catalog()
 
 
 @router.post("/admin/api/internal-squads/refresh")
-async def admin_refresh_internal_squads(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_refresh_internal_squads(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     return await refresh_catalog()
 
@@ -871,14 +902,14 @@ async def public_fixed_plans():
 
 
 @router.get("/admin/api/plans")
-async def admin_list_fixed_plans(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_list_fixed_plans(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     return {"items": await list_plans(active_only=False)}
 
 
 @router.post("/admin/api/plans")
 async def admin_create_fixed_plan(
-    data: PlanPayload, x_telegram_init_data: str | None = Header(default=None)
+    data: PlanPayload, x_telegram_init_data: str | dict | None = Depends(web_credentials)
 ):
     await _require_telegram_admin(x_telegram_init_data)
     try:
@@ -889,7 +920,7 @@ async def admin_create_fixed_plan(
 
 @router.put("/admin/api/plans/{plan_id}")
 async def admin_update_fixed_plan(
-    plan_id: int, data: PlanPayload, x_telegram_init_data: str | None = Header(default=None)
+    plan_id: int, data: PlanPayload, x_telegram_init_data: str | dict | None = Depends(web_credentials)
 ):
     await _require_telegram_admin(x_telegram_init_data)
     if plan_id < 1:
@@ -907,11 +938,13 @@ class WebAppFixedPlanCheckout(BaseModel):
 
 
 @router.post("/api/v1/webapp/plans/checkout")
-async def webapp_checkout_ready_plan(data: WebAppFixedPlanCheckout, x_telegram_init_data: str | None = Header(default=None)):
+async def webapp_checkout_ready_plan(data: WebAppFixedPlanCheckout, x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     identity = await _webapp_user(x_telegram_init_data)
     telegram_id = int(identity["id"])
+    if identity.get("browser_provider"):
+        raise HTTPException(403, "Оплата Stars доступна в Telegram.")
     if not await is_payment_method_enabled("telegram_stars"):
         raise HTTPException(status_code=403, detail="Оплата в Telegram Stars отключена.")
     if bot is None:
@@ -954,7 +987,7 @@ class StoreDocumentPayload(BaseModel):
 
 
 @router.get("/admin/api/documents")
-async def admin_list_documents(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_list_documents(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     return {"documents": await list_documents()}
 
@@ -962,7 +995,7 @@ async def admin_list_documents(x_telegram_init_data: str | None = Header(default
 @router.put("/admin/api/documents/{kind}")
 async def admin_save_document(
     kind: DocumentKind, data: StoreDocumentPayload,
-    x_telegram_init_data: str | None = Header(default=None),
+    x_telegram_init_data: str | dict | None = Depends(web_credentials),
 ):
     await _require_telegram_admin(x_telegram_init_data)
     body = data.body.replace("\r\n", "\n").replace("\r", "\n").strip()
@@ -988,7 +1021,7 @@ async def public_store_profile():
 
 
 @router.get("/admin/api/store-profile")
-async def admin_get_store_profile(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_get_store_profile(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     viewer = await _require_telegram_admin(x_telegram_init_data)
     return (await public_store_profile()) | {"viewer": {"id": viewer.get("id"), "photo_url": telegram_photo_url(viewer.get("photo_url"))}}
 
@@ -1013,7 +1046,7 @@ async def public_welcome_image():
 @router.put("/admin/api/store-profile/welcome-image")
 async def admin_upload_welcome_image(
     data: WelcomeImagePayload,
-    x_telegram_init_data: str | None = Header(default=None),
+    x_telegram_init_data: str | dict | None = Depends(web_credentials),
 ):
     await _require_telegram_admin(x_telegram_init_data)
     try:
@@ -1023,7 +1056,7 @@ async def admin_upload_welcome_image(
 
 
 @router.delete("/admin/api/store-profile/welcome-image")
-async def admin_delete_welcome_image(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_delete_welcome_image(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     delete_welcome_image()
     return {"url": None}
@@ -1042,7 +1075,7 @@ async def public_logo_image():
 
 @router.put("/admin/api/store-profile/logo-image")
 async def admin_upload_logo_image(
-    data: WelcomeImagePayload, x_telegram_init_data: str | None = Header(default=None),
+    data: WelcomeImagePayload, x_telegram_init_data: str | dict | None = Depends(web_credentials),
 ):
     await _require_telegram_admin(x_telegram_init_data)
     try:
@@ -1052,14 +1085,14 @@ async def admin_upload_logo_image(
 
 
 @router.delete("/admin/api/store-profile/logo-image")
-async def admin_remove_logo_image(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_remove_logo_image(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     delete_logo_image()
     return {"url": None}
 
 
 @router.get("/admin/api/bot-identity")
-async def admin_bot_identity(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_bot_identity(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     if bot is None:
         return {"username": "", "name": "", "id": None}
@@ -1072,7 +1105,7 @@ async def admin_bot_identity(x_telegram_init_data: str | None = Header(default=N
 
 @router.put("/admin/api/store-profile")
 async def admin_put_store_profile(
-    data: StoreProfilePayload, x_telegram_init_data: str | None = Header(default=None)
+    data: StoreProfilePayload, x_telegram_init_data: str | dict | None = Depends(web_credentials)
 ):
     await _require_telegram_admin(x_telegram_init_data)
     try:
@@ -1082,7 +1115,7 @@ async def admin_put_store_profile(
 
 
 @router.get("/api/v1/webapp/purchases")
-async def webapp_purchases(x_telegram_init_data: str | None = Header(default=None)):
+async def webapp_purchases(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     identity = await _webapp_user(x_telegram_init_data)
@@ -1096,7 +1129,7 @@ async def webapp_purchases(x_telegram_init_data: str | None = Header(default=Non
 
 
 @router.get("/api/v1/webapp/devices")
-async def webapp_hwid_devices(x_telegram_init_data: str | None = Header(default=None)):
+async def webapp_hwid_devices(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     identity = await _webapp_user(x_telegram_init_data)
@@ -1124,20 +1157,22 @@ class DeviceNameUpdate(BaseModel):
 
 @router.patch("/api/v1/webapp/devices/{device_id}")
 async def webapp_update_device_name(device_id: str, data: DeviceNameUpdate,
-                                    x_telegram_init_data: str | None = Header(default=None)):
+                                    x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     identity = _require_telegram_identity(x_telegram_init_data)
+    await _check_webapp_membership(int(identity["id"]))
     return await _device_request(change_customer_device, int(identity["id"]), device_id, name=data.name)
 
 
 @router.delete("/api/v1/webapp/devices/{device_id}")
-async def webapp_remove_device(device_id: str, x_telegram_init_data: str | None = Header(default=None)):
+async def webapp_remove_device(device_id: str, x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     identity = _require_telegram_identity(x_telegram_init_data)
+    await _check_webapp_membership(int(identity["id"]))
     await _device_request(change_customer_device, int(identity["id"]), device_id, name=None)
     return {"ok": True}
 
 
 @router.get("/api/v1/webapp/referrals")
-async def webapp_referrals(x_telegram_init_data: str | None = Header(default=None)):
+async def webapp_referrals(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     from app.services.referrals import referral_code, referral_count, get_referral_settings, reward_balance
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
@@ -1165,14 +1200,14 @@ class ReferralSettingsPayload(BaseModel):
 
 
 @router.get("/admin/api/referrals")
-async def admin_referrals(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_referrals(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     return await get_referral_settings()
 
 
 @router.put("/admin/api/referrals")
 async def admin_update_referrals(
-    data: ReferralSettingsPayload, x_telegram_init_data: str | None = Header(default=None)
+    data: ReferralSettingsPayload, x_telegram_init_data: str | dict | None = Depends(web_credentials)
 ):
     await _require_telegram_admin(x_telegram_init_data)
     try:
@@ -1213,14 +1248,14 @@ class PromoRedeemPayload(BaseModel):
 
 
 @router.get("/admin/api/trial")
-async def admin_get_trial(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_get_trial(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     return await get_trial_settings()
 
 
 @router.put("/admin/api/trial")
 async def admin_put_trial(
-    data: TrialSettingsPayload, x_telegram_init_data: str | None = Header(default=None)
+    data: TrialSettingsPayload, x_telegram_init_data: str | dict | None = Depends(web_credentials)
 ):
     await _require_telegram_admin(x_telegram_init_data)
     try:
@@ -1230,14 +1265,14 @@ async def admin_put_trial(
 
 
 @router.get("/admin/api/promos")
-async def admin_get_promos(x_telegram_init_data: str | None = Header(default=None)):
+async def admin_get_promos(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     await _require_telegram_admin(x_telegram_init_data)
     return {"items": await list_promos()}
 
 
 @router.post("/admin/api/promos")
 async def admin_create_promo(
-    data: PromoCreatePayload, x_telegram_init_data: str | None = Header(default=None)
+    data: PromoCreatePayload, x_telegram_init_data: str | dict | None = Depends(web_credentials)
 ):
     await _require_telegram_admin(x_telegram_init_data)
     try:
@@ -1249,7 +1284,7 @@ async def admin_create_promo(
 @router.put("/admin/api/promos/{promo_id}")
 async def admin_put_promo(
     promo_id: int, data: PromoStatusPayload,
-    x_telegram_init_data: str | None = Header(default=None),
+    x_telegram_init_data: str | dict | None = Depends(web_credentials),
 ):
     await _require_telegram_admin(x_telegram_init_data)
     try:
@@ -1259,7 +1294,7 @@ async def admin_put_promo(
 
 
 @router.get("/api/v1/webapp/offers")
-async def webapp_offers(x_telegram_init_data: str | None = Header(default=None)):
+async def webapp_offers(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     identity = await _webapp_user(x_telegram_init_data)
@@ -1272,7 +1307,7 @@ async def webapp_offers(x_telegram_init_data: str | None = Header(default=None))
 
 
 @router.post("/api/v1/webapp/trial")
-async def webapp_claim_trial(x_telegram_init_data: str | None = Header(default=None)):
+async def webapp_claim_trial(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
     identity = await _webapp_user(x_telegram_init_data)
@@ -1287,7 +1322,7 @@ async def webapp_claim_trial(x_telegram_init_data: str | None = Header(default=N
 @router.post("/api/v1/webapp/promos/redeem")
 async def webapp_redeem_promo(
     data: PromoRedeemPayload,
-    x_telegram_init_data: str | None = Header(default=None),
+    x_telegram_init_data: str | dict | None = Depends(web_credentials),
 ):
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
@@ -1334,7 +1369,7 @@ async def _external_checkout(telegram_id: int, provider: str, **plan_options):
 
 @router.post("/api/v1/webapp/external/checkout")
 async def webapp_external_checkout(
-    data: WebAppExternalCheckout, x_telegram_init_data: str | None = Header(default=None),
+    data: WebAppExternalCheckout, x_telegram_init_data: str | dict | None = Depends(web_credentials),
 ):
     _require_telegram_identity(x_telegram_init_data)
     raise HTTPException(status_code=410, detail="Конструктор отключён. Выберите готовый тариф.")
@@ -1342,7 +1377,7 @@ async def webapp_external_checkout(
 
 @router.post("/api/v1/webapp/plans/external/checkout")
 async def webapp_external_plan_checkout(
-    data: WebAppPlanExternalCheckout, x_telegram_init_data: str | None = Header(default=None),
+    data: WebAppPlanExternalCheckout, x_telegram_init_data: str | dict | None = Depends(web_credentials),
 ):
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Telegram authentication is required")
@@ -1357,3 +1392,232 @@ async def _get_public_checkout_methods():
     configured = public_payment_settings(methods, credentials)["configured"]
     configured["telegram_stars"] = bot is not None
     return {key: bool(methods.get(key) and configured.get(key)) for key in DEFAULT_METHODS}
+
+
+from typing import Annotated, Literal
+
+from fastapi import Query
+from pydantic import StringConstraints
+
+from app.bot.campaigns import campaign_lock, run_campaign
+from app.db.models import UserTheme
+from app.services import support
+from app.services.bot_identity import bot_username
+from app.services.store_operations import save_operations
+
+WebCredentials = Annotated[str | dict | None, Depends(web_credentials)]
+
+
+class OperationsPayload(BaseModel):
+    telegram_login: bool
+    google_login: bool
+    google_client_id: str = Field(max_length=255)
+    google_client_secret: str = Field(default="", max_length=512)
+    required_channel: str = Field(pattern=r"^(?:@[a-zA-Z0-9_]{5,32}|-100[0-9]{5,16})?$")
+    channel_url: str = Field(max_length=300)
+    extra_devices_max: int = Field(ge=0, le=1000, strict=True)
+    panel_url: str = Field(max_length=500)
+    panel_token: str = Field(default="", max_length=4096)
+    panel_webhook_secret: str = Field(default="", max_length=512)
+
+    @model_validator(mode="after")
+    def validate_urls(self):
+        if self.required_channel:
+            channel = urlsplit(self.channel_url)
+            if channel.scheme != "https" or channel.netloc.lower() != "t.me" or not channel.path.strip("/"):
+                raise ValueError("Укажите HTTPS-ссылку на Telegram-канал.")
+        if self.panel_url:
+            panel = urlsplit(self.panel_url)
+            if (panel.scheme != "https" or not panel.hostname or panel.username is not None
+                    or panel.query or panel.fragment or panel.path not in {"", "/"}):
+                raise ValueError("Укажите HTTPS-адрес панели без пути и параметров.")
+            _ = panel.port
+            self.panel_url = self.panel_url.rstrip("/")
+        return self
+
+
+@router.get("/admin/api/operations")
+async def admin_operations(x_telegram_init_data: WebCredentials):
+    await _require_telegram_admin(x_telegram_init_data)
+    values = await get_operations(credentials=True)
+    return {key: values[key] for key in OperationsPayload.model_fields
+            if key in values and key not in {"google_client_secret", "panel_token", "panel_webhook_secret"}} | {
+        "panel_configured": bool((values["panel_url"] or settings.remnawave_base_url)
+                                 and (values.get("panel_token") or settings.remnawave_api_token)),
+        "panel_webhook_configured": bool(values.get("panel_webhook_secret") or settings.remnawave_webhook_secret),
+        "google_callback_url": app_origin() + "/auth/google/callback",
+        "google_configured": bool(values["google_client_id"] and values.get("google_client_secret")),
+        "telegram_configured": bool(bot_username() and settings.telegram_bot_token),
+    }
+
+
+@router.put("/admin/api/operations")
+async def admin_save_operations(data: OperationsPayload, x_telegram_init_data: WebCredentials):
+    await _require_telegram_admin(x_telegram_init_data)
+    if data.required_channel:
+        if bot is None:
+            raise HTTPException(422, "Подключите Telegram-бота.")
+        target = int(data.required_channel) if data.required_channel.startswith("-") else data.required_channel
+        try:
+            member = await bot.get_chat_member(target, bot.id)
+        except TelegramAPIError as exc:
+            raise HTTPException(422, "Бот не смог открыть указанный канал.") from exc
+        if member.status not in {"administrator", "creator"}:
+            raise HTTPException(422, "Добавьте бота в администраторы канала.")
+    if data.panel_url:
+        old = await get_operations(credentials=True)
+        if data.panel_token or old["panel_url"] != data.panel_url:
+            if not data.panel_token:
+                raise HTTPException(422, "При смене URL укажите API-токен панели.")
+            try:
+                await RemnawaveClient(base_url=data.panel_url, token=data.panel_token).request(
+                    "GET", "/api/internal-squads",
+                )
+            except (httpx.HTTPError, ValueError) as exc:
+                raise HTTPException(422, "Не удалось подключиться к панели. Проверьте адрес и токен.") from exc
+    secrets = {"google_client_secret", "panel_token", "panel_webhook_secret"}
+    try:
+        await save_operations(data.model_dump(exclude=secrets), {
+            key: getattr(data, key).strip() for key in secrets
+        })
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return await admin_operations(x_telegram_init_data)
+
+
+class CampaignPayload(BaseModel):
+    action: Literal["broadcast", "refresh"]
+    text: Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)] = ""
+
+
+@router.post("/admin/api/campaigns", status_code=202)
+async def admin_campaign(data: CampaignPayload, background: BackgroundTasks, x_telegram_init_data: WebCredentials):
+    admin = await _require_telegram_admin(x_telegram_init_data)
+    if bot is None:
+        raise HTTPException(503, "Telegram-бот не настроен.")
+    if data.action == "broadcast" and not data.text:
+        raise HTTPException(422, "Введите текст рассылки.")
+    lock = await campaign_lock()
+    if lock is None:
+        raise HTTPException(409, "Уже выполняется рассылка или обновление меню.")
+    background.add_task(run_campaign, bot, int(admin["id"]), data.text if data.action == "broadcast" else None, lock)
+    return {"queued": True}
+
+
+THEME_COLORS = {
+    "bg", "surface", "surface-raised", "input", "border", "border-strong", "text",
+    "muted", "subtle", "primary", "on-primary", "overlay", "glow", "grid", "focus", "success", "danger",
+}
+HexColor = Annotated[str, StringConstraints(pattern=r"^#[0-9a-fA-F]{6}$")]
+
+
+class ThemePayload(BaseModel):
+    colors: dict[str, HexColor] = Field(max_length=len(THEME_COLORS))
+
+
+@router.get("/api/v1/webapp/theme")
+async def webapp_theme(x_telegram_init_data: WebCredentials):
+    identity = await _webapp_user(x_telegram_init_data)
+    async with SessionLocal() as session:
+        colors = await session.scalar(select(UserTheme.colors).join(User).where(User.telegram_id == int(identity["id"])))
+    return {"colors": colors or {}}
+
+
+@router.put("/api/v1/webapp/theme")
+async def webapp_save_theme(data: ThemePayload, x_telegram_init_data: WebCredentials):
+    from sqlalchemy.dialects.postgresql import insert
+
+    identity = await _webapp_user(x_telegram_init_data)
+    if data.colors.keys() - THEME_COLORS:
+        raise HTTPException(422, "Неизвестный цвет темы.")
+    async with SessionLocal.begin() as session:
+        user_id = await session.scalar(select(User.id).where(User.telegram_id == int(identity["id"])))
+        await session.execute(insert(UserTheme).values(user_id=user_id, colors=data.colors).on_conflict_do_update(
+            index_elements=[UserTheme.user_id], set_={"colors": data.colors},
+        ))
+    return data
+
+
+TicketBody = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=3000)]
+
+
+class ReplyPayload(BaseModel):
+    body: TicketBody
+
+
+class TicketPayload(ReplyPayload):
+    subject: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+
+
+class TicketState(BaseModel):
+    closed: bool
+
+
+@router.get("/api/v1/webapp/tickets")
+async def webapp_tickets(x_telegram_init_data: WebCredentials, offset: int = Query(default=0, ge=0)):
+    identity = await _webapp_user(x_telegram_init_data)
+    return await support.list_tickets(int(identity["id"]), offset)
+
+
+@router.post("/api/v1/webapp/tickets", status_code=201)
+async def webapp_open_ticket(data: TicketPayload, background: BackgroundTasks, x_telegram_init_data: WebCredentials):
+    identity = await _webapp_user(x_telegram_init_data)
+    ticket_id = await support.create_ticket(int(identity["id"]), data.subject, data.body)
+    background.add_task(support.notify_ticket, bot, ticket_id)
+    return {"id": ticket_id}
+
+
+@router.get("/api/v1/webapp/tickets/{ticket_id}")
+async def webapp_ticket(ticket_id: int, x_telegram_init_data: WebCredentials):
+    identity = await _webapp_user(x_telegram_init_data)
+    return await _ticket_detail(ticket_id, int(identity["id"]))
+
+
+@router.post("/api/v1/webapp/tickets/{ticket_id}/replies")
+async def webapp_reply(ticket_id: int, data: ReplyPayload, background: BackgroundTasks, x_telegram_init_data: WebCredentials):
+    identity = await _webapp_user(x_telegram_init_data)
+    return await _ticket_reply(ticket_id, data.body, background, int(identity["id"]))
+
+
+@router.get("/admin/api/tickets")
+async def admin_tickets(x_telegram_init_data: WebCredentials, offset: int = Query(default=0, ge=0)):
+    await _require_telegram_admin(x_telegram_init_data)
+    return await support.list_tickets(None, offset)
+
+
+async def _ticket_detail(ticket_id, user_id=None):
+    item = await support.get_ticket(ticket_id, user_id)
+    if item is None:
+        raise HTTPException(404, "Тикет не найден.")
+    return item
+
+
+async def _ticket_reply(ticket_id, body, background, user_id=None):
+    try:
+        recipient = await support.update_ticket(ticket_id, user_id, body=body)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if recipient is None:
+        raise HTTPException(404, "Тикет не найден.")
+    background.add_task(support.notify_ticket, bot, ticket_id, recipient if user_id is None else None)
+    return {"ok": True}
+
+
+@router.get("/admin/api/tickets/{ticket_id}")
+async def admin_ticket(ticket_id: int, x_telegram_init_data: WebCredentials):
+    await _require_telegram_admin(x_telegram_init_data)
+    return await _ticket_detail(ticket_id)
+
+
+@router.post("/admin/api/tickets/{ticket_id}/replies")
+async def admin_reply(ticket_id: int, data: ReplyPayload, background: BackgroundTasks, x_telegram_init_data: WebCredentials):
+    await _require_telegram_admin(x_telegram_init_data)
+    return await _ticket_reply(ticket_id, data.body, background)
+
+
+@router.put("/admin/api/tickets/{ticket_id}")
+async def admin_ticket_state(ticket_id: int, data: TicketState, x_telegram_init_data: WebCredentials):
+    await _require_telegram_admin(x_telegram_init_data)
+    if await support.update_ticket(ticket_id, None, closed=data.closed) is None:
+        raise HTTPException(404, "Тикет не найден.")
+    return {"ok": True}

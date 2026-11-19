@@ -12,7 +12,10 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
+from app.bot.membership import membership_required
+from app.bot.runtime import bot
 from app.config import settings
+from app.services.store_operations import get_operations
 from app.db.models import User
 from app.db.session import SessionLocal
 from app.services.payment_service import (
@@ -120,6 +123,9 @@ async def store_checkout(request: Request, data: StoreCheckoutPayload):
         raise HTTPException(status_code=403, detail="Invalid checkout origin")
     if await customer_is_blocked(telegram_id):
         raise HTTPException(status_code=403, detail=BLOCKED_MESSAGE)
+    policy = await get_operations()
+    if await membership_required(bot, telegram_id, policy):
+        raise HTTPException(status_code=403, detail="Для покупки подпишитесь на канал " + policy["channel_url"])
     if data.provider not in PROVIDER_LABELS:
         raise HTTPException(status_code=422, detail="Unsupported payment provider")
     if await get_terms_url() and not data.accepted_terms:
