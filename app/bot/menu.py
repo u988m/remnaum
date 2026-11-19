@@ -92,16 +92,19 @@ class MenuMiddleware(BaseMiddleware):
         if message.successful_payment:
             return await handler(event, data)
         actor = event.from_user if is_callback else message.from_user
-        if actor and await customer_is_blocked(actor.id):
-            if is_callback:
-                await event.answer(BLOCKED_MESSAGE, show_alert=True)
-            else:
-                await message.answer(BLOCKED_MESSAGE)
+        blocked = actor is not None and await customer_is_blocked(actor.id)
+        if blocked and is_callback:
+            await event.answer(BLOCKED_MESSAGE, show_alert=True)
             return None
         if message.chat.type != "private":
-            return await handler(event, data)
+            return None if blocked else await handler(event, data)
         try:
             async with menu_session(data["bot"], message.chat.id, wait=0.3 if is_callback else 60) as state:
+                if blocked:
+                    sent = await message.answer(BLOCKED_MESSAGE)
+                    await remember_menu(sent, None)
+                    await remove_command(message)
+                    return None
                 if is_callback and state.message_id is not None:
                     if state.message_id != message.message_id:
                         await event.answer("Используйте кнопки текущего меню.")

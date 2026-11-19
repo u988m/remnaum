@@ -79,7 +79,7 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
         credentials = {"platega": {"merchant_id": "test", "secret_key": "test"}}
         with (
             patch.object(menu, "redis", mock_redis),
-            patch.object(menu, "customer_is_blocked", return_value=False),
+            patch.object(menu, "customer_is_blocked", return_value=False) as blocked_user,
             patch.object(bot.session, "make_request", side_effect=send),
             patch.object(handlers, "get_or_create_user", return_value=False),
             patch.object(handlers, "get_store_profile", return_value=profile),
@@ -133,3 +133,10 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
             await press(handlers.fixed_plan_checkout_handler, messages[102], f"plan:confirm:{order}")
             self.assertEqual(set(messages), {103})
             self.assertNotIn(102, messages)
+
+            blocked_user.return_value = True
+            await start(3)
+            await start(4)
+            self.assertEqual(set(messages), {105})
+            self.assertEqual(messages[105].text, menu.BLOCKED_MESSAGE)
+            self.assertIsNone(messages[105].reply_markup)
