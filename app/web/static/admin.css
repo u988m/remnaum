@@ -186,3 +186,30 @@ main { max-width:1480px;padding:16px clamp(14px,3vw,36px) 44px; }
  .payment-provider-view { padding:18px; }
  .provider-grid { grid-template-columns:1fr; }
 }
+
+.admin-icon-sprite { position:absolute; width:0; height:0; overflow:hidden; }
+.admin-tabs button { display:flex; align-items:center; gap:12px; }
+.admin-sidebar-icon { width:19px; height:19px; min-width:19px; flex:none; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+@media (max-width:640px) {
+  #users-view > .table-wrap table,
+  #payments-view > .table-wrap table { display:block; min-width:0; width:100%; }
+  #users-view > .table-wrap thead,
+  #payments-view > .table-wrap thead {
+    position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%);
+  }
+  #users-table, #payments-table { display:grid; gap:10px; }
+  #users-table tr, #payments-table tr {
+    display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px;
+    border:1px solid var(--color-border); border-radius:18px; background:var(--color-input);
+    padding:13px; min-width:0;
+  }
+  #users-table td, #payments-table td { border:0; padding:4px 2px; font-size:.86rem; overflow-wrap:anywhere; min-width:0; }
+  #users-table td:first-child, #payments-table td:first-child { grid-column:1/-1; font-size:1rem; font-weight:800; }
+  #users-table td:last-child, #payments-table td:last-child { grid-column:1/-1; }
+  #users-table td:nth-child(1)::before { content:"Telegram ID · "; }
+  #payments-table td:nth-child(1)::before { content:"Платёж #"; }
+  #users-table td:nth-child(3)::before { content:"Статус · "; }
+  #users-table td:nth-child(4)::before { content:"До · "; }
+  #payments-table td:nth-child(4)::before { content:"Сумма · "; }
+  #payments-table td:nth-child(5)::before { content:"Статус · "; }
+}

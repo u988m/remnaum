@@ -408,6 +408,21 @@ $("referral-form").onsubmit=async e=>{
     $("status").textContent="Реферальная программа сохранена";
   }catch(err){$("status").textContent=err.message}
 };
+const sidebarIconNames = {
+  overview:"grid", plans:"tag", users:"users", payments:"card",
+  bonuses:"ticket", referrals:"gift", brand:"palette", trial:"clock",
+  pricing:"calc", settings:"wallet", "pay-stars":"star",
+  "pay-yookassa":"card", "pay-yoomoney":"coins", "pay-cryptopay":"crypto",
+};
+for(const button of document.querySelectorAll(".admin-tabs [data-tab]")){
+  const icon=document.createElementNS("http://www.w3.org/2000/svg","svg");
+  icon.classList.add("admin-sidebar-icon");
+  icon.setAttribute("aria-hidden","true");
+  const use=document.createElementNS("http://www.w3.org/2000/svg","use");
+  use.setAttribute("href","#ai-"+sidebarIconNames[button.dataset.tab]);
+  icon.append(use);
+  button.prepend(icon);
+}
 const adminSidebar=$("admin-sidebar"), adminMenuOpen=$("admin-menu-open"), adminBackdrop=$("admin-menu-backdrop");
 let adminReturnFocus=null;
 function setAdminMenu(open) {

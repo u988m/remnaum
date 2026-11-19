@@ -30,6 +30,9 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('id="admin-sidebar"', admin)
         self.assertIn('id="admin-menu-backdrop"', admin)
         self.assertIn('function setAdminMenu(open)', admin_js)
+        self.assertIn('class="admin-icon-sprite"', admin)
+        self.assertIn('const sidebarIconNames =', admin_js)
+        self.assertIn('id="ai-wallet"', admin)
         for section in ("referrals-view", "trial-view", "pricing-view", "payment-settings-view",
                         "payment-telegram_stars-view", "payment-yookassa-view",
                         "payment-yoomoney-view", "payment-cryptopay-view"):
