@@ -340,7 +340,7 @@ async function showCustomer(id, {scroll = true} = {}) {
     $("customer-detail").hidden = false;
     if (scroll) {
       $("status").textContent = "";
-      $("customer-detail").scrollIntoView({block:"start"});
+      window.scrollTo({top: 0, behavior: "instant"});
     }
   } catch (error) {
     if (request === openingCustomer) $("status").textContent = error.message;

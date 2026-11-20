@@ -476,7 +476,6 @@ main { max-width:1480px;padding:16px clamp(14px,3vw,36px) 44px; }
     grid-template-columns: minmax(0, 1fr);
     gap: 10px;
     min-width: 0;
-    scroll-margin-top: 68px;
 }
 .customer-detail .section-heading { margin-bottom: 0; }
 .customer-form {
@@ -491,7 +490,16 @@ main { max-width:1480px;padding:16px clamp(14px,3vw,36px) 44px; }
 }
 .customer-form h3, .customer-form label, .customer-form button[type="submit"] { margin-top: 0; }
 .customer-form label, .editor-group label { min-width: 0; }
-.customer-form input, .customer-form select { display: block; max-width: 100%; }
+.customer-form input, .customer-form select { display: block; width: 100%; min-width: 0; max-width: 100%; }
+#customer-expiry {
+    -webkit-appearance: none;
+    appearance: none;
+}
+#customer-expiry::-webkit-date-and-time-value {
+    min-width: 0;
+    margin: 0;
+    text-align: start;
+}
 .customer-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr)); gap: 8px; }
 .customer-actions button { min-width: 0; padding-inline: 8px; font-size: .875rem; overflow-wrap: anywhere; }
 .customer-danger, .danger-action { border-color: #674344; }
