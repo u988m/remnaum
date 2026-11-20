@@ -1,12 +1,12 @@
 import logging
 from html import escape, unescape
 import re
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandStart
-from aiogram.types import ChatMemberUpdated, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message, PreCheckoutQuery, WebAppInfo, FSInputFile
+from aiogram.types import ChatMemberUpdated, CallbackQuery, CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message, PreCheckoutQuery, WebAppInfo, FSInputFile
 
 from redis.exceptions import LockError
 
@@ -51,6 +51,8 @@ logger = logging.getLogger(__name__)
 router = Router(name="user")
 router.message.middleware(MenuMiddleware())
 router.callback_query.middleware(MenuMiddleware())
+
+PROMO_CANCEL = "promo:cancel"
 
 
 def main_menu(*, has_documents: bool = False) -> InlineKeyboardMarkup:
@@ -244,20 +246,35 @@ async def document_handler(callback: CallbackQuery) -> None:
     await edit_menu_message(callback.message, text, reply_markup=keyboard, with_photo=False)
 
 
-@router.callback_query(F.data == "menu:bonuses")
+@router.callback_query(F.data.in_({"menu:bonuses", PROMO_CANCEL}))
 async def bonuses_handler(callback: CallbackQuery) -> None:
     await callback.answer()
-    if callback.message:
-        await edit_menu_message(callback.message, 
-            "🎁 <b>Бонусы и подарки</b>\n\n"
-            "Приглашайте друзей, активируйте промокоды и получите пробный доступ.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🤝 Пригласить друга", callback_data="menu:referral")],
-                [InlineKeyboardButton(text="🎟 Активировать промокод", callback_data="menu:promo")],
-                [InlineKeyboardButton(text="✨ Пробный доступ", callback_data="menu:trial")],
-                [InlineKeyboardButton(text="← Меню", callback_data="menu:home")],
-            ]),
-        )
+    if not callback.message:
+        return
+    telegram_id = callback.from_user.id
+    referral_days = (await reward_balance(telegram_id))["days"]
+    promo_days = (await promo_balance(telegram_id))["days"]
+    total_days = referral_days + promo_days
+    lines = ["🎁 <b>Бонусы</b>", ""]
+    if total_days:
+        lines.extend((
+            f"Бонусных дней · <b>{total_days}</b>",
+            f"За друзей · {referral_days}  |  За промокоды · {promo_days}",
+            "",
+            "Дни добавятся к следующей оплаченной подписке.",
+        ))
+    else:
+        lines.append("Бонусных дней пока нет.")
+    rows = [
+        [InlineKeyboardButton(text="🤝 Пригласить друга", callback_data="menu:referral")],
+        [InlineKeyboardButton(text="🎟 Ввести промокод", callback_data="menu:promo")],
+    ]
+    if (await get_trial_settings())["enabled"]:
+        rows.append([InlineKeyboardButton(text="✨ Пробный доступ", callback_data="menu:trial")])
+    rows.extend(back_menu().inline_keyboard)
+    await edit_menu_message(
+        callback.message, "\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
 
 
 @router.callback_query(F.data == "menu:plans")
@@ -537,39 +554,67 @@ async def payment_support_handler(message: Message) -> None:
     await show_command_section(message, f"<b>Поддержка по оплате</b>\n{support}", back_menu())
 
 
+async def _promo_entry(telegram_id: int, *, error: str = "") -> tuple[str, InlineKeyboardMarkup]:
+    balance = await promo_balance(telegram_id)
+    text = (
+        "🎟 <b>Промокод</b>\n\n"
+        "Отправьте код следующим сообщением.\n\n"
+        f"Дней за промокоды · <b>{balance['days']}</b>\n"
+        "Они добавятся к следующей оплаченной подписке."
+    )
+    if error:
+        text += f"\n\n{escape(error)} Попробуйте ещё раз."
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Отмена", callback_data=PROMO_CANCEL),
+    ]])
+    return text, keyboard
+
+
+async def _activate_promo(message: Message, telegram_id: int, code: str) -> None:
+    try:
+        result = await redeem_promo(telegram_id, code)
+    except ValueError as exc:
+        text, keyboard = await _promo_entry(telegram_id, error=str(exc))
+    else:
+        text = (
+            f"✅ <b>Промокод {escape(result['code'])} активирован</b>\n\n"
+            f"Бонусных дней добавлено · <b>{result['bonus_days']}</b>\n"
+            "Они добавятся к следующей оплаченной подписке."
+        )
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🎟 Ввести ещё код", callback_data="menu:promo")],
+            *back_menu("menu:bonuses").inline_keyboard,
+        ])
+    await show_command_section(message, text, keyboard)
+
+
 @router.message(Command("promo"))
 async def promo_command_handler(message: Message) -> None:
     if message.from_user is None:
         return
+    telegram_id = message.from_user.id
     chunks = (message.text or "").split(maxsplit=1)
-    if len(chunks) != 2:
-        await show_command_section(message, "Введите промокод: <code>/promo ВАШ_КОД</code>", back_menu())
-        return
-    try:
-        result = await redeem_promo(message.from_user.id, chunks[1])
-    except ValueError as exc:
-        await show_command_section(message, escape(str(exc)), back_menu())
-        return
-    await show_command_section(
-        message,
-        f"Промокод <b>{escape(result['code'])}</b> активирован. "
-        f"+{result['bonus_days']} дней при следующей оплате.",
-        back_menu(),
-    )
+    if len(chunks) == 2:
+        await _activate_promo(message, telegram_id, chunks[1])
+    else:
+        text, keyboard = await _promo_entry(telegram_id)
+        await show_command_section(message, text, keyboard)
 
 
 @router.callback_query(F.data == "menu:promo")
 async def promo_menu_handler(callback: CallbackQuery) -> None:
     await callback.answer()
-    balance = await promo_balance(callback.from_user.id)
     if callback.message:
-        await edit_menu_message(callback.message, 
-            "🎟 <b>Промокоды</b>\n\n"
-            "Введите в этом чате: <code>/promo ВАШ_КОД</code>\n\n"
-            f"Бонусных дней: <b>{balance['days']}</b>. "
-            "Они добавятся к следующей оплаченной подписке.",
-            reply_markup=back_menu("menu:bonuses"),
-        )
+        text, keyboard = await _promo_entry(callback.from_user.id)
+        await edit_menu_message(callback.message, text, reply_markup=keyboard)
+
+
+def _trial_details(config: dict) -> str:
+    return (
+        f"Срок · <b>{config['days']} дн.</b>\n"
+        f"Трафик · <b>{format_traffic(config['traffic_gb'])}</b>\n"
+        f"Устройства · <b>{config['device_limit']}</b>"
+    )
 
 
 @router.callback_query(F.data == "menu:trial")
@@ -578,25 +623,17 @@ async def trial_menu_handler(callback: CallbackQuery) -> None:
     if not callback.message:
         return
     config = await get_trial_settings()
+    rows = back_menu("menu:bonuses").inline_keyboard
     if not config["enabled"]:
-        await edit_menu_message(callback.message, "🎁 Пробный доступ пока отключён.", reply_markup=back_menu("menu:bonuses"))
-        return
-    if not await trial_eligible(callback.from_user.id):
-        await edit_menu_message(callback.message, 
-            "🎁 Пробный доступ доступен только один раз до первой подписки.",
-            reply_markup=back_menu("menu:bonuses"),
-        )
-        return
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎁 Получить пробный доступ", callback_data="trial:claim")],
-        back_menu("menu:bonuses").inline_keyboard[0],
-    ])
-    await edit_menu_message(callback.message, 
-        "🎁 <b>Пробный доступ</b>\n\n"
-        f"{config['days']} дней · {config['traffic_gb']} ГБ · "
-        f"{config['device_limit']} устройств.\n"
-        "Выдаётся один раз.",
-        reply_markup=keyboard,
+        details = "Пробный доступ сейчас отключён."
+    elif not await trial_eligible(callback.from_user.id):
+        details = "Пробный доступ можно активировать один раз до первой подписки."
+    else:
+        details = f"{_trial_details(config)}\n\nМожно активировать один раз до первой подписки."
+        rows.insert(0, [InlineKeyboardButton(text="✨ Активировать", callback_data="trial:claim")])
+    await edit_menu_message(
+        callback.message, f"✨ <b>Пробный доступ</b>\n\n{details}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
 
@@ -605,27 +642,19 @@ async def trial_claim_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     if not callback.message:
         return
+    rows = back_menu("menu:bonuses").inline_keyboard
     try:
         result = await claim_trial(callback.from_user.id)
-    except (ValueError, RuntimeError) as exc:
-        await edit_menu_message(callback.message, "🎁 " + escape(str(exc)), reply_markup=back_menu("menu:bonuses"))
-        return
-    except Exception:
-        await edit_menu_message(callback.message, 
-            "Пробный доступ временно недоступен. Попробуйте позже.", reply_markup=back_menu("menu:bonuses"),
-        )
-        return
-    link = result.get("subscription_url")
-    keyboard = back_menu("menu:bonuses")
-    if isinstance(link, str) and link.startswith("https://"):
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔗 Подключить VPN", url=link)],
-            back_menu("menu:bonuses").inline_keyboard[0],
-        ])
-    await edit_menu_message(callback.message, 
-        f"✅ Доступ выдан: {result['days']} дней, {result['traffic_gb']} ГБ, "
-        f"{result['device_limit']} устройств.",
-        reply_markup=keyboard,
+    except Exception as exc:
+        logger.warning("Could not activate trial access (%s)", type(exc).__name__)
+        text = "✨ <b>Пробный доступ</b>\n\nСейчас активировать доступ не удалось."
+    else:
+        text = f"✅ <b>Пробный доступ активирован</b>\n\n{_trial_details(result)}"
+        link = result.get("subscription_url")
+        if isinstance(link, str) and link.startswith("https://"):
+            rows.insert(0, [InlineKeyboardButton(text="🔗 Подключить VPN", url=link)])
+    await edit_menu_message(
+        callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
 
@@ -855,9 +884,12 @@ async def device_action_handler(callback: CallbackQuery) -> None:
 
 
 @router.message(F.chat.type == "private", F.text, ~F.text.startswith("/"))
-async def device_name_handler(message: Message) -> None:
+async def menu_text_handler(message: Message) -> None:
     menu = current_menu.get()
     if not menu or not message.from_user:
+        return
+    if PROMO_CANCEL in menu.callbacks:
+        await _activate_promo(message, message.from_user.id, message.text)
         return
     pending = next((value for value in menu.callbacks if value.startswith("device:nameback:")), None)
     if not pending:
@@ -909,26 +941,40 @@ async def purchases_handler(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "menu:referral")
 async def referral_handler(callback: CallbackQuery) -> None:
     await callback.answer()
-    username = bot_username()
-    if not username:
-        text = "🎁 Реферальная ссылка пока недоступна."
-    else:
-        link = f"https://t.me/{username}?start={referral_code(callback.from_user.id)}"
-        count = await referral_count(callback.from_user.id)
-        balance = await reward_balance(callback.from_user.id)
-        config = await get_referral_settings()
-        text = (
-            "🎁 <b>Пригласить друга</b>\\n\\n"
-            f"Ваша ссылка: {escape(link)}\\n"
-            f"Приглашено пользователей: <b>{count}</b>\\n\\n"
-            f"Начислено бонусов: <b>{balance['earned']}</b>\\n"
-            f"Доступно бонусных дней: <b>{balance['days']}</b>\\n"
-            + (f"За первую оплаченную покупку друга: {config['reward_days']} бонусных дней. "
-               "Бонус применяется к вашему следующему продлению."
-               if config["enabled"] else "Реферальная программа пока отключена владельцем.")
+    if not callback.message:
+        return
+    telegram_id = callback.from_user.id
+    count = await referral_count(telegram_id)
+    balance = await reward_balance(telegram_id)
+    config = await get_referral_settings()
+    lines = [
+        "🤝 <b>Пригласить друга</b>",
+        "",
+        f"Приглашено друзей · <b>{count}</b>",
+        f"Получено наград · <b>{balance['earned']}</b>",
+        f"Доступно бонусных дней · <b>{balance['days']}</b>",
+        "",
+    ]
+    if config["enabled"]:
+        lines.append(
+            f"За первую оплату друга начислим <b>{config['reward_days']} дн.</b> "
+            "к вашей следующей оплаченной подписке."
         )
-    if callback.message:
-        await edit_menu_message(callback.message, text.replace(chr(92) + "n", chr(10)), reply_markup=back_menu("menu:bonuses"))
+    else:
+        lines.append("Начисление бонусов за приглашения сейчас отключено.")
+    rows = back_menu("menu:bonuses").inline_keyboard
+    if username := bot_username():
+        link = f"https://t.me/{username}?start={referral_code(telegram_id)}"
+        lines.extend(("", f"Ваша ссылка\n<code>{escape(link)}</code>"))
+        rows.insert(0, [
+            InlineKeyboardButton(text="Копировать ссылку", copy_text=CopyTextButton(text=link)),
+            InlineKeyboardButton(text="Поделиться", url=f"https://t.me/share/url?{urlencode({'url': link})}"),
+        ])
+    else:
+        lines.extend(("", "Ссылка для приглашения пока недоступна."))
+    await edit_menu_message(
+        callback.message, "\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
 
 
 @router.callback_query(F.data.regexp(r"^channel:check(?::[0-9]{1,19})?$"))

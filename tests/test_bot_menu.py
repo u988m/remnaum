@@ -2,6 +2,7 @@ import unittest
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from urllib.parse import parse_qs, urlsplit
 
 from aiogram import Bot
 from aiogram.methods import AnswerCallbackQuery, DeleteMessage, EditMessageText, SendInvoice, SendMessage
@@ -177,7 +178,7 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
             await press(handlers.device_action_handler, messages[103], device_button.callback_data)
             await press(handlers.device_action_handler, messages[103], f"device:name:{device_key}:0")
             name_input = telegram_message(7, from_user=user, text="Телефон")
-            await middleware(lambda event, _: handlers.device_name_handler(event), name_input, {"bot": bot})
+            await middleware(lambda event, _: handlers.menu_text_handler(event), name_input, {"bot": bot})
             self.assertEqual(set(messages), {104})
             self.assertIn("Имя сохранено", messages[104].text)
             self.assertIn(7, deleted)
@@ -199,3 +200,54 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(messages[106].reply_markup)
             self.assertTrue({2, 3} <= set(deleted))
             self.assertNotIn(4, deleted)
+
+
+            blocked_user.return_value = False
+            self.enterContext(patch.object(handlers, "reward_balance", return_value={"days": 7, "earned": 2}))
+            self.enterContext(patch.object(handlers, "promo_balance", return_value={"days": 3}))
+            self.enterContext(patch.object(handlers, "referral_count", return_value=4))
+            self.enterContext(patch.object(handlers, "bot_username", return_value="test_bot"))
+            self.enterContext(patch.object(handlers, "get_referral_settings", return_value={"enabled": True, "reward_days": 5}))
+            trial = self.enterContext(patch.object(handlers, "get_trial_settings", return_value={"enabled": False}))
+            redeem = self.enterContext(patch.object(handlers, "redeem_promo", side_effect=[
+                ValueError("Промокод не найден."), {"code": "VALID", "bonus_days": 2},
+            ]))
+
+            def active_menu():
+                self.assertEqual(len(messages), 1)
+                return next(iter(messages.values()))
+
+            await start(5)
+            await press(handlers.bonuses_handler, active_menu(), "menu:bonuses")
+            self.assertIn("Бонусных дней · <b>10</b>", active_menu().text)
+            self.assertEqual(
+                [row[0].callback_data for row in active_menu().reply_markup.inline_keyboard],
+                ["menu:referral", "menu:promo", "menu:home"],
+            )
+            await press(handlers.referral_handler, active_menu(), "menu:referral")
+            copy, share = active_menu().reply_markup.inline_keyboard[0]
+            link = "https://t.me/test_bot?start=ref_42"
+            self.assertEqual(copy.copy_text.text, link)
+            self.assertEqual(parse_qs(urlsplit(share.url).query), {"url": [link]})
+
+            trial.return_value = {"enabled": True, "days": 3, "traffic_gb": 10, "device_limit": 1}
+            await press(handlers.bonuses_handler, active_menu(), "menu:bonuses")
+            self.assertIn("menu:trial", [row[0].callback_data for row in active_menu().reply_markup.inline_keyboard])
+            await press(handlers.promo_menu_handler, active_menu(), "menu:promo")
+            await press(handlers.bonuses_handler, active_menu(), "promo:cancel")
+            self.assertIn("<b>Бонусы</b>", active_menu().text)
+
+            async def enter_code(message_id, text):
+                message = telegram_message(message_id, from_user=user, text=text)
+                await middleware(lambda event, _: handlers.menu_text_handler(event), message, {"bot": bot})
+
+            await enter_code(9, "FREE")
+            redeem.assert_not_awaited()
+            await press(handlers.promo_menu_handler, active_menu(), "menu:promo")
+            await enter_code(10, "WRONG")
+            self.assertIn("Попробуйте ещё раз", active_menu().text)
+            self.assertEqual(active_menu().reply_markup.inline_keyboard[0][0].callback_data, "promo:cancel")
+            await enter_code(11, "VALID")
+            self.assertIn("<b>Промокод VALID активирован</b>", active_menu().text)
+            redeem.assert_awaited_with(42, "VALID")
+            self.assertTrue({10, 11} <= set(deleted))

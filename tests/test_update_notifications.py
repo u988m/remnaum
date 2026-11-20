@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from redis.asyncio import Redis
 
 from app.services import release_notifications as notices
+from app.version import RELEASE_REPOSITORY
 from app.web import routes
 
 SECRET = "test-release-webhook-secret"
@@ -26,7 +27,7 @@ RELEASE = {
 }
 EVENT = {
     "action": "published",
-    "repository": {"full_name": notices.RELEASE_REPOSITORY},
+    "repository": {"full_name": RELEASE_REPOSITORY},
     "release": RELEASE,
 }
 
@@ -110,7 +111,10 @@ class ReleaseDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertCountEqual([call.args[0] for call in self.bot.send_message.await_args_list], [23, 42])
         for call in self.bot.send_message.await_args_list:
             self.assertIn("Вышел релиз Remnaum v0.0.9", call.args[1])
-            self.assertTrue(call.kwargs["reply_markup"].inline_keyboard[0][0].url.endswith("/tag/v0.0.9"))
+            links, actions = call.kwargs["reply_markup"].inline_keyboard
+            self.assertTrue(links[0].url.endswith("/tag/v0.0.9"))
+            self.assertEqual((links[1].text, links[1].url), ("Сообщество", "https://t.me/remnaum"))
+            self.assertEqual((actions[0].text, actions[0].callback_data), ("Закрыть", "release:close"))
 
     async def test_retry_keeps_delivery_progress(self):
         async def send(admin_id, *args, **kwargs):

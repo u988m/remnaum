@@ -6,10 +6,11 @@ from aiogram.enums import ParseMode
 from app.config import settings
 from app.services.bot_identity import remember_bot
 from app.bot.handlers import router
+from app.bot.release_notices import router as release_router
 
 bot = Bot(settings.telegram_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML)) if settings.telegram_bot_token else None
 dispatcher = Dispatcher()
-dispatcher.include_router(router)
+dispatcher.include_routers(release_router, router)
 
 async def setup_bot() -> None:
     if bot is not None:
