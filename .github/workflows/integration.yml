@@ -149,7 +149,8 @@ jobs:
           admin = request('/admin')
           assert admin.status == 200
           markup = admin.read().decode()
-          assert 'id="remnaum-version"' in markup
+          assert f'id="remnaum-version">{os.environ["REMNAUM_BUILD_VERSION"]}</dd>' in markup
+          assert 'id="remnaum-github-version"' in markup
           assert '/static/admin.css?v=' in markup
           assert json.load(request('/openapi.json'))['info']['version'] == os.environ['REMNAUM_BUILD_VERSION']
           assert request('/admin/api/release-version').status == 401

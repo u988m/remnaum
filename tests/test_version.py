@@ -16,13 +16,14 @@ from scripts.release_version import BUILD_VERSION, DEV_VERSION, git_version
 
 
 class VersionTests(unittest.IsolatedAsyncioTestCase):
-    async def test_admin_renders_the_release_number_and_refreshes_cached_assets(self):
+    async def test_admin_renders_installed_build_separately_from_github_release(self):
         self.assertEqual(app.version, version.__version__)
         with patch.object(version, "__version__", "1.2.3+g0123456789ab"):
             page = await admin_dashboard_page(Request({"type": "http", "headers": []}))
         html = page.body.decode()
-        self.assertIn('>Релиз Remnaum 1.2.3</p>', html)
-        self.assertNotIn("+g0123456789ab", html)
+        self.assertIn('<dt>Установленная версия</dt><dd id="remnaum-version">1.2.3+g0123456789ab</dd>', html)
+        self.assertIn('<dt>Последний релиз GitHub</dt><dd id="remnaum-github-version"', html)
+        self.assertIn('aria-live="polite">Загружаем…</dd>', html)
         self.assertEqual(page.headers["Cache-Control"], "no-cache")
         for name in ("admin.css", "admin.js"):
             self.assertRegex(html, rf'/static/{name}\?v=[0-9a-f]{{16}}"')
@@ -37,12 +38,16 @@ class VersionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await version.latest_release_version(), "1.2.3")
         client.__aenter__.return_value.get.assert_awaited_once()
 
-    async def test_unavailable_github_falls_back_to_the_release_tag(self):
+    async def test_unavailable_github_uses_only_cached_github_version(self):
         client = AsyncMock()
         client.__aenter__.return_value.get.side_effect = httpx.ConnectError("offline")
         with patch.object(version, "__version__", "1.2.3+g0123456789ab"), patch.object(version, "_release", None), \
              patch.object(version, "_release_expires_at", 0), patch.object(version.httpx, "AsyncClient", return_value=client):
-            self.assertEqual(await version.latest_release_version(), "1.2.3")
+            self.assertIsNone(await version.latest_release_version())
+            version._release = "1.2.4"
+            version._release_expires_at = 0
+            self.assertEqual(await version.latest_release_version(), "1.2.4")
+            self.assertEqual(version.installed_version(), "1.2.3+g0123456789ab")
 
     def test_container_metadata_takes_precedence_over_git(self):
         with patch.dict(os.environ, {BUILD_VERSION: "1.2.3+g0123456789ab"}):

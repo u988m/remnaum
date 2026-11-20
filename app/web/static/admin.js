@@ -154,12 +154,23 @@ function renderPanel(data) {
   }
 }
 
+async function loadGithubRelease() {
+  const release = $("remnaum-github-version");
+  try {
+    const {version} = await api("/admin/api/release-version");
+    release.textContent = version || "Недоступен";
+  } catch {
+    release.textContent = "Недоступен";
+  }
+}
+
 async function overview() {
   const refresh = $("overview-refresh");
   if (refresh.disabled) return;
   refresh.disabled = true;
   try {
     await Promise.all([
+      loadGithubRelease(),
       api("/admin/api/overview").then(renderOverview).catch(error => {
         $("status").textContent = error.message;
       }),
@@ -1453,9 +1464,6 @@ async function start() {
     $("dashboard").hidden = false;
     adminMenuOpen.hidden = false;
     document.querySelector(".admin-return-link").href = "/" + location.hash;
-    api("/admin/api/release-version").then(({version}) => {
-      if (version) $("remnaum-version").textContent = "Релиз Remnaum " + version;
-    }).catch(() => {});
     const params = new URLSearchParams(location.search);
     const tab = canonicalTab(params.get("tab"));
     const record = tab === "tickets" ? ticketId(params.get("ticket")) : null;
