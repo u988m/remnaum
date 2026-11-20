@@ -20,6 +20,7 @@ from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 import terminal_ui as ui
 import backup_manager as backups
+from release_version import BUILD_VERSION, git_version
 from remnawave_setup import (
     local_panel_for_url, panel_webhook_secret, apply_local_panel_webhook,
     discover_local_panel, read_panel_env, public_webhook_ready,
@@ -1077,6 +1078,7 @@ def main() -> int:
     else:
         print("\nStandalone mode: Remnaum Caddy will own 80/443; Nginx stays private.")
 
+    os.environ[BUILD_VERSION] = git_version(ROOT)
     ui.section(4, 5, "Сборка и запуск Docker")
     run(["docker", "compose", "config", "--quiet"])
     ensure_install_postgres_connection(cfg)

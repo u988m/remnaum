@@ -69,12 +69,12 @@ trap 'rm -rf "$TEMP"' EXIT INT TERM
 OWNER=${SUDO_USER:-root}
 if [ "$OWNER" != root ] && id "$OWNER" >/dev/null 2>&1; then
   chown "$OWNER" "$TEMP"
-  runuser -u "$OWNER" -- git clone --depth 1 https://github.com/u988m/remnaum.git "$TEMP/project" || {
+  runuser -u "$OWNER" -- git clone https://github.com/u988m/remnaum.git "$TEMP/project" || {
     echo "GitHub не дал скачать проект. Проверьте доступ к репозиторию." >&2
     exit 1
   }
 else
-  git clone --depth 1 https://github.com/u988m/remnaum.git "$TEMP/project" || exit 1
+  git clone https://github.com/u988m/remnaum.git "$TEMP/project" || exit 1
 fi
 mkdir -p "$(dirname "$DEST")"
 if [ -d "$DEST" ]; then

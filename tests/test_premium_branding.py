@@ -109,6 +109,21 @@ class BotWelcomeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(button.text.endswith("… · 499 ₽"))
         self.assertEqual(button.callback_data, "plan:select:4")
 
+    async def test_bot_uses_its_own_guide_and_escapes_admin_text(self):
+        from app.bot.handlers import connection_help_handler
+
+        callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
+        profile = {"connection_instructions": "Инструкция Mini App", "bot_connection_instructions": "<Первая>\nВторая"}
+        with patch("app.bot.handlers.get_store_profile", return_value=profile), \
+             patch("app.bot.handlers.welcome_image_path", return_value=None):
+            await connection_help_handler(callback)
+            text = callback.message.edit_text.await_args.args[0]
+            self.assertIn("&lt;Первая&gt;\nВторая", text)
+            self.assertNotIn(profile["connection_instructions"], text)
+            profile["bot_connection_instructions"] = ""
+            await connection_help_handler(callback)
+            self.assertIn("Установите приложение-клиент", callback.message.edit_text.await_args.args[0])
+
     async def test_welcome_caption_fits_with_emoji(self):
         from html import unescape
         from app.bot.handlers import send_home_menu

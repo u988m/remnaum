@@ -16,7 +16,7 @@
 <div id="dashboard" hidden>
 <button type="button" class="admin-menu-backdrop" id="admin-menu-backdrop" aria-label="Закрыть меню" hidden></button>
 <aside class="admin-sidebar" id="admin-sidebar" aria-label="Навигация админки">
-<div class="sidebar-heading"><span>Управление</span><a class="admin-return-link" href="/app"><svg aria-hidden="true"><use href="#ai-home"/></svg>Магазин</a><button type="button" id="admin-menu-close" aria-label="Закрыть меню">✕</button></div>
+<div class="sidebar-heading"><span>Управление</span><a class="admin-return-link" href="/?section=account" aria-label="Магазин" title="Магазин"><svg aria-hidden="true"><use href="#ai-home"/></svg></a><button type="button" id="admin-menu-close" aria-label="Закрыть меню">✕</button></div>
 <nav class="admin-tabs" aria-label="Разделы управления">
   <p class="sidebar-category">Магазин</p>
   <button aria-current="page" data-tab="overview" type="button">Обзор</button>
@@ -36,7 +36,7 @@
 <div class="admin-workspace">
 <section id="overview-view" class="dashboard-view">
   <div class="dashboard-heading">
-    <h1>Обзор</h1>
+    <div><h1>Обзор</h1><p class="muted" id="remnaum-version">Remnaum __REMNAUM_VERSION__</p></div>
     <button class="action admin-icon-action" id="overview-refresh" type="button" aria-label="Обновить обзор"><svg aria-hidden="true"><use href="#ai-refresh"/></svg></button>
   </div>
   <div class="overview-metrics">
@@ -466,7 +466,11 @@
 <label>Название<input id="brand-name" maxlength="80" required></label>
 <label>Текст на главной<textarea id="brand-tagline" maxlength="300" rows="2" placeholder="Оставьте пустым, чтобы скрыть"></textarea></label>
 <label>Вступление в каталоге<input id="brand-description" maxlength="300"></label>
-<label>Инструкция подключения<textarea id="brand-guide" rows="4" maxlength="1600" placeholder="Пустое поле использует стандартную инструкцию"></textarea></label>
+<fieldset class="editor-group">
+<legend>Инструкции подключения</legend>
+<label>В Mini App<textarea id="brand-guide" rows="4" maxlength="1600" placeholder="Стандартная инструкция Mini App"></textarea></label>
+<label>В меню бота<textarea id="brand-bot-guide" rows="4" maxlength="1600" placeholder="Стандартная инструкция бота"></textarea></label>
+</fieldset>
 <label>Ссылка на условия продажи (HTTPS)<input id="brand-terms" type="url" maxlength="300" placeholder="https://..."><small>Если указать ссылку, покупатель увидит условия перед оплатой.</small></label>
 <button type="submit" class="action primary">Сохранить оформление</button>
 </form>

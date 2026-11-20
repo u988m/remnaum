@@ -14,8 +14,11 @@ jobs:
         mode: [standalone, panel, panel-network]
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: Prepare isolated topology
         run: |
+          echo "REMNAUM_BUILD_VERSION=$(python3 scripts/release_version.py)" >> "$GITHUB_ENV"
           cp .env.example .env
           # Replace the documented placeholder before starting production-mode containers.
           sed -i 's|^APP_SECRET_KEY=.*|APP_SECRET_KEY=integration-test-only-secret-do-not-use-in-production-123456|' .env
@@ -113,6 +116,7 @@ jobs:
             test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc "SELECT COUNT(*) FROM $table;")" = "0"
           done
           docker compose exec -T app python - <<'PY'
+          import os
           import urllib.error
           import urllib.request
           base = 'http://127.0.0.1:8080'
@@ -132,7 +136,9 @@ jobs:
           assert request('/auth', host='web.example.com').status == 200
           assert request('/', host='webhook.example.com').status == 404
           assert request('/app').status == 200
-          assert request('/admin').status == 200
+          admin = request('/admin')
+          assert admin.status == 200
+          assert f'Remnaum {os.environ["REMNAUM_BUILD_VERSION"]}' in admin.read().decode()
           assert request('/api/v1/store-profile/welcome-image').status == 404
           assert request('/static/miniapp.js').status == 200
           assert request('/static/miniapp.css').status == 200

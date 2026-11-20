@@ -678,6 +678,7 @@ async function loadBrand(){
   fillPalette(d.theme_colors || {});
   $("brand-preview-name").textContent = d.name;
   $("brand-guide").value = d.connection_instructions || "";
+  $("brand-bot-guide").value = d.bot_connection_instructions || "";
   $("brand-terms").value = d.terms_url || "";
   renderStoreMark(d.name, d.logo_image_url);
   renderImage("brand-photo", d.welcome_image_url);
@@ -691,6 +692,7 @@ $("brand-form").onsubmit=async e=>{
     await adminApi("PUT","/admin/api/store-profile",{
       name:$("brand-name").value,tagline:$("brand-tagline").value,
       description:$("brand-description").value,connection_instructions:$("brand-guide").value,
+      bot_connection_instructions:$("brand-bot-guide").value,
       terms_url:$("brand-terms").value
     });$("admin-shop-name").textContent=$("brand-name").value;$("status").textContent="Оформление сохранено";
   }catch(e){$("status").textContent=e.message}

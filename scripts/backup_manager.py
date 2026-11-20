@@ -31,6 +31,8 @@ from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from release_version import BUILD_VERSION, git_version
+
 ROOT = Path(__file__).resolve().parents[1]
 BACKUPS = ROOT / "backups"
 DATA = ROOT / "data"
@@ -604,7 +606,7 @@ def restore_backup(archive: Path, *, supplied_key: str | None = None, target_roo
                 ], cwd=target, check=True, capture_output=True, timeout=120)
                 prepare_branding_directory(target)
                 subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=target,
-                               check=True, timeout=360)
+                               env=os.environ | {BUILD_VERSION: git_version(target)}, check=True, timeout=360)
                 for _ in range(40):
                     health = subprocess.run([
                         "docker", "compose", "exec", "-T", "app", "python", "-c",
