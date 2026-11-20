@@ -116,6 +116,7 @@ jobs:
             test "$(docker compose exec -T postgres psql -U remnaum -d remnaum -Atc "SELECT COUNT(*) FROM $table;")" = "0"
           done
           docker compose exec -T app python - <<'PY'
+          import json
           import os
           import urllib.error
           import urllib.request
@@ -138,7 +139,11 @@ jobs:
           assert request('/app').status == 200
           admin = request('/admin')
           assert admin.status == 200
-          assert f'Remnaum {os.environ["REMNAUM_BUILD_VERSION"]}' in admin.read().decode()
+          markup = admin.read().decode()
+          assert 'id="remnaum-version"' in markup
+          assert '/static/admin.css?v=' in markup
+          assert json.load(request('/openapi.json'))['info']['version'] == os.environ['REMNAUM_BUILD_VERSION']
+          assert request('/admin/api/release-version').status == 401
           assert request('/api/v1/store-profile/welcome-image').status == 404
           assert request('/static/miniapp.js').status == 200
           assert request('/static/miniapp.css').status == 200

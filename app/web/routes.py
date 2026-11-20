@@ -2,6 +2,7 @@ import asyncio
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from hashlib import blake2s
 import json
 import logging
 
@@ -17,7 +18,7 @@ from aiogram.exceptions import TelegramAPIError
 
 from app.bot.runtime import bot, dispatcher
 from app.config import settings
-from app.version import __version__
+from app.version import installed_release_version, latest_release_version
 from app.db.models import Payment, Subscription, TariffPlan, User
 from app.db.session import SessionLocal
 from app.services.payment_providers import get_provider
@@ -439,8 +440,20 @@ async def admin_save_notifications(data: NotificationSettings, x_telegram_init_d
 
 @router.get("/admin", response_class=HTMLResponse)
 async def admin_dashboard_page():
-    html = (Path(__file__).parent / "templates" / "admin.html").read_text(encoding="utf-8")
-    return HTMLResponse(html.replace("__REMNAUM_VERSION__", escape(__version__)))
+    web_dir = Path(__file__).parent
+    html = (web_dir / "templates" / "admin.html").read_text(encoding="utf-8")
+    for asset in ("admin.css", "admin.js"):
+        revision = blake2s((web_dir / "static" / asset).read_bytes(), digest_size=8).hexdigest()
+        html = html.replace(f'/static/{asset}"', f'/static/{asset}?v={revision}"')
+    version = installed_release_version()
+    label = f"Релиз Remnaum {version}" if version else "Версия релиза Remnaum"
+    return HTMLResponse(html.replace("__REMNAUM_RELEASE__", escape(label)), headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/admin/api/release-version")
+async def admin_release_version(x_telegram_init_data: str | dict | None = Depends(web_credentials)):
+    await _require_telegram_admin(x_telegram_init_data)
+    return {"version": await latest_release_version()}
 
 
 @router.get("/admin/api/overview")

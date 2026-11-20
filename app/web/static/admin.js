@@ -1343,7 +1343,7 @@ function goAdminBack(fallback = null) {
   else if (parent) openTab(parent, {replace: true});
   else if (fromProfile) {
     if (document.referrer && ["/", "/app"].includes(new URL(document.referrer).pathname)) history.back();
-    else location.assign(document.querySelector(".admin-return-link").href);
+    else location.assign("/?section=account" + location.hash);
   }
 }
 
@@ -1370,7 +1370,10 @@ async function start() {
     $("loading").hidden = true;
     $("dashboard").hidden = false;
     adminMenuOpen.hidden = false;
-    document.querySelector(".admin-return-link").href = "/?section=account" + location.hash;
+    document.querySelector(".admin-return-link").href = "/" + location.hash;
+    api("/admin/api/release-version").then(({version}) => {
+      if (version) $("remnaum-version").textContent = "Релиз Remnaum " + version;
+    }).catch(() => {});
     const params = new URLSearchParams(location.search);
     const tab = canonicalTab(params.get("tab"));
     const record = tab === "tickets" ? ticketId(params.get("ticket")) : null;
