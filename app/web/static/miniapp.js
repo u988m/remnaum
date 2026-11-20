@@ -694,24 +694,27 @@ async function loadReadyPlans() {
         description.textContent = plan.description;
         item.append(description);
       }
+      const hasRublePrice = plan.price_rub_minor > 0;
+      const starsAvailable = (!methods || methods.telegram_stars) && plan.price_stars > 0;
       const prices = [];
-      if (rublesAvailable && plan.price_rub_minor > 0) prices.push(money(plan.price_rub_minor));
-      if ((!methods || methods.telegram_stars) && plan.price_stars > 0) {
-        prices.push(providerAmount("telegram_stars", plan.price_stars));
+      if (hasRublePrice) prices.push(money(plan.price_rub_minor));
+      if (starsAvailable) {
+        const stars = providerAmount("telegram_stars", plan.price_stars);
+        prices.push(hasRublePrice && !rublesAvailable ? "Оплата " + stars : stars);
       }
       const total = document.createElement("span");
       total.className = "plan-total";
-      if (!prices.length) {
-        const notice = document.createElement("span");
-        notice.textContent = "Оплата недоступна";
-        total.append(notice);
-      }
       prices.forEach((amount, index) => {
         const price = document.createElement(index ? "span" : "strong");
         if (!index) price.className = "plan-price";
         price.textContent = amount;
         total.append(price);
       });
+      if (!(hasRublePrice && rublesAvailable) && !starsAvailable) {
+        const notice = document.createElement("span");
+        notice.textContent = "Оплата недоступна";
+        total.append(notice);
+      }
       const arrow = document.createElement("span");
       arrow.textContent = "→";
       arrow.setAttribute("aria-hidden", "true");
