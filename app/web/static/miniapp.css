@@ -108,6 +108,7 @@ main {
 .steps li + li { margin-top: 10px; }
 .loading { color: var(--color-muted); padding: 18px 0; }
 .svg-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.cabinet-brand { display: none; }
 .bottom-nav {
     position: fixed;
     z-index: 10;

@@ -1,3 +1,4 @@
+from starlette.requests import Request
 import re
 import shutil
 import subprocess
@@ -16,8 +17,8 @@ STATIC = Path(__file__).resolve().parents[1] / "app" / "web" / "static"
 
 class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_admin_scripts_do_not_break_miniapp(self):
-        mini = (await mini_app_page()).body.decode()
-        admin = (await admin_dashboard_page()).body.decode()
+        mini = (await mini_app_page(Request({"type": "http", "headers": []}))).body.decode()
+        admin = (await admin_dashboard_page(Request({"type": "http", "headers": []}))).body.decode()
         mini_js = (STATIC / "miniapp.js").read_text(encoding="utf-8")
         admin_js = (STATIC / "admin.js").read_text(encoding="utf-8")
         self.assertIn('loadReadyPlans()', mini_js)
@@ -76,7 +77,7 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('id="referral-form"', admin)
         self.assertIn('async function loadReferrals()', admin_js)
         self.assertIn('id="brand-terms"', admin)
-        self.assertIn('href="/static/miniapp.css"', mini)
+        self.assertIn('href="/static/miniapp.css?v=', mini)
         self.assertIn('src="/static/admin.js?v=', admin)
         self.assertRegex(admin, r'<div class="sidebar-actions">\s*<a[^>]+href="/"[^>]*aria-label="Магазин"')
         self.assertIn("telegram-web-app.js", admin)
@@ -98,7 +99,7 @@ class FrontendRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('id="copy-referral"', mini)
 
     async def test_miniapp_javascript_has_no_missing_static_dom_ids(self):
-        mini = (await mini_app_page()).body.decode()
+        mini = (await mini_app_page(Request({"type": "http", "headers": []}))).body.decode()
         js = (STATIC / "miniapp.js").read_text(encoding="utf-8")
         html_ids = set(re.findall(r'id="([^"]+)"', mini))
         js_ids = set(re.findall(r'\\$\\("([^"]+)"\\)', js))

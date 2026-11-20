@@ -9,7 +9,8 @@
 <link rel="stylesheet" href="/store-theme.css" id="store-theme">
 <link rel="stylesheet" href="/static/miniapp.css">
 </head>
-<body>
+<body data-surface="__CUSTOMER_SURFACE__">
+<div class="customer-shell">
 <main>
   <header class="topbar" hidden>
     <button class="icon-button" id="shop-back" type="button" aria-label="Назад" hidden><svg aria-hidden="true"><use href="#i-back"/></svg></button>
@@ -54,6 +55,7 @@
         </section>
         <section class="panel empty-state" id="no-subscription">
           <h2>Подписки пока нет</h2><p class="muted">После оплаты здесь появится ссылка подключения.</p>
+          <button class="primary-btn full" type="button" data-go-page="shop">Выбрать тариф</button>
         </section>
 
       </div>
@@ -90,9 +92,9 @@
         <span><strong>Обращения</strong><small>Создать тикет или посмотреть ответы</small></span>
         <span aria-hidden="true">›</span>
       </button>
-      <section class="panel support-contact" id="account-support">
+      <section class="panel support-contact" id="account-support" hidden>
         <h2>Написать напрямую</h2>
-        <p class="muted" id="support-text">Контакт поддержки пока не указан.</p>
+        <p class="muted" id="support-text"></p>
         <a class="secondary-btn full" id="support-link" target="_blank" rel="noopener noreferrer" hidden>Написать в Telegram</a>
       </section>
     </section>
@@ -187,7 +189,7 @@
         <p class="status" id="promo-status" role="status"></p>
       </section>
       <section class="panel" id="trial-offer" hidden>
-        <h2>Пробный доступ</h2>
+        <h2><span aria-hidden="true">🧪</span> Пробный доступ</h2>
         <p class="muted" id="trial-copy"></p>
         <button id="trial-claim" type="button" class="primary-btn full">Получить доступ</button>
         <p class="status" id="trial-status" role="status"></p>
@@ -240,11 +242,13 @@
   </div>
 </main>
 <nav class="bottom-nav" id="bottom-nav" aria-label="Разделы магазина" hidden>
+  <div class="cabinet-brand"><span class="brand-logo"><span id="cabinet-mark" aria-hidden="true">R</span><img id="cabinet-logo" alt="" hidden></span><strong id="cabinet-name">Remnaum</strong></div>
   <button type="button" data-page="vpn" aria-current="page"><svg aria-hidden="true"><use href="#i-home"/></svg><span>Главная</span></button>
   <button type="button" data-page="bonuses"><svg aria-hidden="true"><use href="#i-gift"/></svg><span>Бонусы</span></button>
   <button type="button" data-page="devices"><svg aria-hidden="true"><use href="#i-device"/></svg><span>Устройства</span></button>
   <button type="button" data-page="account"><svg aria-hidden="true"><use href="#i-user"/></svg><span>Профиль</span></button>
 </nav>
+</div>
 <dialog class="device-dialog" id="device-editor" aria-labelledby="device-editor-title">
   <form id="device-form">
     <h2 id="device-editor-title"></h2>

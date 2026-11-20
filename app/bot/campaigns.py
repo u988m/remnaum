@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.bot.handlers import _menu_caption, home_text, main_menu
 from app.bot.membership import membership_required, send_subscription_prompt
+from app.bot.notifications import with_close
 from app.bot.menu import menu_session, redis, remember_menu
 from app.db.models import User
 from app.db.session import SessionLocal
@@ -55,7 +56,7 @@ async def run_campaign(bot, admin_id, text, lock):
                         if text is None:
                             await refresh_menu(bot, telegram_id, profile, keyboard, policy)
                         else:
-                            await bot.send_message(telegram_id, text, parse_mode=None)
+                            await bot.send_message(telegram_id, text, parse_mode=None, reply_markup=with_close())
                     except TelegramRetryAfter as exc:
                         await asyncio.sleep(exc.retry_after)
                         await lock.reacquire()
@@ -79,7 +80,7 @@ async def run_campaign(bot, admin_id, text, lock):
             await bot.send_message(admin_id, (
                 f"Рассылка завершена. Доставлено: {counts['sent']}. "
                 f"Новые блокировки: {counts['blocked']}. Ошибки: {counts['failed']}."
-            ))
+            ), reply_markup=with_close())
         except TelegramAPIError:
             logger.info("Could not send Telegram campaign summary")
         await lock.release()

@@ -10,6 +10,8 @@ from aiogram.types import ChatMemberUpdated, CallbackQuery, CopyTextButton, Inli
 
 from redis.exceptions import LockError
 
+from app.bot.buttons import button
+from app.bot.notifications import with_close
 from app.bot.membership import SUBSCRIBE_TEXT, active_member, membership_required, send_subscription_prompt
 from app.bot.menu import MenuMiddleware, current_menu, menu_session, remember_menu, remember_start_command, remove_command
 from app.config import settings
@@ -59,22 +61,22 @@ def main_menu(*, has_documents: bool = False) -> InlineKeyboardMarkup:
     rows = []
     has_webapp = settings.webapp_root_url.startswith("https://")
     if has_webapp:
-        rows.append([InlineKeyboardButton(text="✨ Mini App", web_app=WebAppInfo(url=settings.webapp_root_url))])
+        rows.append([button("miniapp",  web_app=WebAppInfo(url=settings.webapp_root_url))])
     rows.extend([
-        [InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile"),
-         InlineKeyboardButton(text="🔐 Подписка", callback_data="menu:subscription")],
-        [InlineKeyboardButton(text="🛒 Тарифы", callback_data="menu:plans"),
-         InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses")],
-        [InlineKeyboardButton(text="🧾 Покупки", callback_data="menu:purchases"),
-         InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support")],
+        [button("profile",  callback_data="menu:profile"),
+         button("subscription",  callback_data="menu:subscription")],
+        [button("plans",  callback_data="menu:plans"),
+         button("bonuses",  callback_data="menu:bonuses")],
+        [button("purchases",  callback_data="menu:purchases"),
+         button("support",  callback_data="menu:support")],
     ])
     if has_documents:
-        rows.append([InlineKeyboardButton(text="ℹ️ Информация", callback_data="menu:information")])
+        rows.append([button("information",  callback_data="menu:information")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def back_menu(destination: str = "menu:home") -> InlineKeyboardMarkup:
-    label = "← Меню" if destination == "menu:home" else "← Назад"
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=label, callback_data=destination)]])
+    key = "home" if destination == "menu:home" else "back"
+    return InlineKeyboardMarkup(inline_keyboard=[[button(key, callback_data=destination)]])
 
 
 SUBSCRIPTION_STATUS = {
@@ -198,7 +200,7 @@ async def information_handler(callback: CallbackQuery) -> None:
         return
     kinds = await list_document_kinds()
     rows = [
-        [InlineKeyboardButton(text=title, callback_data=f"document:{kind}:0")]
+        [button(f"document_{kind}", title, callback_data=f"document:{kind}:0")]
         for kind, title in DOCUMENT_TITLES.items() if kind in kinds
     ]
     text = "ℹ️ <b>Информация</b>" if rows else "Документы пока не опубликованы."
@@ -239,9 +241,9 @@ async def document_handler(callback: CallbackQuery) -> None:
         text += f"\n\nСтраница {page + 1} из {len(pages)}"
         navigation = []
         if page > 0:
-            navigation.append(InlineKeyboardButton(text="‹ Предыдущая", callback_data=f"document:{kind}:{page - 1}"))
+            navigation.append(button("previous",  callback_data=f"document:{kind}:{page - 1}"))
         if page + 1 < len(pages):
-            navigation.append(InlineKeyboardButton(text="Следующая ›", callback_data=f"document:{kind}:{page + 1}"))
+            navigation.append(button("next", "Следующая ›",  callback_data=f"document:{kind}:{page + 1}"))
         keyboard.inline_keyboard.insert(0, navigation)
     await edit_menu_message(callback.message, text, reply_markup=keyboard, with_photo=False)
 
@@ -266,11 +268,11 @@ async def bonuses_handler(callback: CallbackQuery) -> None:
     else:
         lines.append("Бонусных дней пока нет.")
     rows = [
-        [InlineKeyboardButton(text="🤝 Пригласить друга", callback_data="menu:referral")],
-        [InlineKeyboardButton(text="🎟 Ввести промокод", callback_data="menu:promo")],
+        [button("invite",  callback_data="menu:referral")],
+        [button("promo",  callback_data="menu:promo")],
     ]
     if (await get_trial_settings())["enabled"]:
-        rows.append([InlineKeyboardButton(text="✨ Пробный доступ", callback_data="menu:trial")])
+        rows.append([button("trial",  callback_data="menu:trial")])
     rows.extend(back_menu().inline_keyboard)
     await edit_menu_message(
         callback.message, "\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
@@ -287,11 +289,11 @@ async def plans_handler(callback: CallbackQuery) -> None:
         if len(title) > 20:
             title = title[:19].rstrip() + "…"
         price = f"{plan['price_rub']:g} ₽" if plan["price_rub_minor"] else f"{plan['price_stars']} ⭐"
-        rows.append([InlineKeyboardButton(
-            text=f"{title} · {price}",
+        rows.append([button(
+            "plan_item", f"{title} · {price}",
             callback_data=f"plan:select:{plan['id']}",
         )])
-    rows.append([InlineKeyboardButton(text="← Меню", callback_data="menu:home")])
+    rows.append([button("home",  callback_data="menu:home")])
     if callback.message:
         await edit_menu_message(callback.message, 
             "📦 <b>Выберите тариф</b>\n\n"
@@ -322,17 +324,17 @@ async def fixed_plan_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     controls = []
     if extra_devices:
-        controls.append(InlineKeyboardButton(text="− Устройство", callback_data=f"plan:select:{plan_id}:{extra_devices - 1}{suffix}"))
+        controls.append(button("device_minus", "Устройство",  callback_data=f"plan:select:{plan_id}:{extra_devices - 1}{suffix}"))
     if extra_devices < max_extra_devices(plan, slots):
-        controls.append(InlineKeyboardButton(text="+ Устройство", callback_data=f"plan:select:{plan_id}:{extra_devices + 1}{suffix}"))
+        controls.append(button("device_plus", "Устройство",  callback_data=f"plan:select:{plan_id}:{extra_devices + 1}{suffix}"))
     price = f"{quote.amount_minor / 100:.2f} ₽" if quote.amount_minor else ""
     if quote.stars is not None:
         price = " / ".join(filter(None, (price, f"{quote.stars} ⭐")))
     key = f"{plan_id}:{extra_devices}:{plan_revision(plan)}{suffix}"
     rows = [controls] if controls else []
     rows.extend([
-        [InlineKeyboardButton(text="💳 Выбрать оплату", callback_data=f"plan:confirm:{key}")],
-        [InlineKeyboardButton(text="← Назад", callback_data="menu:subscription" if renewal else "menu:plans")],
+        [button("checkout",  callback_data=f"plan:confirm:{key}")],
+        [button("back",  callback_data="menu:subscription" if renewal else "menu:plans")],
     ])
     if callback.message:
         details = [_plan_summary(quote)]
@@ -378,8 +380,8 @@ async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
     rows = []
     if not accepted:
         rows.extend([
-            [InlineKeyboardButton(text="📄 Условия продажи", url=terms)],
-            [InlineKeyboardButton(text="✅ Принимаю", callback_data=f"plan:accept:{key}")],
+            [button("terms",  url=terms)],
+            [button("accept_terms",  callback_data=f"plan:accept:{key}")],
         ])
         text = "Перед оплатой примите условия продажи."
     elif action.startswith("pay:"):
@@ -398,13 +400,13 @@ async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
                 continue
             if provider == "telegram_stars":
                 if quote.stars is not None:
-                    rows.append([InlineKeyboardButton(text=f"⭐ {label} · {quote.stars}", callback_data=f"plan:pay:stars:{key}")])
+                    rows.append([button("payment_stars", f"{label} · {quote.stars}", callback_data=f"plan:pay:stars:{key}")])
             elif quote.amount_minor > 0:
-                rows.append([InlineKeyboardButton(
-                    text=f"💳 {label} · {quote.amount_minor / 100:.2f} ₽", callback_data=f"plan:pay:{provider}:{key}",
+                rows.append([button(
+                    f"payment_{provider}", f"{label} · {quote.amount_minor / 100:.2f} ₽", callback_data=f"plan:pay:{provider}:{key}",
                 )])
         text = "Выберите способ оплаты." if rows else "Для этого заказа нет доступных способов оплаты."
-    rows.append([InlineKeyboardButton(text="← Назад", callback_data=f"plan:select:{plan_id}:{extras}{suffix}")])
+    rows.append([button("back",  callback_data=f"plan:select:{plan_id}:{extras}{suffix}")])
     await edit_menu_message(callback.message, f"{_plan_summary(quote)}\n\n{text}",
                             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
@@ -426,7 +428,7 @@ def payment_back_button(order: dict, *, renewal: bool = False) -> InlineKeyboard
     if order.get("revision") is None:
         return back_menu().inline_keyboard[0][0]
     key = f"{order['plan_id']}:{order['extra_devices']}:{order['revision']}"
-    return InlineKeyboardButton(text="← Назад", callback_data=f"plan:confirm:{key}" + (":r" if renewal else ""))
+    return button("back",  callback_data=f"plan:confirm:{key}" + (":r" if renewal else ""))
 
 
 async def send_external_invoice(message: Message, telegram_id: int, name: str, *, renewal: bool = False, **order) -> None:
@@ -444,7 +446,7 @@ async def send_external_invoice(message: Message, telegram_id: int, name: str, *
     await edit_menu_message(
         message, f"<b>Заказ №{payment.id}</b>\n{PROVIDER_LABELS[name]} · {payment.amount / 100:.2f} ₽",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Оплатить", url=link.url)], [back],
+            [button("pay",  url=link.url)], [back],
         ]),
     )
 
@@ -460,7 +462,7 @@ async def send_stars_invoice(message: Message, telegram_id: int, *, renewal: boo
         await edit_menu_message(message, escape(str(exc)), reply_markup=reply_markup)
         return
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Оплатить ⭐", pay=True)], [back],
+        [button("pay_stars",  pay=True)], [back],
     ])
     try:
         profile = await get_store_profile()
@@ -506,7 +508,7 @@ async def stars_pre_checkout_handler(query: PreCheckoutQuery) -> None:
 
 async def show_payment_result(bot, chat_id: int, text: str) -> None:
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔐 Подписка", callback_data="menu:subscription")],
+        [button("subscription",  callback_data="menu:subscription")],
         back_menu().inline_keyboard[0],
     ])
     async with menu_session(bot, chat_id, wait=3) as menu:
@@ -549,9 +551,8 @@ async def terms_handler(message: Message) -> None:
 
 @router.message(Command("paysupport"))
 async def payment_support_handler(message: Message) -> None:
-    profile = await get_store_profile()
-    support = escape(profile["support_contact"]) if profile["support_contact"] else "Контакт поддержки ещё не настроен."
-    await show_command_section(message, f"<b>Поддержка по оплате</b>\n{support}", back_menu())
+    text, keyboard = await support_menu("Поддержка по оплате")
+    await show_command_section(message, text, keyboard)
 
 
 async def _promo_entry(telegram_id: int, *, error: str = "") -> tuple[str, InlineKeyboardMarkup]:
@@ -565,7 +566,7 @@ async def _promo_entry(telegram_id: int, *, error: str = "") -> tuple[str, Inlin
     if error:
         text += f"\n\n{escape(error)} Попробуйте ещё раз."
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Отмена", callback_data=PROMO_CANCEL),
+        button("cancel",  callback_data=PROMO_CANCEL),
     ]])
     return text, keyboard
 
@@ -582,7 +583,7 @@ async def _activate_promo(message: Message, telegram_id: int, code: str) -> None
             "Они добавятся к следующей оплаченной подписке."
         )
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🎟 Ввести ещё код", callback_data="menu:promo")],
+            [button("promo_again",  callback_data="menu:promo")],
             *back_menu("menu:bonuses").inline_keyboard,
         ])
     await show_command_section(message, text, keyboard)
@@ -630,9 +631,9 @@ async def trial_menu_handler(callback: CallbackQuery) -> None:
         details = "Пробный доступ можно активировать один раз до первой подписки."
     else:
         details = f"{_trial_details(config)}\n\nМожно активировать один раз до первой подписки."
-        rows.insert(0, [InlineKeyboardButton(text="✨ Активировать", callback_data="trial:claim")])
+        rows.insert(0, [button("trial_activate", "Активировать",  callback_data="trial:claim")])
     await edit_menu_message(
-        callback.message, f"✨ <b>Пробный доступ</b>\n\n{details}",
+        callback.message, f"🧪 <b>Пробный доступ</b>\n\n{details}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
@@ -647,14 +648,14 @@ async def trial_claim_handler(callback: CallbackQuery) -> None:
         result = await claim_trial(callback.from_user.id)
     except Exception as exc:
         logger.warning("Could not activate trial access (%s)", type(exc).__name__)
-        text = "✨ <b>Пробный доступ</b>\n\nСейчас активировать доступ не удалось."
+        text = "🧪 <b>Пробный доступ</b>\n\nСейчас активировать доступ не удалось."
     else:
-        text = f"✅ <b>Пробный доступ активирован</b>\n\n{_trial_details(result)}"
+        text = f"🧪 <b>Пробный доступ активирован</b>\n\n{_trial_details(result)}"
         link = result.get("subscription_url")
         if isinstance(link, str) and link.startswith("https://"):
-            rows.insert(0, [InlineKeyboardButton(text="🔗 Подключить VPN", url=link)])
+            rows.insert(0, [button("connect",  url=link)])
     await edit_menu_message(
-        callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        callback.message, text, reply_markup=with_close(InlineKeyboardMarkup(inline_keyboard=rows), tracked=True),
     )
 
 
@@ -683,8 +684,8 @@ async def subscription_handler(callback: CallbackQuery) -> None:
         pass
     subscription = await get_user_subscription(callback.from_user.id)
     rows = [
-        [InlineKeyboardButton(text="📱 Устройства", callback_data="menu:devices")],
-        [InlineKeyboardButton(text="📖 Инструкция", callback_data="menu:connect")],
+        [button("devices",  callback_data="menu:devices")],
+        [button("instructions",  callback_data="menu:connect")],
         back_menu().inline_keyboard[0],
     ]
     if subscription is None:
@@ -710,11 +711,10 @@ async def subscription_handler(callback: CallbackQuery) -> None:
             extras = max(0, (subscription.get("device_limit") or plan.device_limit) - plan.device_limit)
             slots = (await get_operations())["extra_devices_max"]
             extras = min(extras, max_extra_devices(plan, slots))
-            rows.insert(0, [InlineKeyboardButton(
-                text="🔄 Продлить", callback_data=f"plan:select:{plan.id}:{extras}:r",
+            rows.insert(0, [button("renew",  callback_data=f"plan:select:{plan.id}:{extras}:r",
             )])
     if isinstance(url, str) and url.startswith("https://"):
-        rows.insert(0, [InlineKeyboardButton(text="🔗 Подключить VPN", url=url)])
+        rows.insert(0, [button("connect",  url=url)])
     await edit_menu_message(callback.message, details, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
@@ -739,10 +739,9 @@ async def connection_help_handler(callback: CallbackQuery) -> None:
     )
 
 
-async def support_menu() -> tuple[str, InlineKeyboardMarkup]:
+async def support_menu(title: str = "Поддержка") -> tuple[str, InlineKeyboardMarkup]:
     profile = await get_store_profile()
     contact = str(profile.get("support_contact") or "").strip()
-    support = escape(contact) if contact else "Связь с поддержкой пока не настроена."
     button_url = None
     if contact.startswith("@") and len(contact) > 1 and contact[1:].replace("_", "").isalnum():
         button_url = "https://t.me/" + contact[1:]
@@ -754,15 +753,19 @@ async def support_menu() -> tuple[str, InlineKeyboardMarkup]:
         except ValueError:
             pass
     rows = []
-    if urlsplit(settings.webapp_root_url).scheme == "https":
-        url = urlsplit(settings.webapp_root_url)._replace(query="section=tickets").geturl()
-        rows.append([InlineKeyboardButton(text="🎫 Тикеты поддержки", web_app=WebAppInfo(url=url))])
+    miniapp = urlsplit(settings.webapp_root_url)
+    has_tickets = miniapp.scheme == "https" and bool(miniapp.hostname)
+    if has_tickets:
+        url = miniapp._replace(query="section=tickets").geturl()
+        rows.append([button("tickets",  web_app=WebAppInfo(url=url))])
     if button_url:
-        rows.append([InlineKeyboardButton(text="💬 Написать в поддержку", url=button_url)])
-    rows.append([InlineKeyboardButton(text="← Меню", callback_data="menu:home")])
-    text = "💬 <b>Поддержка</b>"
-    if not button_url:
-        text += f"\n\n{support}"
+        rows.append([button("support_link",  url=button_url)])
+    rows.append([button("home",  callback_data="menu:home")])
+    text = f"💬 <b>{title}</b>"
+    if contact and not button_url:
+        text += f"\n\n{escape(contact)}"
+    elif not contact and not has_tickets:
+        text += "\n\nСвязь с поддержкой пока не настроена."
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -792,7 +795,7 @@ async def _device_menu(telegram_id: int, page: int, notice: str = ""):
         devices = await get_customer_devices(telegram_id)
     except DEVICE_ERRORS as exc:
         lines.append(escape(str(exc)))
-        rows.append([InlineKeyboardButton(text="Обновить", callback_data=_device_list_callback(page))])
+        rows.append([button("refresh_devices",  callback_data=_device_list_callback(page))])
     else:
         items = devices["items"]
         if not devices["has_subscription"]:
@@ -807,14 +810,14 @@ async def _device_menu(telegram_id: int, page: int, notice: str = ""):
             for device in items[start:start + DEVICE_PAGE_SIZE]:
                 name = device["name"][:36]
                 label = f"{name} · {device['client']}" if device["client"] else name
-                rows.append([InlineKeyboardButton(
-                    text=label, callback_data=f"device:view:{device['id']}:{page}",
+                rows.append([button(
+                    "device_item", label, callback_data=f"device:view:{device['id']}:{page}",
                 )])
             navigation = []
             if page:
-                navigation.append(InlineKeyboardButton(text="‹ Предыдущие", callback_data=_device_list_callback(page - 1)))
+                navigation.append(button("previous", "Предыдущие",  callback_data=_device_list_callback(page - 1)))
             if start + DEVICE_PAGE_SIZE < len(items):
-                navigation.append(InlineKeyboardButton(text="Следующие ›", callback_data=_device_list_callback(page + 1)))
+                navigation.append(button("next", "Следующие ›",  callback_data=_device_list_callback(page + 1)))
             if navigation:
                 rows.append(navigation)
     rows.append(back_menu("menu:subscription").inline_keyboard[0])
@@ -832,9 +835,9 @@ def _device_details(device: dict, page: int, notice: str = ""):
         lines.append(escape(platform))
     lines.append("Клиент: " + escape(device["client"] or "Не определён"))
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✏️ Переименовать", callback_data=f"device:name:{key}:{page}"),
-         InlineKeyboardButton(text="🗑 Удалить", callback_data=f"device:remove:{key}:{page}")],
-        [InlineKeyboardButton(text="← К устройствам", callback_data=_device_list_callback(page))],
+        [button("rename_device",  callback_data=f"device:name:{key}:{page}"),
+         button("remove_device",  callback_data=f"device:remove:{key}:{page}")],
+        [button("back_devices",  callback_data=_device_list_callback(page))],
     ])
 
 
@@ -867,13 +870,13 @@ async def device_action_handler(callback: CallbackQuery) -> None:
             if action == "name":
                 text = f"Введите новое имя для <b>{escape(device['name'])}</b> (до 48 символов)."
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="Отмена", callback_data=f"device:nameback:{device_id}:{page}"),
+                    button("cancel",  callback_data=f"device:nameback:{device_id}:{page}"),
                 ]])
             elif action == "remove":
                 text = f"Удалить <b>{escape(device['name'])}</b>? Место освободится."
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Удалить устройство", callback_data=f"device:confirm:{device_id}:{page}")],
-                    [InlineKeyboardButton(text="Отмена", callback_data=f"device:view:{device_id}:{page}")],
+                    [button("confirm_device",  callback_data=f"device:confirm:{device_id}:{page}")],
+                    [button("cancel",  callback_data=f"device:view:{device_id}:{page}")],
                 ])
             else:
                 text, keyboard = _device_details(device, page)
@@ -899,7 +902,7 @@ async def menu_text_handler(message: Message) -> None:
     if not name or len(name) > 48:
         text = "Введите имя от 1 до 48 символов."
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="Отмена", callback_data=pending),
+            button("cancel",  callback_data=pending),
         ]])
     else:
         try:
@@ -911,7 +914,7 @@ async def menu_text_handler(message: Message) -> None:
         except ValueError as exc:
             text = escape(str(exc))
             keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="Отмена", callback_data=pending),
+                button("cancel",  callback_data=pending),
             ]])
     await show_command_section(message, text, keyboard)
 
@@ -967,8 +970,8 @@ async def referral_handler(callback: CallbackQuery) -> None:
         link = f"https://t.me/{username}?start={referral_code(telegram_id)}"
         lines.extend(("", f"Ваша ссылка\n<code>{escape(link)}</code>"))
         rows.insert(0, [
-            InlineKeyboardButton(text="Копировать ссылку", copy_text=CopyTextButton(text=link)),
-            InlineKeyboardButton(text="Поделиться", url=f"https://t.me/share/url?{urlencode({'url': link})}"),
+            button("copy_invite",  copy_text=CopyTextButton(text=link)),
+            button("share_invite",  url=f"https://t.me/share/url?{urlencode({'url': link})}"),
         ])
     else:
         lines.extend(("", "Ссылка для приглашения пока недоступна."))

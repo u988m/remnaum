@@ -3,7 +3,10 @@ import logging
 from urllib.parse import urlencode, urljoin, urlsplit
 
 from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from aiogram.types import InlineKeyboardMarkup, WebAppInfo
+
+from app.bot.buttons import button
+from app.bot.notifications import with_close
 from sqlalchemy import func, or_, select
 
 from app.config import settings
@@ -105,7 +108,7 @@ def ticket_button(ticket_id, *, admin):
         return None
     url = urljoin(root.geturl(), ticket_path(ticket_id, admin=admin))
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=f"Открыть тикет №{ticket_id}", web_app=WebAppInfo(url=url)),
+        button("open_ticket", f"Открыть тикет №{ticket_id}", web_app=WebAppInfo(url=url)),
     ]])
 
 
@@ -120,7 +123,7 @@ async def notify_ticket(bot, ticket_id, telegram_id=None, *, event="reply"):
         "closed": "Обращение закрыто",
         "reopened": "Обращение открыто снова",
     }[event]
-    markup = ticket_button(ticket_id, admin=admin)
+    markup = with_close(ticket_button(ticket_id, admin=admin))
     for recipient in recipients:
         try:
             await bot.send_message(recipient, f"{label} · тикет №{ticket_id}", reply_markup=markup)

@@ -7,6 +7,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
 from sqlalchemy import select, update
 
+from app.bot.notifications import with_close
 from app.db.models import Payment, User
 from app.db.session import SessionLocal
 from app.services.payment_providers import PAYMENT_WINDOW
@@ -64,6 +65,7 @@ async def _deliver_expiry_notice(bot: Bot, payment_id: int) -> None:
                         f"Заказ №{payment.id} отменён. Оплата не поступила в течение 30 минут.\n\n"
                         "Если вы уже оплатили, дождитесь подтверждения. "
                         "Для новой оплаты создайте счёт в разделе «Тарифы».",
+                        reply_markup=with_close(),
                     )
             except (TelegramForbiddenError, TelegramBadRequest):
                 log.info("Cannot deliver expiry notice for order %s to Telegram", payment_id)

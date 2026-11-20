@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import aliased
 
+from app.bot.notifications import with_close
 from app.db.models import (
     Payment, Subscription, SubscriptionDetails, SubscriptionNotification, TrialClaim, User, UserNotificationPreferences,
 )
@@ -150,7 +151,7 @@ async def _deliver(bot: Bot, recipient: Recipient, notice: Notice) -> None:
             if inserted is None:
                 return
             try:
-                await asyncio.wait_for(bot.send_message(user.telegram_id, notice.text, parse_mode=None), timeout=10)
+                await asyncio.wait_for(bot.send_message(user.telegram_id, notice.text, parse_mode=None, reply_markup=with_close()), timeout=10)
             except (TelegramForbiddenError, TelegramBadRequest):
                 # This chat cannot receive this notice. Avoid retrying it every scan.
                 log.info("Telegram notification %s could not be delivered for subscription %s", notice.kind, snapshot.id)

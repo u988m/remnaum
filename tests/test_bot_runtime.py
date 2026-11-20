@@ -1,4 +1,6 @@
 import unittest
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from aiogram import Bot
@@ -7,7 +9,8 @@ from aiogram.types import Update
 
 from app import main
 from app.bot.release_notices import CLOSE_RELEASE, release_keyboard
-from app.bot.handlers import main_menu
+from app.bot.handlers import main_menu, support_menu
+from app.bot.notifications import CLOSE_MENU_NOTICE, with_close
 
 
 class BotRuntimeTests(unittest.IsolatedAsyncioTestCase):
@@ -43,14 +46,14 @@ class BotRuntimeTests(unittest.IsolatedAsyncioTestCase):
             "reply_markup": release_keyboard("v0.0.9"),
         }
 
-        async def click(message):
+        async def click(message, action=CLOSE_RELEASE):
             update = Update.model_validate({
                 "update_id": 1,
                 "callback_query": {
                     "id": "release-click",
                     "from": {"id": 42, "first_name": "Пользователь", "is_bot": False},
                     "chat_instance": "chat",
-                    "data": CLOSE_RELEASE,
+                    "data": action,
                     "message": message,
                 },
             }, context={"bot": bot})
@@ -66,3 +69,25 @@ class BotRuntimeTests(unittest.IsolatedAsyncioTestCase):
             await click(notice | {"message_id": 71, "reply_markup": main_menu()})
             send.assert_awaited_once()
             self.assertIsInstance(send.await_args.args[1], AnswerCallbackQuery)
+
+
+            state = SimpleNamespace(message_id=70, callbacks=[CLOSE_MENU_NOTICE], start_message_id=67, save=AsyncMock())
+
+            @asynccontextmanager
+            async def menu_session(*args, **kwargs):
+                yield state
+
+            with patch("app.bot.menu.menu_session", menu_session):
+                send.reset_mock()
+                await click(notice | {"reply_markup": with_close(tracked=True)}, CLOSE_MENU_NOTICE)
+                self.assertEqual([type(call.args[1]) for call in send.await_args_list], [DeleteMessage, AnswerCallbackQuery])
+                self.assertEqual((state.message_id, state.callbacks, state.start_message_id), (None, [], 67))
+                state.save.assert_awaited_once()
+
+    async def test_support_offers_tickets_without_a_contact_placeholder(self):
+        with patch("app.bot.handlers.get_store_profile", return_value={"support_contact": " "}), \
+             patch.object(main.settings, "webapp_url", "https://miniapp.example.test"):
+            text, markup = await support_menu()
+        self.assertEqual(text, "💬 <b>Поддержка</b>")
+        self.assertEqual(markup.inline_keyboard[0][0].web_app.url,
+                         "https://miniapp.example.test?section=tickets")

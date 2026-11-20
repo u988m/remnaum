@@ -1,3 +1,4 @@
+from starlette.requests import Request
 import os
 import shutil
 import subprocess
@@ -18,7 +19,7 @@ class VersionTests(unittest.IsolatedAsyncioTestCase):
     async def test_admin_renders_the_release_number_and_refreshes_cached_assets(self):
         self.assertEqual(app.version, version.__version__)
         with patch.object(version, "__version__", "1.2.3+g0123456789ab"):
-            page = await admin_dashboard_page()
+            page = await admin_dashboard_page(Request({"type": "http", "headers": []}))
         html = page.body.decode()
         self.assertIn('>Релиз Remnaum 1.2.3</p>', html)
         self.assertNotIn("+g0123456789ab", html)

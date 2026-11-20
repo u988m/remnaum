@@ -1206,7 +1206,89 @@ contactForm.onsubmit = async event => {
   }
 };
 
+const buttonColors = [
+  ["", "Стандартный"], ["primary", "Синий"], ["success", "Зелёный"], ["danger", "Красный"],
+];
+const buttonForm = $("bot-buttons-form");
+let buttonEditors = [];
+
+async function loadBotButtons() {
+  const list = $("bot-buttons-list");
+  $("save-bot-buttons").disabled = $("reset-bot-buttons").disabled = true;
+  $("bot-buttons-status").textContent = "";
+  list.replaceChildren();
+  const data = await api("/admin/api/bot-buttons");
+  const groups = new Map();
+  buttonEditors = data.items.map(item => {
+    if (!groups.has(item.section)) {
+      const group = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = item.section;
+      group.open = groups.size === 0;
+      group.append(summary);
+      list.append(group);
+      groups.set(item.section, group);
+    }
+    const row = document.createElement("div");
+    row.className = "bot-button-row";
+    const preview = document.createElement("span");
+    preview.className = "bot-button-preview";
+    const emojiLabel = document.createElement("label");
+    emojiLabel.textContent = "Эмодзи";
+    const emoji = document.createElement("input");
+    emoji.value = item.emoji;
+    emoji.maxLength = 24;
+    emoji.autocomplete = "off";
+    emoji.setAttribute("aria-label", "Эмодзи · " + item.label);
+    emojiLabel.append(emoji);
+    const colorLabel = document.createElement("label");
+    colorLabel.textContent = "Цвет";
+    const color = document.createElement("select");
+    color.setAttribute("aria-label", "Цвет · " + item.label);
+    for (const [value, name] of buttonColors) color.add(new Option(name, value));
+    color.value = item.style;
+    colorLabel.append(color);
+    const render = () => {
+      preview.textContent = [emoji.value.trim(), item.label].filter(Boolean).join(" ");
+      preview.dataset.color = color.value;
+    };
+    emoji.addEventListener("input", render);
+    color.addEventListener("change", render);
+    render();
+    row.append(preview, emojiLabel, colorLabel);
+    groups.get(item.section).append(row);
+    return {item, emoji, color, render};
+  });
+  $("save-bot-buttons").disabled = $("reset-bot-buttons").disabled = false;
+}
+
+$("reset-bot-buttons").onclick = () => {
+  for (const {item, emoji, color, render} of buttonEditors) {
+    emoji.value = item.default_emoji;
+    color.value = "";
+    render();
+  }
+  $("bot-buttons-status").textContent = "Сохраните, чтобы применить стандартные кнопки.";
+};
+
+buttonForm.onsubmit = async event => {
+  event.preventDefault();
+  const save = $("save-bot-buttons");
+  save.disabled = true;
+  try {
+    const buttons = Object.fromEntries(buttonEditors.map(({item, emoji, color}) =>
+      [item.key, {emoji: emoji.value.trim(), style: color.value}]));
+    await adminApi("PUT", "/admin/api/bot-buttons", {buttons});
+    $("bot-buttons-status").textContent = "Оформление кнопок сохранено.";
+  } catch (error) {
+    $("bot-buttons-status").textContent = error.status === 422 ? "Проверьте эмодзи и повторите сохранение." : error.message;
+  } finally {
+    save.disabled = false;
+  }
+};
+
 const tabs = {
+  "bot-buttons": {sections: ["bot-buttons-view"], load: loadBotButtons},
   login: {sections: ["login-view"]},
   "login-telegram": {sections: ["login-telegram-view"], load: loadTelegramLogin},
   "login-google": {sections: ["login-google-view"], load: loadGoogleLogin},
@@ -1250,7 +1332,7 @@ function parentFor({tab, panel}) {
   if (panel) return tab;
   if (providerByTab[tab]) return "settings";
   if (["login-telegram", "login-google"].includes(tab)) return "login";
-  if (["settings", "login", "trial", "notifications", "operations", "campaigns"].includes(tab)) return "configuration";
+  if (["settings", "login", "trial", "notifications", "operations", "campaigns", "bot-buttons"].includes(tab)) return "configuration";
   return null;
 }
 

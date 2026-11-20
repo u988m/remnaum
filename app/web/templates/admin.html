@@ -89,11 +89,25 @@
   <div class="settings-list">
     <button type="button" data-open-tab="login"><strong>Вход в веб-приложение</strong><span>Telegram и Google</span></button>
     <button type="button" data-open-tab="operations"><strong>Интеграции и лимиты</strong><span>Канал, Remnawave и дополнительные устройства</span></button>
+    <button type="button" data-open-tab="bot-buttons"><strong>Кнопки</strong><span>Эмодзи и цвета меню Telegram</span></button>
     <button type="button" data-open-tab="campaigns"><strong>Рассылки и меню</strong><span>Отправить сообщение или обновить /start</span></button>
     <button type="button" data-open-tab="settings"><strong>Платёжные системы</strong><span>Способы оплаты и реквизиты</span></button>
     <button type="button" data-open-tab="trial"><strong>Пробный доступ</strong><span>Срок, трафик и число устройств</span></button>
     <button type="button" data-open-tab="notifications"><strong>Уведомления</strong><span>Подписка, триал и трафик</span></button>
   </div>
+</section>
+<section class="dashboard-view" id="bot-buttons-view" hidden>
+  <button class="provider-back" type="button" data-back-tab="configuration">← Настройки</button>
+  <h1>Кнопки</h1>
+  <form id="bot-buttons-form" class="dashboard-panel bot-buttons-form">
+    <p class="muted">Оставьте поле эмодзи пустым, чтобы убрать его. Оформление применяется к новым и обновлённым сообщениям бота.</p>
+    <div id="bot-buttons-list"></div>
+    <div class="bot-buttons-actions">
+      <button class="primary-btn" id="save-bot-buttons" type="submit" disabled>Сохранить</button>
+      <button class="secondary-btn" id="reset-bot-buttons" type="button" disabled>Вернуть стандартные</button>
+    </div>
+    <p id="bot-buttons-status" role="status"></p>
+  </form>
 </section>
 <section class="dashboard-view" id="login-view" hidden>
   <button class="provider-back" type="button" data-back-tab="configuration">← Настройки</button>

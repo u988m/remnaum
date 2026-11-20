@@ -71,6 +71,8 @@ class PaymentExpiryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recipient, 42)
         self.assertIn(f"Заказ №{overdue} отменён", message)
         self.assertIn("30 минут", message)
+        markup = self.bot.send_message.await_args.kwargs["reply_markup"]
+        self.assertEqual(markup.inline_keyboard[-1][0].callback_data, "notice:close")
         order = await self.payment(overdue)
         self.assertEqual(order.status, "cancelled")
         self.assertIsNotNone(order.expired_at)
@@ -89,7 +91,7 @@ class PaymentExpiryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone((await self.payment(order_id)).expiry_notice_completed_at)
         self.bot.send_message.reset_mock(side_effect=True)
 
-        async def send(*args):
+        async def send(*args, **kwargs):
             await asyncio.sleep(0.05)
 
         self.bot.send_message.side_effect = send

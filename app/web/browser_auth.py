@@ -3,9 +3,11 @@ import base64
 import hashlib
 import json
 import secrets
+import re
 from html import escape
+from pathlib import Path
 from urllib.parse import urlencode, urlsplit
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Query, Request
@@ -20,6 +22,8 @@ from app.db.session import SessionLocal
 from app.services.bot_identity import bot_username
 from app.services.store_auth import issue_store_session, verify_store_session, verify_telegram_login
 from app.services.store_operations import get_operations
+from app.services.store_profile import get_store_profile
+from app.services.store_media import logo_image_url
 from app.services.support import ticket_path
 from app.services.users import BLOCKED_MESSAGE, BlockedCustomer, upsert_active_customer
 
@@ -28,6 +32,9 @@ SESSION = "__Host-remnaum-web"
 FLOW = "__Host-remnaum-login"
 FLOW_TTL = 600
 LoginTicket = Annotated[int | None, Query(gt=0, le=2_147_483_647)]
+LoginSection = Literal["account", "support", "tickets"]
+LOGIN_SECTIONS = {"account", "support", "tickets"}
+LOGIN_TEMPLATE = Path(__file__).parent / "templates" / "login.html"
 
 
 def app_origin():
@@ -41,6 +48,42 @@ def on_miniapp_host(request):
 
 def on_app_host(request):
     return request.url.netloc == urlsplit(app_origin()).netloc
+
+
+def is_browser_host(request: Request) -> bool:
+    return bool(settings.browser_webapp_url) and on_app_host(request) and not on_miniapp_host(request)
+
+
+def login_path(*, admin: bool = False, ticket: int | None = None, section: str | None = None) -> str:
+    params = {}
+    if admin:
+        params["admin"] = "true"
+    if ticket:
+        params["ticket"] = ticket
+    elif section in LOGIN_SECTIONS and not admin:
+        params["section"] = section
+    return "/auth" + ("?" + urlencode(params) if params else "")
+
+
+def requested_login(request: Request, *, admin: bool = False) -> str:
+    section = request.query_params.get("section")
+    raw = request.query_params.get("ticket", "")
+    ticket = None
+    if (admin or section == "tickets") and re.fullmatch(r"[0-9]{1,10}", raw):
+        candidate = int(raw)
+        if 0 < candidate <= 2_147_483_647:
+            ticket = candidate
+    return login_path(admin=admin, ticket=ticket, section=section)
+
+
+def login_destination(*, admin=False, ticket=None, section=None) -> str:
+    if ticket:
+        return ticket_path(ticket, admin=admin)
+    if admin:
+        return "/admin"
+    if section in LOGIN_SECTIONS:
+        return "/?" + urlencode({"section": section})
+    return "/"
 
 
 def require_app_host(request):
@@ -112,40 +155,49 @@ async def take_flow(request, provider, state):
 
 
 @router.get("/auth", response_class=HTMLResponse)
-async def login_page(request: Request, admin: bool = False, ticket: LoginTicket = None):
+async def login_page(request: Request, admin: bool = False, ticket: LoginTicket = None, section: LoginSection | None = None):
     if not on_app_host(request) and on_miniapp_host(request) and app_origin().startswith("https://"):
-        params = {}
-        if admin:
-            params["admin"] = "true"
-        if ticket:
-            params["ticket"] = ticket
-        return RedirectResponse(app_origin() + "/auth" + ("?" + urlencode(params) if params else ""))
+        return RedirectResponse(app_origin() + login_path(admin=admin, ticket=ticket, section=section))
     require_app_host(request)
     policy = await get_operations()
-    destination = ticket_path(ticket, admin=admin) if ticket else "/admin" if admin else "/"
+    profile = await get_store_profile()
+    destination = login_destination(admin=admin, ticket=ticket, section=section)
     options = []
     nonce = None
-    if policy["telegram_login"] and bot_username() and settings.telegram_bot_token:
+    username = bot_username()
+    if policy["telegram_login"] and username and settings.telegram_bot_token:
         nonce, state = await save_flow(request, "telegram", {"destination": destination})
         options.append(
-            '<script async src="https://telegram.org/js/telegram-widget.js?22" '
-            f'data-telegram-login="{escape(bot_username(), quote=True)}" data-size="large" '
-            f'data-auth-url="{escape(app_origin(), quote=True)}/auth/telegram/{state}"></script>'
+            '<div class="login-telegram"><script async src="https://telegram.org/js/telegram-widget.js?22" '
+            f'data-telegram-login="{escape(username, quote=True)}" data-size="large" data-radius="12" data-userpic="false" '
+            f'data-auth-url="{escape(app_origin(), quote=True)}/auth/telegram/{state}"></script></div>'
         )
     if policy["google_login"] and not admin:
-        target = "/auth/google" + ("?" + urlencode({"ticket": ticket}) if ticket else "")
-        options.append(f'<p><a class="secondary-btn" href="{target}">Войти через Google</a></p>')
+        params = {"ticket": ticket} if ticket else {"section": section} if section else {}
+        target = "/auth/google" + ("?" + urlencode(params) if params else "")
+        options.append(
+            f'<a class="secondary-btn" href="{escape(target, quote=True)}">'
+            '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 10.2H12v3.9h5.5a5.6 5.6 0 1 1-1.5-6.4l2.9-2.8A9.6 9.6 0 1 0 12 21.6c5.4 0 9.8-3.9 9.8-9.6 0-.6-.1-1.2-.2-1.8Z"/></svg>'
+            'Войти через Google</a><p class="muted login-note">Для входа через Google сначала привяжите его в профиле.</p>'
+        )
+    description = "Войдите, чтобы управлять магазином." if admin else "Управляйте подпиской и устройствами в личном кабинете."
     if not options:
-        options.append("<p>Откройте Mini App из Telegram.</p>")
-    response = HTMLResponse(
-        '<!doctype html><html lang="ru"><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        '<title>Вход</title><link rel="stylesheet" href="/static/theme.css">'
-        '<link rel="stylesheet" href="/store-theme.css">'
-        '<main style="max-width:32rem;margin:12vh auto;padding:1.5rem"><h1>Вход</h1>'
-        + "".join(options) + "</main></html>",
-        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
-    )
+        description = "Вход в браузере сейчас недоступен. Откройте Mini App в боте."
+    logo = logo_image_url()
+    logo_html = f'<img src="{escape(logo, quote=True)}" alt="">' if logo else '<span aria-hidden="true">R</span>'
+    bot_link = ""
+    if re.fullmatch(r"[A-Za-z0-9_]{5,32}", username):
+        bot_link = f'<a class="login-back" href="https://t.me/{username}">Открыть бота</a>'
+    replacements = {
+        "STORE_NAME": escape(profile["name"]),
+        "STORE_LOGO": logo_html,
+        "LOGIN_TITLE": "Вход в админ-панель" if admin else "Вход в кабинет",
+        "LOGIN_DESCRIPTION": description,
+        "LOGIN_OPTIONS": "".join(options),
+        "BOT_LINK": bot_link,
+    }
+    html = re.sub(r"__([A-Z_]+)__", lambda match: replacements[match[1]], LOGIN_TEMPLATE.read_text(encoding="utf-8"))
+    response = HTMLResponse(html, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
     if nonce:
         set_cookie(response, FLOW, nonce, FLOW_TTL)
     return response
@@ -169,7 +221,7 @@ async def telegram_browser_login(request: Request, state: str):
 
 
 @router.get("/auth/google")
-async def google_login_start(request: Request, link: bool = False, ticket: LoginTicket = None):
+async def google_login_start(request: Request, link: bool = False, ticket: LoginTicket = None, section: LoginSection | None = None):
     require_app_host(request)
     policy = await get_operations()
     if not policy["google_login"]:
@@ -183,7 +235,7 @@ async def google_login_start(request: Request, link: bool = False, ticket: Login
     verifier = secrets.token_urlsafe(48)
     nonce, state = await save_flow(request, "google", {
         "verifier": verifier, "telegram_id": telegram_id, "client_id": policy["google_client_id"],
-        "destination": ticket_path(ticket) if ticket else "/",
+        "destination": login_destination(ticket=ticket, section=section),
     })
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
     response = RedirectResponse("https://accounts.google.com/o/oauth2/v2/auth?" + urlencode({
