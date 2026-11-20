@@ -4,23 +4,48 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+
+import httpx
 
 from app.main import app
-from app.version import __version__, read_version
+from app import version
 from app.web.routes import admin_dashboard_page
 from scripts.release_version import BUILD_VERSION, DEV_VERSION, git_version
 
 
 class VersionTests(unittest.IsolatedAsyncioTestCase):
-    async def test_admin_and_api_show_the_running_version(self):
-        self.assertEqual(app.version, __version__)
-        page = await admin_dashboard_page()
-        self.assertIn(f'id="remnaum-version">Remnaum {__version__}', page.body.decode())
+    async def test_admin_renders_the_release_number_and_refreshes_cached_assets(self):
+        self.assertEqual(app.version, version.__version__)
+        with patch.object(version, "__version__", "1.2.3+g0123456789ab"):
+            page = await admin_dashboard_page()
+        html = page.body.decode()
+        self.assertIn('>Релиз Remnaum 1.2.3</p>', html)
+        self.assertNotIn("+g0123456789ab", html)
+        self.assertEqual(page.headers["Cache-Control"], "no-cache")
+        for name in ("admin.css", "admin.js"):
+            self.assertRegex(html, rf'/static/{name}\?v=[0-9a-f]{{16}}"')
+
+    async def test_published_release_is_loaded_without_build_metadata_and_cached(self):
+        response = httpx.Response(200, json={"tag_name": "v1.2.3"}, request=httpx.Request("GET", version.RELEASE_URL))
+        client = AsyncMock()
+        client.__aenter__.return_value.get.return_value = response
+        with patch.object(version, "__version__", DEV_VERSION), patch.object(version, "_release", None), \
+             patch.object(version, "_release_expires_at", 0), patch.object(version.httpx, "AsyncClient", return_value=client):
+            self.assertEqual(await version.latest_release_version(), "1.2.3")
+            self.assertEqual(await version.latest_release_version(), "1.2.3")
+        client.__aenter__.return_value.get.assert_awaited_once()
+
+    async def test_unavailable_github_falls_back_to_the_release_tag(self):
+        client = AsyncMock()
+        client.__aenter__.return_value.get.side_effect = httpx.ConnectError("offline")
+        with patch.object(version, "__version__", "1.2.3+g0123456789ab"), patch.object(version, "_release", None), \
+             patch.object(version, "_release_expires_at", 0), patch.object(version.httpx, "AsyncClient", return_value=client):
+            self.assertEqual(await version.latest_release_version(), "1.2.3")
 
     def test_container_metadata_takes_precedence_over_git(self):
         with patch.dict(os.environ, {BUILD_VERSION: "1.2.3+g0123456789ab"}):
-            self.assertEqual(read_version(), "1.2.3+g0123456789ab")
+            self.assertEqual(version.read_version(), "1.2.3+g0123456789ab")
 
     def test_source_without_git_has_a_development_version(self):
         with tempfile.TemporaryDirectory() as directory:

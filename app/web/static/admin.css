@@ -153,7 +153,7 @@ main { max-width:1480px;padding:16px clamp(14px,3vw,36px) 44px; }
  #dashboard:not([hidden]) { display:block; }
  .admin-sidebar { position:fixed;z-index:60;top:0;bottom:0;left:0;width:min(85vw,340px);max-height:none;border-radius:0 24px 24px 0;padding:calc(22px + env(safe-area-inset-top)) 13px max(24px,env(safe-area-inset-bottom));transform:translateX(-102%);visibility:hidden;transition:transform .22s ease,visibility .22s; }
  .admin-sidebar.is-open { transform:translateX(0);visibility:visible; }
- #admin-menu-close { display:block;width:var(--tap-target);height:var(--tap-target);border-radius:12px;border:1px solid var(--color-border);background:var(--color-surface-raised);color:var(--color-text); }
+ #admin-menu-close { display:inline-flex; }
  .admin-menu-backdrop:not([hidden]) { display:block;position:fixed;inset:0;z-index:59;border:0;background:rgb(0 0 0 / .70); }
  .admin-workspace { padding-bottom:30px; }
  .cards { grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -464,23 +464,10 @@ main { max-width:1480px;padding:16px clamp(14px,3vw,36px) 44px; }
     .chart-detail { justify-content: space-between; }
 }
 
-.sidebar-heading { display: grid; align-items: center; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-.sidebar-heading > span { min-width: 0; overflow-wrap: anywhere; }
-@media (max-width: 850px) {
-    .sidebar-heading { grid-template-columns: minmax(0, 1fr) auto auto; }
-}
-.admin-return-link {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0;
-    width: var(--tap-target);
-    min-height: var(--tap-target);
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    color: var(--color-text);
-    text-decoration: none;
-}
+.sidebar-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sidebar-heading > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-actions { display: flex; flex: none; align-items: center; gap: 6px; }
+.sidebar-actions .admin-icon-action { flex: none; }
 .refresh-action { justify-self: end; min-width: 96px; white-space: nowrap; }
 .pagination { display: grid; grid-template-columns: 1fr minmax(0, 1.25fr) 1fr; align-items: center; gap: 8px; margin-top: 10px; text-align: center; }
 .pagination .action { min-width: 0; padding-inline: 4px; }
@@ -530,7 +517,7 @@ main { max-width:1480px;padding:16px clamp(14px,3vw,36px) 44px; }
 .admin-header .brand-block { grid-column: 2; }
 #admin-viewer { grid-column: 3; }
 #admin-back { grid-column: 4; }
-#admin-menu-open svg, .admin-icon-action svg, .admin-return-link svg {
+#admin-menu-open svg, .admin-icon-action svg {
     width: 18px;
     height: 18px;
     fill: none;
