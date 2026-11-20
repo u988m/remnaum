@@ -14,7 +14,7 @@ CODE_PATTERN = re.compile(r"[A-Z0-9][A-Z0-9_-]{3,31}")
 def normalize_code(value: str) -> str:
     code = str(value).strip().upper()
     if not CODE_PATTERN.fullmatch(code):
-        raise ValueError("Promo code must contain 4–32 Latin letters, digits, _ or -")
+        raise ValueError("Код должен содержать от 4 до 32 латинских букв, цифр, дефисов или подчёркиваний.")
     return code
 
 
@@ -72,21 +72,21 @@ async def redeem_promo(telegram_id: int, code: str) -> dict:
     async with SessionLocal() as session:
         user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
         if not user:
-            raise ValueError("Register with /start first")
+            raise ValueError("Сначала откройте меню командой /start.")
         promo = await session.scalar(
             select(PromoCode).where(PromoCode.code == normalized).with_for_update()
         )
         if not promo or not promo.active:
-            raise ValueError("Promo code not found or disabled")
+            raise ValueError("Промокод не найден или отключён.")
         if await session.scalar(
             select(PromoRedemption.id).where(
                 PromoRedemption.user_id == user.id,
                 PromoRedemption.promo_id == promo.id,
             )
         ):
-            raise ValueError("You have already used this promo code")
+            raise ValueError("Вы уже активировали этот промокод.")
         if promo.used_count >= promo.max_uses:
-            raise ValueError("Promo code redemption limit reached")
+            raise ValueError("Лимит активаций промокода исчерпан.")
         promo.used_count += 1
         session.add(PromoRedemption(
             user_id=user.id, promo_id=promo.id, bonus_days=promo.bonus_days,

@@ -10,12 +10,12 @@ from datetime import datetime, timezone
 import httpx
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from redis.exceptions import LockError
 
 from app.bot.menu import redis
+from app.bot.release_notices import release_keyboard
 from app.config import settings
-from app.version import RELEASE_NUMBER, RELEASE_REPOSITORY, RELEASE_URL
+from app.version import RELEASE_NUMBER, RELEASE_URL
 
 log = logging.getLogger(__name__)
 POLL_INTERVAL = 90
@@ -71,9 +71,7 @@ async def _notify(bot: Bot, admin_id: int, tag: str, sent_key: str) -> None:
             await bot.send_message(
                 admin_id, f"🚀 Вышел релиз Remnaum {tag}\n\nДля обновления запустите sudo remnaum и выберите «Обновить».",
                 parse_mode=None,
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="Открыть релиз", url=f"https://github.com/{RELEASE_REPOSITORY}/releases/tag/{tag}"),
-                ]]),
+                reply_markup=release_keyboard(tag),
             )
     except (TelegramForbiddenError, TelegramBadRequest):
         log.info("Release %s cannot be delivered to administrator %s", tag, admin_id)
