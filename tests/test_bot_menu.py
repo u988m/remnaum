@@ -243,6 +243,7 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
 
             await enter_code(9, "FREE")
             redeem.assert_not_awaited()
+            self.assertIn(9, deleted)
             await press(handlers.promo_menu_handler, active_menu(), "menu:promo")
             await enter_code(10, "WRONG")
             self.assertIn("Попробуйте ещё раз", active_menu().text)
