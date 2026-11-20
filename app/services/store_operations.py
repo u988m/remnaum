@@ -15,6 +15,7 @@ DEFAULTS = {
     "channel_url": "",
     "extra_devices_max": 1000,
     "panel_url": "",
+    "bot_buttons": {},
 }
 
 

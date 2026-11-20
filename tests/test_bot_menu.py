@@ -197,7 +197,7 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
             await start(4)
             self.assertEqual(set(messages), {106})
             self.assertEqual(messages[106].text, menu.BLOCKED_MESSAGE)
-            self.assertIsNone(messages[106].reply_markup)
+            self.assertEqual(messages[106].reply_markup.inline_keyboard[0][0].callback_data, "notice:close-menu")
             self.assertTrue({2, 3} <= set(deleted))
             self.assertNotIn(4, deleted)
 

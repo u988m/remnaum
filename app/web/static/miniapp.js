@@ -735,8 +735,6 @@ function renderProfile(profile, user) {
   $("store-name").textContent = name;
   $("landing-name").textContent = name;
   const mark = name.trim().charAt(0).toUpperCase() || "R";
-  $("store-mark").textContent = mark;
-  $("landing-mark").textContent = mark;
   const tagline = profile?.tagline?.trim();
   $("home-message").textContent = tagline || "";
   $("home-message").hidden = !tagline;
@@ -749,15 +747,18 @@ function renderProfile(profile, user) {
     $("store-description").textContent = description;
     $("store-description").hidden = false;
   }
-  for (const [id, url] of [["store-logo", profile?.logo_image_url], ["landing-logo", profile?.logo_image_url]]) {
-    if (url) {
-      $(id).src = url;
-      $(id).hidden = false;
-    }
+  $("cabinet-name").textContent = $("store-name").textContent;
+  const logo = profile?.logo_image_url;
+  for (const area of ["store", "landing", "cabinet"]) {
+    $(area + "-logo").hidden = !logo;
+    if (logo) $(area + "-logo").src = logo;
+    $(area + "-mark").textContent = mark;
+    $(area + "-mark").hidden = Boolean(logo);
   }
-  $("store-mark").hidden = Boolean(profile?.logo_image_url);
-  $("landing-mark").hidden = Boolean(profile?.logo_image_url);
   const contact = profile?.support_contact?.trim();
+  $("account-support").hidden = !contact;
+  $("support-link").hidden = true;
+  $("support-text").hidden = !contact;
   if (contact) {
     $("support-text").textContent = contact;
     const candidate = /^@[a-z0-9_]+$/i.test(contact) ? "https://t.me/" + contact.slice(1) : contact;
@@ -884,8 +885,13 @@ async function start() {
     await loadReadyPlans();
   } catch (error) {
     if (error.status === 401 && !tg?.initData) {
-      if (screen.ticket) $("login-options").querySelector("a").href = "/auth?ticket=" + screen.ticket;
+      const params = new URLSearchParams();
+      if (screen.ticket) params.set("ticket", screen.ticket);
+      else if (["account", "support", "tickets"].includes(screen.page)) params.set("section", screen.page);
+      $("login-options").querySelector("a").href = "/auth" + (params.size ? "?" + params : "");
       $("login-options").hidden = false;
+      $("loading").textContent = "Войдите, чтобы открыть кабинет.";
+      return;
     }
     $("loading").hidden = false;
     $("loading").textContent = error.message;

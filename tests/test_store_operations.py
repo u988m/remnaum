@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
+from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from aiogram.methods import SendMessage
 from fastapi import FastAPI
@@ -16,7 +17,8 @@ import httpx
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.bot import campaigns
+from app.bot import campaigns, handlers
+from app.bot.buttons import style_buttons
 from app.db.models import TariffPlan, User
 from app.db.session import initialize_schema
 from app.services import store_operations, store_profile, support, users
@@ -140,16 +142,61 @@ class BrowserStoreOperationsTests(unittest.IsolatedAsyncioTestCase):
             response = await self.client.get("/auth?ticket=11")
             self.assertEqual(response.headers["location"], browser + "/auth?ticket=11")
             self.assertEqual((await self.client.get("/auth/google?ticket=11")).status_code, 404)
-            self.assertEqual((await self.client.get(browser + "/")).status_code, 200)
+            guest = await self.client.get(browser + "/?section=tickets&ticket=11")
+            self.assertEqual(guest.status_code, 307)
+            self.assertEqual(guest.headers["location"], "/auth?ticket=11")
+            self.assertEqual((await self.client.get(browser + "/admin?ticket=11")).headers["location"],
+                             "/auth?admin=true&ticket=11")
             self.assertEqual((await self.client.get("/store")).headers["location"], browser + "/store")
             self.assertEqual((await self.client.get(browser + "/store")).status_code, 200)
             login = await self.client.get(browser + "/auth")
             self.assertEqual(login.status_code, 200)
             self.assertIn(f'data-auth-url="{browser}/auth/telegram/', login.text)
+            self.assertIn("Вход в кабинет", login.text)
+            self.assertIn("/static/browser.css", login.text)
+            await users.get_or_create_user(SimpleNamespace(id=42, username="owner"))
+            self.client.cookies.set(browser_auth.SESSION,
+                "telegram." + browser_auth.issue_store_session(42, browser_auth.session_key("telegram")),
+                domain="web.example.test", path="/")
+            cabinet = await self.client.get(browser + "/")
+            self.assertEqual(cabinet.status_code, 200)
+            self.assertIn('data-surface="browser"', cabinet.text)
+            self.assertNotIn("telegram-web-app.js", cabinet.text)
+            self.assertEqual((await self.client.get(browser + "/admin")).status_code, 200)
             admin = {"X-Telegram-Init-Data": "42"}
             config = (await self.client.get("/admin/api/operations", headers=admin)).json()
             self.assertEqual(config["browser_origin"], browser)
             self.assertEqual(config["google_callback_url"], browser + "/auth/google/callback")
+
+    async def test_button_settings_are_admin_only_and_style_outbound_menu(self):
+        endpoint = "/admin/api/bot-buttons"
+        admin = {"X-Telegram-Init-Data": "42"}
+        saved = {"buttons": {"bonuses": {"emoji": "🎉", "style": "success"},
+                             "trial": {"emoji": "", "style": "primary"}}}
+        self.assertEqual((await self.client.get(endpoint)).status_code, 401)
+        self.assertEqual((await self.client.put(endpoint, headers={"X-Telegram-Init-Data": "11"}, json=saved)).status_code, 403)
+        invalid = {"buttons": {"bonuses": {"emoji": "🎉", "style": "#ffffff"}}}
+        self.assertEqual((await self.client.put(endpoint, headers=admin, json=invalid)).status_code, 422)
+        response = await self.client.put(endpoint, headers=admin, json=saved)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual((await self.client.get(endpoint, headers=admin)).json(), response.json())
+        round_trip = {item["key"]: {"emoji": item["emoji"], "style": item["style"]} for item in response.json()["items"]}
+        self.assertEqual((await self.client.put(endpoint, headers=admin, json={"buttons": round_trip})).status_code, 200)
+        items = {item["key"]: item for item in response.json()["items"]}
+        self.assertEqual((items["trial"]["emoji"], items["trial"]["default_emoji"]), ("", "🧪"))
+
+        bot = Bot("123:test")
+        self.addAsyncCleanup(bot.session.close)
+        bot.session.middleware(style_buttons)
+        markup = handlers.main_menu()
+        with patch.object(bot.session, "make_request", return_value=True) as send:
+            await bot.send_message(42, "Меню", reply_markup=markup)
+        outgoing = send.await_args.args[1].reply_markup
+        bonuses = next(button for row in outgoing.inline_keyboard for button in row if button.callback_data == "menu:bonuses")
+        self.assertEqual((bonuses.text, bonuses.style), ("🎉 Бонусы", "success"))
+        self.assertNotIn('"_key":', outgoing.model_dump_json())
+        self.assertEqual((await self.client.put(endpoint, headers=admin, json={"buttons": {}})).status_code, 200)
+        self.assertEqual((await store_operations.get_operations())["bot_buttons"], {})
 
     async def test_login_settings_are_independent_of_other_integrations(self):
         admin = {"X-Telegram-Init-Data": "42"}

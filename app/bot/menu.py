@@ -12,6 +12,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from redis.asyncio import Redis
 from redis.exceptions import LockError
 
+from app.bot.notifications import with_close
 from app.bot.membership import membership_required, send_subscription_prompt
 from app.config import settings
 from app.services.referrals import parse_referral_start
@@ -132,8 +133,9 @@ class MenuMiddleware(BaseMiddleware):
                         await remove_command(message)
                     return None
                 if blocked:
-                    sent = await message.answer(BLOCKED_MESSAGE)
-                    await remember_menu(sent, None)
+                    markup = with_close(tracked=True)
+                    sent = await message.answer(BLOCKED_MESSAGE, reply_markup=markup)
+                    await remember_menu(sent, markup)
                     await finish_command(message)
                     return None
                 if is_callback and state.message_id is not None:

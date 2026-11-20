@@ -17,6 +17,7 @@ from sqlalchemy import Date, cast, func, or_, select
 from aiogram.exceptions import TelegramAPIError
 from redis.exceptions import RedisError
 
+from app.bot.buttons import BUTTONS, ButtonStyle
 from app.bot.runtime import bot, dispatcher
 from app.config import settings
 from app.version import RELEASE_REPOSITORY, installed_release_version, latest_release_version
@@ -42,7 +43,9 @@ from app.services.users import BLOCKED_MESSAGE, BlockedCustomer, customer_is_blo
 
 from app.bot.membership import membership_required
 from app.services.store_operations import get_operations
-from app.web.browser_auth import app_origin, on_app_host, on_miniapp_host, web_credentials
+from app.web.browser_auth import (
+    app_origin, browser_identity, is_browser_host, on_app_host, on_miniapp_host, requested_login, web_credentials,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -336,12 +339,25 @@ async def _webapp_user(init_data: str | dict):
 async def mini_app_root(request: Request):
     if not (on_app_host(request) or on_miniapp_host(request)):
         raise HTTPException(404)
-    return await mini_app_page()
+    return await mini_app_page(request)
 
 
 @router.get("/app", response_class=HTMLResponse)
-async def mini_app_page():
-    return HTMLResponse((Path(__file__).parent / "templates" / "miniapp.html").read_text(encoding="utf-8"))
+async def mini_app_page(request: Request):
+    browser = is_browser_host(request)
+    if browser and not await browser_identity(request):
+        return RedirectResponse(requested_login(request), headers={"Cache-Control": "no-store"})
+    web_dir = Path(__file__).parent
+    html = (web_dir / "templates" / "miniapp.html").read_text(encoding="utf-8")
+    for asset in ("miniapp.css", "miniapp.js"):
+        revision = blake2s((web_dir / "static" / asset).read_bytes(), digest_size=8).hexdigest()
+        html = html.replace(f'/static/{asset}"', f'/static/{asset}?v={revision}"')
+    html = html.replace("__CUSTOMER_SURFACE__", "browser" if browser else "miniapp")
+    if browser:
+        html = html.replace(',maximum-scale=1,user-scalable=no', '')
+        html = html.replace('<script src="https://telegram.org/js/telegram-web-app.js"></script>', '')
+        html = html.replace("</head>", '<link rel="stylesheet" href="/static/browser.css">\n</head>')
+    return HTMLResponse(html, headers={"Cache-Control": "no-store" if browser else "no-cache"})
 
 
 async def _webapp_subscription_data(telegram_id: int) -> dict | None:
@@ -476,7 +492,13 @@ async def admin_save_notifications(data: NotificationSettings, x_telegram_init_d
 
 
 @router.get("/admin", response_class=HTMLResponse)
-async def admin_dashboard_page():
+async def admin_dashboard_page(request: Request):
+    if is_browser_host(request):
+        identity = await browser_identity(request)
+        if not identity or identity["browser_provider"] != "telegram":
+            return RedirectResponse(requested_login(request, admin=True), headers={"Cache-Control": "no-store"})
+        if identity["id"] not in settings.admin_id_set:
+            raise HTTPException(403, "Доступ к админ-панели закрыт.")
     web_dir = Path(__file__).parent
     html = (web_dir / "templates" / "admin.html").read_text(encoding="utf-8")
     for asset in ("admin.css", "admin.js"):
@@ -1486,6 +1508,38 @@ class OperationsPayload(BaseModel):
             _ = panel.port
             self.panel_url = self.panel_url.rstrip("/")
         return self
+
+
+class BotButtonsPayload(BaseModel):
+    buttons: dict[str, ButtonStyle] = Field(max_length=len(BUTTONS))
+
+
+@router.get("/admin/api/bot-buttons")
+async def admin_bot_buttons(x_telegram_init_data: WebCredentials):
+    await _require_telegram_admin(x_telegram_init_data)
+    return bot_button_catalog((await get_operations())["bot_buttons"])
+
+
+def bot_button_catalog(saved):
+    return {"items": [
+        {"key": key, "section": section, "label": label, "default_emoji": emoji, **(
+            saved.get(key) or {"emoji": emoji, "style": ""}
+        )}
+        for key, (section, label, emoji) in BUTTONS.items()
+    ]}
+
+
+@router.put("/admin/api/bot-buttons")
+async def admin_save_bot_buttons(data: BotButtonsPayload, x_telegram_init_data: WebCredentials):
+    await _require_telegram_admin(x_telegram_init_data)
+    if data.buttons.keys() - BUTTONS.keys():
+        raise HTTPException(422, "Неизвестная кнопка.")
+    styles = {
+        key: value.model_dump() for key, value in data.buttons.items()
+        if value.emoji != BUTTONS[key][2] or value.style
+    }
+    await save_operations({"bot_buttons": styles}, {})
+    return bot_button_catalog(styles)
 
 
 @router.get("/admin/api/operations")

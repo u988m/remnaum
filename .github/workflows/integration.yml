@@ -133,7 +133,16 @@ jobs:
                   return exc
           assert request('/store', host='web.example.com').status == 200
           assert request('/').status == 200
-          assert request('/', host='web.example.com').status == 200
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+          try:
+              urllib.request.build_opener(NoRedirect).open(
+                  urllib.request.Request(base + '/', headers={'Host': 'web.example.com'}), timeout=5)
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 307 and exc.headers['Location'] == '/auth'
+          else:
+              raise AssertionError("Browser guests must be sent to the login page")
           assert request('/auth', host='web.example.com').status == 200
           assert request('/', host='webhook.example.com').status == 404
           assert request('/app').status == 200

@@ -1,0 +1,81 @@
+.browser-login {
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: radial-gradient(ellipse 620px 420px at 50% 8%,
+        color-mix(in srgb, var(--color-success) 10%, transparent), transparent), var(--color-bg);
+}
+.login-shell { width: min(100%, 440px); margin: 0; padding: 0; }
+.login-card { display: grid; gap: 24px; padding: clamp(22px, 5vw, 38px); }
+.login-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.login-brand strong { overflow-wrap: anywhere; }
+.login-brand .brand-logo { width: 44px; flex: none; }
+.login-card h1 { font-size: clamp(1.7rem, 5vw, 2.25rem); letter-spacing: -.035em; line-height: 1.15; }
+.login-card h1 + p { margin-top: 8px; }
+.login-options { display: grid; gap: 10px; }
+.login-telegram { min-height: var(--tap-target); display: grid; justify-items: center; align-items: center; }
+.login-note { font-size: .86rem; }
+.login-options a { gap: 9px; }
+.login-options svg { width: 19px; height: 19px; fill: currentColor; }
+.login-back { justify-self: start; color: var(--color-muted); min-height: var(--tap-target); display: inline-flex; align-items: center; }
+.login-back:focus-visible { color: var(--color-text); }
+
+@media (min-width: 880px) {
+    [data-surface=browser] .customer-shell {
+        display: grid;
+        grid-template-columns: 220px minmax(0, 1fr);
+        align-items: start;
+        gap: clamp(24px, 4vw, 54px);
+        max-width: 1200px;
+        margin-inline: auto;
+        padding: clamp(28px, 5vw, 64px) clamp(22px, 4vw, 40px);
+    }
+    [data-surface=browser] main { grid-area: 1 / 2; width: 100%; max-width: none; padding: 0; min-width: 0; }
+    [data-surface=browser] .topbar { margin-bottom: 18px; }
+    [data-surface=browser] .bottom-nav {
+        grid-area: 1 / 1;
+        grid-template-columns: minmax(0, 1fr);
+        position: sticky;
+        top: 24px;
+        inset-inline: auto;
+        bottom: auto;
+        width: 100%;
+        transform: none;
+        backdrop-filter: none;
+        background: var(--color-surface);
+        border-color: var(--color-border);
+        padding: 10px;
+    }
+    [data-surface=browser] .bottom-nav button {
+        flex-direction: row;
+        justify-content: start;
+        gap: 11px;
+        padding: 8px 12px;
+        min-height: var(--tap-target);
+        font-size: .95rem;
+    }
+    [data-surface=browser] .bottom-nav svg { flex: none; }
+    [data-surface=browser] .cabinet-brand {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 5px 6px 14px;
+        margin-bottom: 4px;
+        border-bottom: 1px solid var(--color-border);
+        overflow-wrap: anywhere;
+    }
+    .cabinet-brand .brand-logo { width: 34px; flex: none; }
+    [data-surface=browser] #page-vpn { min-height: 0; grid-template-rows: auto auto; gap: 18px; }
+    [data-surface=browser] .landing-brand {
+        min-height: 168px;
+        justify-items: start;
+        text-align: left;
+        padding: clamp(22px, 4vw, 34px);
+        border-radius: var(--radius-card);
+        border: 1px solid var(--color-border);
+        background: linear-gradient(140deg, color-mix(in srgb, var(--color-success) 10%, var(--color-surface)), var(--color-surface) 70%);
+    }
+    [data-surface=browser] #home-message { max-width: 60ch; }
+    [data-surface=browser] #no-subscription .full { width: auto; }
+}

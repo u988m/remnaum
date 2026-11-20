@@ -1,6 +1,9 @@
 """On-demand membership checks and immediate Telegram leave handling."""
 from aiogram.exceptions import TelegramAPIError
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup
+
+from app.bot.buttons import button
+from app.bot.notifications import with_close
 
 
 SUBSCRIBE_TEXT = "Подпишитесь на канал магазина и нажмите «Проверить подписку»."
@@ -27,10 +30,10 @@ async def membership_required(bot, telegram_id, policy):
 
 def subscription_keyboard(policy, inviter=None):
     callback = f"channel:check:{inviter}" if inviter else "channel:check"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Открыть канал", url=policy["channel_url"])],
-        [InlineKeyboardButton(text="Проверить подписку", callback_data=callback)],
-    ])
+    return with_close(InlineKeyboardMarkup(inline_keyboard=[
+        [button("channel", url=policy["channel_url"])],
+        [button("check_channel", callback_data=callback)],
+    ]), tracked=True)
 
 
 async def send_subscription_prompt(bot, telegram_id, policy, *, inviter=None):
