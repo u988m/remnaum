@@ -32,7 +32,8 @@ from app.services.users import BlockedCustomer, get_or_create_user
 from app.services.devices import DeviceNotFound, DevicesUnavailable, change_customer_device, get_customer_devices
 from app.services.store_documents import DOCUMENT_TITLES, get_document, list_document_kinds
 from app.services.store_settings import (
-    PROVIDER_LABELS, get_payment_presentation, get_store_payment_settings, is_payment_method_enabled, public_payment_settings,
+    PROVIDER_LABELS, get_payment_presentation, get_store_payment_settings, is_payment_method_enabled,
+    public_payment_settings, rubles_first,
 )
 from app.services.store_profile import get_terms_url
 from app.services.store_profile import get_store_profile
@@ -374,7 +375,7 @@ async def fixed_plan_checkout_handler(callback: CallbackQuery) -> None:
     else:
         methods, credentials = await get_store_payment_settings()
         configured = public_payment_settings(methods, credentials)["configured"]
-        for item in await get_payment_presentation():
+        for item in rubles_first(await get_payment_presentation()):
             provider, label = item["provider"], item["label"]
             if not methods.get(provider) or not configured.get(provider):
                 continue

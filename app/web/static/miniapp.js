@@ -394,7 +394,7 @@ async function loadReferrals() {
     $("account-referral-info").textContent = "Реферальная информация временно недоступна.";
   }
 }
-const providerLabels={telegram_stars:"Telegram Stars",yookassa:"ЮKassa",yoomoney:"ЮMoney",cryptopay:"Crypto Pay",platega:"Platega"};
+const providerLabels={yookassa:"ЮKassa",yoomoney:"ЮMoney",cryptopay:"Crypto Pay",platega:"Platega",telegram_stars:"Telegram Stars"};
 const rubles = new Intl.NumberFormat("ru-RU", {style: "currency", currency: "RUB", minimumFractionDigits: 0});
 const money = minor => rubles.format(minor / 100);
 const trafficLabel = value => value == null ? "—" : value === 0 ? "Безлимит" : value + " ГБ";
@@ -662,7 +662,6 @@ async function loadReadyPlans() {
     ]);
     const methods = paymentInfo?.methods;
     if (methods && !tg?.initData) methods.telegram_stars = false;
-    const rublesFirst = paymentInfo?.presentation?.[0]?.provider !== "telegram_stars";
     const rublesAvailable = !methods || Object.keys(providerLabels).some(key => key !== "telegram_stars" && methods[key]);
     availablePlans = new Map(result.items.map(plan => [plan.id, plan]));
     renderRenewalActions();
@@ -695,26 +694,27 @@ async function loadReadyPlans() {
         description.textContent = plan.description;
         item.append(description);
       }
+      const hasRublePrice = plan.price_rub_minor > 0;
+      const starsAvailable = (!methods || methods.telegram_stars) && plan.price_stars > 0;
       const prices = [];
-      if (rublesAvailable && plan.price_rub_minor > 0) prices.push(money(plan.price_rub_minor));
-      if ((!methods || methods.telegram_stars) && plan.price_stars > 0) {
+      if (hasRublePrice) prices.push(money(plan.price_rub_minor));
+      if (starsAvailable) {
         const stars = providerAmount("telegram_stars", plan.price_stars);
-        if (rublesFirst) prices.push(stars);
-        else prices.unshift(stars);
+        prices.push(hasRublePrice && !rublesAvailable ? "Оплата " + stars : stars);
       }
       const total = document.createElement("span");
       total.className = "plan-total";
-      if (!prices.length) {
-        const notice = document.createElement("span");
-        notice.textContent = "Оплата недоступна";
-        total.append(notice);
-      }
       prices.forEach((amount, index) => {
         const price = document.createElement(index ? "span" : "strong");
         if (!index) price.className = "plan-price";
         price.textContent = amount;
         total.append(price);
       });
+      if (!(hasRublePrice && rublesAvailable) && !starsAvailable) {
+        const notice = document.createElement("span");
+        notice.textContent = "Оплата недоступна";
+        total.append(notice);
+      }
       const arrow = document.createElement("span");
       arrow.textContent = "→";
       arrow.setAttribute("aria-hidden", "true");

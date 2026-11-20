@@ -51,7 +51,7 @@ async def admin_payments_page():
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 from app.services.store_settings import (
     DEFAULT_METHODS, PROVIDER_LABELS, get_store_payment_settings, is_payment_method_enabled,
-    get_payment_presentation, public_payment_settings, update_store_payment_settings,
+    get_payment_presentation, public_payment_settings, rubles_first, update_store_payment_settings,
 )
 
 
@@ -122,7 +122,7 @@ async def public_payment_methods():
     methods = await _get_public_checkout_methods()
     return {
         "methods": methods, "terms_url": await get_terms_url(),
-        "presentation": [item for item in await get_payment_presentation() if methods.get(item["provider"])],
+        "presentation": [item for item in rubles_first(await get_payment_presentation()) if methods.get(item["provider"])],
     }
 
 
