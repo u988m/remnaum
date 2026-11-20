@@ -80,6 +80,8 @@ class Payment(Base):
     status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
     payload: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expiry_notice_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class StorePaymentSettings(Base):

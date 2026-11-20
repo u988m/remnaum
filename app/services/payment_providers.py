@@ -5,6 +5,7 @@ import hmac
 import json
 import uuid
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import quote
@@ -12,6 +13,8 @@ from urllib.parse import quote
 import httpx
 
 from app.config import settings
+
+PAYMENT_WINDOW = timedelta(minutes=30)
 
 
 @dataclass(frozen=True)
@@ -220,7 +223,7 @@ class CryptoPayProvider(PaymentProvider):
                 "payload": str(local_payment_id),
                 "allow_comments": False,
                 "allow_anonymous": False,
-                "expires_in": 3600,
+                "expires_in": int(PAYMENT_WINDOW.total_seconds()),
             },
         )
         url = (result.get("web_app_invoice_url") or result.get("bot_invoice_url")
