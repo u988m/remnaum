@@ -8,7 +8,8 @@ import httpx
 from scripts.release_version import read_version
 
 __version__ = read_version()
-RELEASE_URL = "https://api.github.com/repos/u988m/remnaum/releases/latest"
+RELEASE_REPOSITORY = "u988m/remnaum"
+RELEASE_URL = f"https://api.github.com/repos/{RELEASE_REPOSITORY}/releases/latest"
 RELEASE_NUMBER = r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
 
 _release_lock = asyncio.Lock()

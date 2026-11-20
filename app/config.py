@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     telegram_webhook_secret: str = ""
     telegram_use_webhook: bool = False
     admin_ids: str = ""
+    github_release_webhook_secret: str = ""
     remnawave_base_url: str = ""
     remnawave_api_token: str = ""
     remnawave_webhook_secret: str = ""

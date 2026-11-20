@@ -11,7 +11,7 @@ from aiogram.types import ChatMemberUpdated, CallbackQuery, InlineKeyboardButton
 from redis.exceptions import LockError
 
 from app.bot.membership import SUBSCRIBE_TEXT, active_member, membership_required, send_subscription_prompt
-from app.bot.menu import MenuMiddleware, current_menu, menu_session, remember_menu, remove_command
+from app.bot.menu import MenuMiddleware, current_menu, menu_session, remember_menu, remember_start_command, remove_command
 from app.config import settings
 from app.services.store_operations import get_operations
 from app.services.users import customer_is_blocked, set_bot_blocked
@@ -161,7 +161,7 @@ async def start_handler(message: Message) -> None:
         await register_referral(message.from_user.id, inviter)
     profile = await get_store_profile()
     await send_home_menu(message, message.from_user.id, profile)
-    await remove_command(message)
+    await remember_start_command(message)
 
 
 @router.message(Command("admin"))
