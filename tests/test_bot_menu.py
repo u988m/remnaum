@@ -31,7 +31,7 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
 
         def telegram_message(message_id, **fields):
             return Message.model_validate({
-                "message_id": message_id, "date": 0, "chat": chat, **fields,
+                "message_id": message_id, "date": 1_700_000_000, "chat": chat, **fields,
             }, context={"bot": bot})
 
         async def send(bot, method, timeout=None):
@@ -131,6 +131,9 @@ class BotMenuTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Тариф", messages[101].text)
             await press(handlers.fixed_plan_checkout_handler, messages[101], f"plan:confirm:{order}")
             methods_page = messages[101]
+            self.assertEqual([row[0].callback_data for row in methods_page.reply_markup.inline_keyboard[:2]], [
+                f"plan:pay:platega:{order}", f"plan:pay:stars:{order}",
+            ])
             await press(handlers.fixed_plan_checkout_handler, methods_page, f"plan:pay:platega:{order}")
             await press(handlers.fixed_plan_checkout_handler, methods_page, f"plan:pay:platega:{order}")
             create_external.assert_awaited_once()
