@@ -35,6 +35,11 @@ def payment_presentation(entries: list[dict] | None = None) -> list[dict[str, st
     }).items()]
 
 
+def rubles_first(presentation: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Keep the configured order of ruble providers and show Stars after them."""
+    return sorted(presentation, key=lambda item: item["provider"] == "telegram_stars")
+
+
 async def get_payment_presentation() -> list[dict[str, str]]:
     async with SessionLocal() as session:
         row = await session.get(StorePaymentSettings, 1)

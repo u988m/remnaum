@@ -137,7 +137,21 @@ class CheckoutContracts(unittest.IsolatedAsyncioTestCase):
                          "https://hooks.example/webhooks/payments/yookassa")
         self.assertNotIn("sensitive-secret",json.dumps(data))
 
-    async def test_bot_offers_enabled_methods_when_no_terms_url_is_configured(self):
+    async def test_public_payment_methods_keep_ruble_provider_order_before_stars(self):
+        presentation = [
+            {"provider": "telegram_stars", "label": "Звёзды"},
+            {"provider": "platega", "label": "Platega"},
+            {"provider": "cryptopay", "label": "Crypto Pay"},
+            {"provider": "yookassa", "label": "Карты"},
+        ]
+        with patch.object(routes, "_get_public_checkout_methods", return_value={
+            "telegram_stars": True, "platega": True, "cryptopay": False, "yookassa": True,
+        }), patch.object(routes, "get_payment_presentation", return_value=presentation), \
+             patch.object(routes, "get_terms_url", return_value=""):
+            result = await routes.public_payment_methods()
+        self.assertEqual(result["presentation"], [presentation[1], presentation[3], presentation[0]])
+
+    async def test_bot_offers_enabled_ruble_methods_before_stars_without_terms(self):
         from app.db.models import TariffPlan
         from app.services.plans import plan_revision
 
@@ -157,7 +171,7 @@ class CheckoutContracts(unittest.IsolatedAsyncioTestCase):
              patch.object(handlers, "get_terms_url", return_value=""), \
              patch.object(handlers, "has_accepted_current_terms") as accepted, \
              patch.object(handlers, "get_payment_presentation", return_value=[
-                 {"provider":"yookassa", "label":"Карты"}, {"provider":"telegram_stars", "label":"Звёзды"},
+                 {"provider":"telegram_stars", "label":"Звёзды"}, {"provider":"yookassa", "label":"Карты"},
              ]), \
              patch.object(handlers, "welcome_image_path", return_value=None), \
              patch.object(handlers, "get_store_payment_settings", return_value=(methods, credentials)):
