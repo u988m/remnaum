@@ -91,3 +91,30 @@ class BotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text, "💬 <b>Поддержка</b>")
         self.assertEqual(markup.inline_keyboard[0][0].web_app.url,
                          "https://miniapp.example.test?section=tickets")
+
+
+    async def test_fallback_removes_unknown_commands_and_media_only_in_private_chats(self):
+        bot = Bot("123:test")
+        self.addAsyncCleanup(bot.session.close)
+        user = {"id": 42, "first_name": "Пользователь", "is_bot": False}
+
+        async def receive(message_id, content, *, chat_type="private", sender=user):
+            update = Update.model_validate({
+                "update_id": message_id,
+                "message": {
+                    "message_id": message_id, "date": 1_700_000_000,
+                    "chat": {"id": 42, "type": chat_type}, "from": sender, **content,
+                },
+            }, context={"bot": bot})
+            await main.dispatcher.feed_update(bot, update)
+
+        photo = {"photo": [{"file_id": "photo", "file_unique_id": "unique", "width": 320, "height": 240}]}
+        with patch.object(bot.session, "make_request", return_value=True) as send:
+            await receive(1, {"text": "/unknown"})
+            await receive(2, photo)
+            await receive(3, photo, chat_type="group")
+            await receive(4, photo, sender=user | {"is_bot": True})
+            await receive(5, {"web_app_data": {"data": "{}", "button_text": "Mini App"}})
+            methods = [call.args[1] for call in send.await_args_list]
+            self.assertTrue(all(isinstance(method, DeleteMessage) for method in methods))
+            self.assertEqual([(method.chat_id, method.message_id) for method in methods], [(42, 1), (42, 2)])

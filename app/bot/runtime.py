@@ -5,7 +5,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from app.config import settings
 from app.services.bot_identity import remember_bot
-from app.bot.handlers import router
+from app.bot.handlers import router, unhandled_router
 from app.bot.buttons import style_buttons
 from app.bot.notifications import router as notice_router
 
@@ -13,7 +13,7 @@ bot = Bot(settings.telegram_bot_token, default=DefaultBotProperties(parse_mode=P
 if bot is not None:
     bot.session.middleware(style_buttons)
 dispatcher = Dispatcher()
-dispatcher.include_routers(notice_router, router)
+dispatcher.include_routers(notice_router, router, unhandled_router)
 
 async def setup_bot() -> None:
     if bot is not None:

@@ -4,7 +4,8 @@ import re
 from urllib.parse import urlencode, urlsplit
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.enums import ContentType
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandStart
 from aiogram.types import ChatMemberUpdated, CallbackQuery, CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message, PreCheckoutQuery, WebAppInfo, FSInputFile
 
@@ -51,6 +52,7 @@ from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 router = Router(name="user")
+unhandled_router = Router(name="unhandled_messages")
 router.message.middleware(MenuMiddleware())
 router.callback_query.middleware(MenuMiddleware())
 
@@ -886,7 +888,7 @@ async def device_action_handler(callback: CallbackQuery) -> None:
     await edit_menu_message(callback.message, text, reply_markup=keyboard)
 
 
-@router.message(F.chat.type == "private", F.text, ~F.text.startswith("/"))
+@router.message(F.chat.type == "private", ~F.from_user.is_bot, F.text, ~F.text.startswith("/"))
 async def menu_text_handler(message: Message) -> None:
     menu = current_menu.get()
     if not menu or not message.from_user:
@@ -896,6 +898,7 @@ async def menu_text_handler(message: Message) -> None:
         return
     pending = next((value for value in menu.callbacks if value.startswith("device:nameback:")), None)
     if not pending:
+        await delete_unhandled_message(message)
         return
     _, _, device_id, page_number = pending.split(":")
     name = " ".join(message.text.split())
@@ -1020,3 +1023,20 @@ async def required_channel_update(event: ChatMemberUpdated) -> None:
     except LockError:
         # Every subsequent interaction checks membership directly with Telegram.
         return
+
+
+USER_CONTENT = {
+    ContentType.TEXT, ContentType.PHOTO, ContentType.VIDEO, ContentType.VIDEO_NOTE,
+    ContentType.VOICE, ContentType.AUDIO, ContentType.ANIMATION, ContentType.DOCUMENT,
+    ContentType.STICKER, ContentType.CONTACT, ContentType.LOCATION, ContentType.VENUE,
+    ContentType.POLL, ContentType.DICE, ContentType.STORY, ContentType.LIVE_PHOTO,
+    ContentType.CHECKLIST, ContentType.RICH_MESSAGE,
+}
+
+
+@unhandled_router.message(F.chat.type == "private", ~F.from_user.is_bot, F.content_type.in_(USER_CONTENT))
+async def delete_unhandled_message(message: Message) -> None:
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        logger.debug("Could not delete unhandled Telegram message %s", message.message_id)
