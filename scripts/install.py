@@ -498,7 +498,7 @@ def show_backup_menu(existing: dict[str, str]) -> int:
         ui.section(2, 2, "Восстановление завершено")
         install_global_command()
         backups.configure_timer()
-        install_update_timer()
+        disable_update_timer()
         ui.ok("Remnaum восстановлен. Проверьте DNS и подключение к панели.")
     elif choice == "3":
         ui.menu("Как часто создавать резервные копии?", [
@@ -760,7 +760,7 @@ def perform_update(existing: dict[str, str]) -> int:
     scrub_migrated_legacy_payment_keys()
     install_global_command()
     backups.configure_timer()
-    install_update_timer()
+    disable_update_timer()
     ui.ok("Remnaum обновлён. База, секреты и резервные копии сохранены.")
     return 0
 
@@ -816,46 +816,12 @@ def choose_install_dir(existing: dict[str, str], requested: str | None = None,
     ])
 
 
-def install_update_timer() -> bool:
-    """Install a host-side scheduler that can read the private Git remote safely."""
-    if os.geteuid() != 0:
-        return False
-    if not shutil.which("systemctl") or not Path("/run/systemd/system").exists():
-        print("Systemd недоступен: автоматические уведомления GitHub можно проверять вручную.")
-        return False
-    source = str(ROOT.resolve())
-    git_path = ROOT / ".git"
-    username = os.environ.get("SUDO_USER", "") or pwd.getpwuid(
-        (git_path if git_path.exists() else ROOT).stat().st_uid
-    ).pw_name
-    if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username):
-        username = "root"
-    unit = Path("/etc/systemd/system/remnaum-update-check.service")
+def disable_update_timer() -> None:
+    """Remove the legacy six-hour schedule after the app takes over."""
     timer = Path("/etc/systemd/system/remnaum-update-check.timer")
-    unit.write_text(
-        "[Unit]\nDescription=Remnaum GitHub update checker\n"
-        "[Service]\nType=oneshot\nUser=root\n"
-        f"Environment=REMNAUM_GIT_USER={username}\n"
-        f"WorkingDirectory={source}\n"
-        f"ExecStart=/usr/bin/python3 {source}/scripts/check_updates.py\n",
-        encoding="utf-8",
-    )
-    timer.write_text(
-        "[Unit]\nDescription=Check Remnaum updates every six hours\n"
-        "[Timer]\nOnBootSec=5min\nOnUnitInactiveSec=6h\nPersistent=true\nRandomizedDelaySec=10m\n"
-        "[Install]\nWantedBy=timers.target\n",
-        encoding="utf-8",
-    )
-    os.chmod(unit, 0o644)
-    os.chmod(timer, 0o644)
-    try:
-        run(["systemctl", "daemon-reload"])
-        run(["systemctl", "enable", "--now", "remnaum-update-check.timer"])
-        print("Проверка новых версий GitHub включена (раз в 6 часов).")
-        return True
-    except subprocess.CalledProcessError:
-        print("Не удалось включить таймер GitHub; приложение продолжит работать.")
-        return False
+    if os.geteuid() == 0 and timer.exists() and Path("/run/systemd/system").exists() and shutil.which("systemctl"):
+        run(["systemctl", "disable", "--now", timer.name], check=False, quiet=True)
+
 
 def config_for_install(existing: dict[str, str], mode: str,
                        network_override: str | None, port: int) -> dict[str, str]:
@@ -992,7 +958,7 @@ def config_for_install(existing: dict[str, str], mode: str,
     cfg["TELEGRAM_WEBHOOK_URL"] = "https://" + cfg["PUBLIC_DOMAIN"] + "/telegram/webhook"
     cfg["TELEGRAM_USE_WEBHOOK"] = "true"
     for key in ("APP_SECRET_KEY", "POSTGRES_PASSWORD",
-                "TELEGRAM_WEBHOOK_SECRET", "REMNAWAVE_WEBHOOK_SECRET"):
+                "TELEGRAM_WEBHOOK_SECRET", "REMNAWAVE_WEBHOOK_SECRET", "GITHUB_RELEASE_WEBHOOK_SECRET"):
         if not cfg.get(key):
             cfg[key] = secrets.token_hex(32)
     if not cfg.get("DATABASE_URL"):
@@ -1117,7 +1083,7 @@ def main() -> int:
             print("Локальная панель не совпадает с адресом API; её настройки не меняем.")
     install_global_command()
     backups.configure_timer()
-    install_update_timer()
+    disable_update_timer()
     ui.ok("Remnaum запущен. База создана без тестовых пользователей.")
 
     print("Telegram webhook: " + cfg["TELEGRAM_WEBHOOK_URL"])
@@ -1128,6 +1094,7 @@ def main() -> int:
     print("Remnawave events: https://" + cfg["PUBLIC_DOMAIN"] + "/webhooks/remnawave")
     if mode != "panel" or local_panel_for_url(cfg["REMNAWAVE_BASE_URL"]) is None:
         print("Для удалённой панели параметры вебхука находятся в .env — настройте исходящие события на сервере панели.")
+    print("GitHub Releases: https://" + cfg["PUBLIC_DOMAIN"] + "/webhooks/github/releases (секрет в .env)")
     print("Check: docker compose ps; docker compose logs --tail=100 app")
     return 0
 

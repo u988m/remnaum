@@ -15,13 +15,15 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Response
 from sqlalchemy import Date, cast, func, or_, select
 from aiogram.exceptions import TelegramAPIError
+from redis.exceptions import RedisError
 
 from app.bot.runtime import bot, dispatcher
 from app.config import settings
-from app.version import installed_release_version, latest_release_version
+from app.version import RELEASE_REPOSITORY, installed_release_version, latest_release_version
 from app.db.models import Payment, Subscription, TariffPlan, User
 from app.db.session import SessionLocal
 from app.services.payment_providers import PAYMENT_WINDOW, get_provider
+from app.services.release_notifications import enqueue_release, parse_release, verify_signature
 from app.services.remnawave import RemnawaveClient, panel_client
 from app.services.payment_service import PaymentProviderUnavailable, TermsAcceptanceRequired, settle_payment
 from app.services.tariffs import format_traffic
@@ -153,6 +155,36 @@ async def admin_update_tariff_pricing(data: TariffPricingUpdate, x_telegram_init
         return await update_store_tariff_pricing(data.pricing)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/webhooks/github/releases")
+async def github_release_webhook(request: Request):
+    secret = settings.github_release_webhook_secret
+    if not secret or bot is None or not settings.admin_id_set:
+        raise HTTPException(status_code=404, detail="GitHub release webhook unavailable")
+    body = await request.body()
+    if not verify_signature(body, request.headers.get("X-Hub-Signature-256", ""), secret):
+        raise HTTPException(status_code=403, detail="Invalid GitHub signature")
+    if request.headers.get("X-GitHub-Event") != "release":
+        return {"status": "ignored"}
+    try:
+        event = json.loads(body)
+    except (UnicodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid GitHub payload") from exc
+    if not isinstance(event, dict) or event.get("action") != "published":
+        return {"status": "ignored"}
+    repository = event.get("repository")
+    if not isinstance(repository, dict) or repository.get("full_name") != RELEASE_REPOSITORY:
+        return {"status": "ignored"}
+    release = parse_release(event.get("release"))
+    if release is None:
+        return {"status": "ignored"}
+    try:
+        queued = await enqueue_release(bot.id, release)
+    except RedisError as exc:
+        logger.warning("Could not queue GitHub release %s", release.tag, exc_info=True)
+        raise HTTPException(status_code=503, detail="Could not queue GitHub release") from exc
+    return {"status": "queued" if queued else "ignored"}
 
 
 @router.post("/telegram/webhook")

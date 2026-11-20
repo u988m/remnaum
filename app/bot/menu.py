@@ -1,6 +1,7 @@
 """Track the current menu in each private Telegram chat."""
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ from app.services.users import BLOCKED_MESSAGE, customer_is_blocked
 
 logger = logging.getLogger(__name__)
 redis = Redis.from_url(settings.redis_url, decode_responses=True)
+START_COMMAND = re.compile(r'^/start(?:@[A-Za-z0-9_]+)?(?=\s|$)')
 
 
 @dataclass
@@ -28,6 +30,21 @@ class ActiveMenu:
     key: str
     message_id: int | None = None
     callbacks: list[str] = field(default_factory=list)
+    start_message_id: int | None = None
+
+    async def save(self):
+        await redis.set(self.key, json.dumps({
+            "message_id": self.message_id,
+            "callbacks": self.callbacks,
+            "start_message_id": self.start_message_id,
+        }))
+
+    async def remember_start(self, message_id: int):
+        previous = self.start_message_id
+        self.start_message_id = message_id
+        await self.save()
+        if previous is not None and previous != message_id:
+            await self.remove(previous, menu=False)
 
     async def remember(self, message_id: int, markup: InlineKeyboardMarkup | None, previous_id: int | None = None):
         old_ids = {self.message_id, previous_id} - {None, message_id}
@@ -35,7 +52,7 @@ class ActiveMenu:
         self.callbacks = [
             button.callback_data for row in markup.inline_keyboard for button in row if button.callback_data
         ] if markup else []
-        await redis.set(self.key, json.dumps({"message_id": message_id, "callbacks": self.callbacks}))
+        await self.save()
         for old_id in old_ids:
             await self.remove(old_id)
 
@@ -84,6 +101,11 @@ async def remove_command(message: Message) -> None:
         await state.remove(message.message_id, menu=False)
 
 
+async def remember_start_command(message: Message) -> None:
+    if state := current_menu.get():
+        await state.remember_start(message.message_id)
+
+
 class MenuMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         is_callback = isinstance(event, CallbackQuery)
@@ -101,12 +123,18 @@ class MenuMiddleware(BaseMiddleware):
             return None
         if message.chat.type != "private":
             return None if blocked else await handler(event, data)
+        is_start = not is_callback and START_COMMAND.match(message.text or "") is not None
+        finish_command = remember_start_command if is_start else remove_command
         try:
             async with menu_session(data["bot"], message.chat.id, wait=0.3 if is_callback else 60) as state:
+                if is_start and state.start_message_id is not None and message.message_id <= state.start_message_id:
+                    if message.message_id < state.start_message_id:
+                        await remove_command(message)
+                    return None
                 if blocked:
                     sent = await message.answer(BLOCKED_MESSAGE)
                     await remember_menu(sent, None)
-                    await remove_command(message)
+                    await finish_command(message)
                     return None
                 if is_callback and state.message_id is not None:
                     if state.message_id != message.message_id:
@@ -125,7 +153,7 @@ class MenuMiddleware(BaseMiddleware):
                         inviter = parse_referral_start(message.text) if not is_callback else None
                         await send_subscription_prompt(state.bot, state.chat_id, policy, inviter=inviter)
                         if not is_callback:
-                            await remove_command(message)
+                            await finish_command(message)
                         return None
                 return await handler(event, data)
         except LockError:
