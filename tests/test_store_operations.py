@@ -166,6 +166,20 @@ class BrowserStoreOperationsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["google_client_secret"], "test-secret")
         self.assertEqual(result["extra_devices_max"], 30)
 
+    async def test_connection_guides_are_saved_independently(self):
+        admin = {"X-Telegram-Init-Data": "42"}
+        await store_profile.update_store_profile({"connection_instructions": "Прежняя инструкция"})
+        initial = (await self.client.get("/admin/api/store-profile", headers=admin)).json()
+        self.assertEqual(initial["connection_instructions"], "Прежняя инструкция")
+        self.assertEqual(initial["bot_connection_instructions"], "")
+        result = await self.client.put("/admin/api/store-profile", headers=admin, json={
+            "name": initial["name"], "bot_connection_instructions": "Откройте меню бота",
+        })
+        self.assertEqual(result.status_code, 200, result.text)
+        saved = (await self.client.get("/admin/api/store-profile", headers=admin)).json()
+        self.assertEqual(saved["connection_instructions"], "Прежняя инструкция")
+        self.assertEqual(saved["bot_connection_instructions"], "Откройте меню бота")
+
     async def test_palette_is_global_and_has_separate_support_settings(self):
         guest = {"X-Telegram-Init-Data": "110"}
         admin = {"X-Telegram-Init-Data": "42"}

@@ -2,7 +2,10 @@
 # The installer selects a deployment overlay via COMPOSE_FILE in .env.
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        REMNAUM_BUILD_VERSION: ${REMNAUM_BUILD_VERSION:-0.0.0+dev}
     restart: unless-stopped
     env_file: .env
     expose:

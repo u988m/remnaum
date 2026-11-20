@@ -16,6 +16,7 @@ DEFAULT_PROFILE = {
     "tagline": "",
     "description": "",
     "connection_instructions": "",
+    "bot_connection_instructions": "",
     "accent_color": "#4b8bea",
     "theme_colors": {},
     "support_contact": settings.support_contact,
@@ -28,7 +29,7 @@ def validate_profile(data: dict) -> dict:
         raise ValueError("Unknown store profile field")
     next_values = DEFAULT_PROFILE | data
     for key, maximum in {"name": 80, "tagline": 300, "description": 300, "connection_instructions": 1600,
-                         "support_contact": 300, "terms_url": 300}.items():
+                         "bot_connection_instructions": 1600, "support_contact": 300, "terms_url": 300}.items():
         value = next_values[key]
         if not isinstance(value, str) or len(value) > maximum:
             raise ValueError(f"Invalid {key}")

@@ -17,6 +17,7 @@ from aiogram.exceptions import TelegramAPIError
 
 from app.bot.runtime import bot, dispatcher
 from app.config import settings
+from app.version import __version__
 from app.db.models import Payment, Subscription, TariffPlan, User
 from app.db.session import SessionLocal
 from app.services.payment_providers import get_provider
@@ -438,7 +439,8 @@ async def admin_save_notifications(data: NotificationSettings, x_telegram_init_d
 
 @router.get("/admin", response_class=HTMLResponse)
 async def admin_dashboard_page():
-    return HTMLResponse((Path(__file__).parent / "templates" / "admin.html").read_text(encoding="utf-8"))
+    html = (Path(__file__).parent / "templates" / "admin.html").read_text(encoding="utf-8")
+    return HTMLResponse(html.replace("__REMNAUM_VERSION__", escape(__version__)))
 
 
 @router.get("/admin/api/overview")
@@ -977,6 +979,7 @@ class StoreProfilePayload(BaseModel):
     tagline: str = Field(default="", max_length=300)
     description: str = Field(default="", max_length=300)
     connection_instructions: str = Field(default="", max_length=1600)
+    bot_connection_instructions: str = Field(default="", max_length=1600)
     accent_color: str = Field(default="#4b8bea", pattern=r"^#[a-fA-F0-9]{6}$")
     support_contact: str = Field(default="", max_length=300)
     terms_url: str = Field(default="", max_length=300)

@@ -694,14 +694,19 @@ async def connection_help_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     if not callback.message:
         return
-    await edit_menu_message(callback.message, 
-        "📖 <b>Как подключить VPN</b>\n\n"
-        "1. Установите приложение-клиент, совместимое с подпиской вашей панели Remnawave.\n"
-        "2. Откройте ссылку подключения из раздела «Подписка».\n"
-        "3. Импортируйте ссылку в клиент и обновите список серверов.\n"
-        "4. Выберите сервер и включите соединение.\n\n"
-        "Если профиль не открывается, напишите в поддержку магазина.",
-        reply_markup=back_menu("menu:subscription"),
+    profile = await get_store_profile()
+    instructions = profile["bot_connection_instructions"].strip()
+    if not instructions:
+        instructions = (
+            "1. Установите приложение-клиент, совместимое с подпиской вашей панели Remnawave.\n"
+            "2. Откройте ссылку подключения из раздела «Подписка».\n"
+            "3. Импортируйте ссылку в клиент и обновите список серверов.\n"
+            "4. Выберите сервер и включите соединение.\n\n"
+            "Если профиль не открывается, напишите в поддержку магазина."
+        )
+    await edit_menu_message(
+        callback.message, f"📖 <b>Как подключить VPN</b>\n\n{escape(instructions)}",
+        reply_markup=back_menu("menu:subscription"), with_photo=False,
     )
 
 

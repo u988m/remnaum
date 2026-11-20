@@ -355,6 +355,7 @@ class InstallerTests(unittest.TestCase):
             (root / ".git").mkdir()
             (root / ".env").write_text("COMPOSE_FILE=compose.yaml\n")
             (root / "scripts").mkdir()
+            shutil.copyfile(installer.ROOT / "scripts" / "release_version.py", root / "scripts" / "release_version.py")
             (root / "scripts" / "backup_manager.py").write_text(
                 "ROOT = None\ndef prepare_branding_directory(root): pass\n"
             )

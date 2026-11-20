@@ -29,8 +29,13 @@ flock -n 9 || { echo "Другое обновление или смена пар
 echo "Создаём резервную копию базы..."
 bash backup.sh
 echo "Получаем последнюю версию..."
-git_user fetch --tags origin
+if [[ "$(git_user rev-parse --is-shallow-repository)" == true ]]; then
+  git_user fetch --unshallow --tags origin
+else
+  git_user fetch --tags origin
+fi
 git_user pull --ff-only origin main
+export REMNAUM_BUILD_VERSION="$(python3 scripts/release_version.py)"
 echo "Собираем новый образ приложения..."
 docker compose config --quiet
 docker compose build app
