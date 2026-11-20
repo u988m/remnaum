@@ -17,9 +17,8 @@ _release: str | None = None
 _release_expires_at = 0.0
 
 
-def installed_release_version() -> str | None:
-    version = __version__.split("+", 1)[0]
-    return version if version != "0.0.0" and re.fullmatch(RELEASE_NUMBER, version) else None
+def installed_version() -> str:
+    return __version__
 
 
 async def latest_release_version() -> str | None:
@@ -43,4 +42,4 @@ async def latest_release_version() -> str | None:
                 else:
                     _release = tag.removeprefix("v")
                     _release_expires_at = monotonic() + 1800
-    return _release or installed_release_version()
+    return _release

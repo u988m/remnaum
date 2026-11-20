@@ -42,7 +42,13 @@
 <div class="admin-workspace">
 <section id="overview-view" class="dashboard-view">
   <div class="dashboard-heading">
-    <div><h1>Обзор</h1><p class="muted" id="remnaum-version" aria-live="polite">__REMNAUM_RELEASE__</p></div>
+    <div>
+      <h1>Обзор</h1>
+      <dl class="overview-versions">
+        <div><dt>Установленная версия</dt><dd id="remnaum-version">__REMNAUM_INSTALLED_VERSION__</dd></div>
+        <div><dt>Последний релиз GitHub</dt><dd id="remnaum-github-version" aria-live="polite">Загружаем…</dd></div>
+      </dl>
+    </div>
     <button class="action admin-icon-action" id="overview-refresh" type="button" aria-label="Обновить обзор"><svg aria-hidden="true"><use href="#ai-refresh"/></svg></button>
   </div>
   <div class="overview-metrics">

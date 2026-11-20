@@ -20,7 +20,7 @@ from redis.exceptions import RedisError
 from app.bot.buttons import BUTTONS, ButtonStyle
 from app.bot.runtime import bot, dispatcher
 from app.config import settings
-from app.version import RELEASE_REPOSITORY, installed_release_version, latest_release_version
+from app.version import RELEASE_REPOSITORY, installed_version, latest_release_version
 from app.db.models import Payment, Subscription, TariffPlan, User
 from app.db.session import SessionLocal
 from app.services.payment_providers import PAYMENT_WINDOW, get_provider
@@ -504,9 +504,8 @@ async def admin_dashboard_page(request: Request):
     for asset in ("admin.css", "admin.js"):
         revision = blake2s((web_dir / "static" / asset).read_bytes(), digest_size=8).hexdigest()
         html = html.replace(f'/static/{asset}"', f'/static/{asset}?v={revision}"')
-    version = installed_release_version()
-    label = f"Релиз Remnaum {version}" if version else "Версия релиза Remnaum"
-    return HTMLResponse(html.replace("__REMNAUM_RELEASE__", escape(label)), headers={"Cache-Control": "no-cache"})
+    html = html.replace("__REMNAUM_INSTALLED_VERSION__", escape(installed_version()))
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/admin/api/release-version")

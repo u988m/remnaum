@@ -649,7 +649,10 @@ main { max-width:1480px;padding:16px clamp(14px,3vw,36px) 44px; }
     .provider-webhook button { justify-self: start; }
 }
 
-#remnaum-version { font-size: .84rem; overflow-wrap: anywhere; }
+.overview-versions { display: grid; gap: 4px; margin: 8px 0 0; font-size: .84rem; }
+.overview-versions > div { display: flex; flex-wrap: wrap; gap: 2px 8px; }
+.overview-versions dt { color: var(--color-muted); }
+.overview-versions dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
 #brand-form .editor-group label + label { margin-top: 10px; }
 
 .bot-buttons-form { display: grid; gap: 12px; }
