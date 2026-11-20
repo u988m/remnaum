@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert
 from app.db.models import Subscription, Payment, TariffDraft, TariffPlan, TermsAcceptance, User
 from app.db.session import SessionLocal
 from app.config import settings
-from app.services.payment_providers import VerifiedPayment, get_provider
+from app.services.payment_providers import PAYMENT_WINDOW, VerifiedPayment, get_provider
 from app.services.tariffs import TariffQuote, calculate_store_price, calculate_store_stars_price, ensure_tariff_draft
 from app.services.store_settings import PROVIDER_LABELS, get_store_payment_settings, public_payment_settings
 from app.services.plans import PlanQuote, quote_plan, selected_plan_for_user
@@ -185,7 +185,7 @@ async def create_payment_for_user(
         stored = await session.get(Payment, payment_id, with_for_update=True)
         if stored is None:
             raise RuntimeError("Local payment record disappeared")
-        if stored.status == "pending":
+        if stored.status == "pending" or (stored.status == "cancelled" and stored.expired_at is not None):
             stored.provider_payment_id = link.payment_id
         await session.commit()
     return payment, link
@@ -222,7 +222,10 @@ async def settle_payment(verified: VerifiedPayment, provider_name: str) -> bool:
         )) is not None
         if payment.status == "paid":
             return can_provision
-        if payment.status != "pending":
+        # Gate unpaid checkout locally, but honor money already accepted by a provider
+        # when its confirmation is delayed past the deadline.
+        expired = payment.status == "cancelled" and payment.expired_at is not None
+        if payment.status != "pending" and not expired:
             raise ValueError("Payment is not pending")
         payment.provider_payment_id = verified.provider_payment_id
         payment.status = "paid"
@@ -314,6 +317,7 @@ async def validate_stars_pre_checkout(
                 Payment.id == payment_id,
                 Payment.provider == "telegram_stars",
                 Payment.status == "pending",
+                Payment.created_at > datetime.now(timezone.utc) - PAYMENT_WINDOW,
                 Payment.amount == amount,
                 Payment.currency == "XTR",
                 User.telegram_id == telegram_id, User.blocked_at.is_(None),
@@ -334,7 +338,7 @@ async def validate_stars_pre_checkout(
                 )
         except (ValueError, RuntimeError, TimeoutError):
             return False
-        return True
+        return datetime.now(timezone.utc) < payment.created_at + PAYMENT_WINDOW
 
 
 async def retry_paid_payments_for_user(telegram_id: int) -> None:

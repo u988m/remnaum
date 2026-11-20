@@ -21,7 +21,7 @@ from app.config import settings
 from app.version import installed_release_version, latest_release_version
 from app.db.models import Payment, Subscription, TariffPlan, User
 from app.db.session import SessionLocal
-from app.services.payment_providers import get_provider
+from app.services.payment_providers import PAYMENT_WINDOW, get_provider
 from app.services.remnawave import RemnawaveClient, panel_client
 from app.services.payment_service import PaymentProviderUnavailable, TermsAcceptanceRequired, settle_payment
 from app.services.tariffs import format_traffic
@@ -196,6 +196,11 @@ async def yoomoney_payment_form(payment_id: int):
         payment = await session.scalar(
             select(Payment).where(Payment.id == payment_id, Payment.provider == "yoomoney")
         )
+        if payment is not None and (
+            (payment.status == "cancelled" and payment.expired_at is not None)
+            or (payment.status == "pending" and datetime.now(timezone.utc) >= payment.created_at + PAYMENT_WINDOW)
+        ):
+            raise HTTPException(status_code=410, detail="Срок оплаты истёк. Создайте новый счёт в разделе «Тарифы».")
         if payment is None or payment.status != "pending":
             raise HTTPException(status_code=404, detail="Payment not found or no longer pending")
         amount = f"{payment.amount / 100:.2f}"

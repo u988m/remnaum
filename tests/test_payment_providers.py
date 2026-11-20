@@ -108,6 +108,7 @@ class PaymentProviderTests(unittest.IsolatedAsyncioTestCase):
         def handle(request):
             body = json.loads(request.content)
             self.assertEqual((body["currency_type"], body["fiat"], body["amount"]), ("fiat", "RUB", "100.50"))
+            self.assertEqual(body["expires_in"], 1800)
             return httpx.Response(200, json={"ok": True, "result": {
                 "invoice_id": 123, "pay_url": "https://t.me/CryptoBot?start=invoice",
             }})

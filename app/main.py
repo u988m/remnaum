@@ -14,6 +14,7 @@ from app.config import settings
 from app.version import __version__
 from app.db.session import engine, initialize_schema
 from app.services.squads import refresh_catalog
+from app.services.payment_expiry import run_payment_expiry_forever
 from app.services.payment_recovery import run_payment_recovery_forever
 from app.services.subscription_notifications import run_subscription_notifications
 from app.services.legacy_settings import migrate_legacy_payment_settings
@@ -87,13 +88,16 @@ async def lifespan(_: FastAPI):
         notification_task = asyncio.create_task(run_subscription_notifications(bot))
     sync_task = asyncio.create_task(_sync_squads_periodically())
     payment_recovery_task = asyncio.create_task(run_payment_recovery_forever())
+    payment_expiry_task = asyncio.create_task(run_payment_expiry_forever(bot))
     try:
         yield
     finally:
         if telegram_task and not settings.telegram_use_webhook:
             with suppress(RuntimeError, TimeoutError):
                 await asyncio.wait_for(dispatcher.stop_polling(), timeout=10)
-        tasks = [task for task in (telegram_task, notification_task, sync_task, payment_recovery_task) if task]
+        tasks = [task for task in (
+            telegram_task, notification_task, sync_task, payment_recovery_task, payment_expiry_task,
+        ) if task]
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
