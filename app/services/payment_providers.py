@@ -325,6 +325,11 @@ class PlategaProvider(PaymentProvider):
         if update.get("status") != "CONFIRMED":
             return None
         transaction_id = str(uuid.UUID(str(update.get("id") or "")))
+        return await self.verify_transaction(transaction_id)
+
+    async def verify_transaction(self, transaction_id: str) -> VerifiedPayment | None:
+        """Confirm a transaction against Platega API, including when the callback was lost."""
+        transaction_id = str(uuid.UUID(str(transaction_id)))
         payment = await self._request("GET", f"transaction/{transaction_id}")
         if payment.get("status") != "CONFIRMED":
             return None
