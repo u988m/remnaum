@@ -61,6 +61,9 @@ class ActiveMenu:
             await self.remove(old_id)
 
     async def remove(self, message_id: int, *, menu: bool = True):
+        # Never delete the recorded /start command, even through menu cleanup.
+        if message_id == self.start_message_id:
+            return
         try:
             await self.bot.delete_message(self.chat_id, message_id)
         except TelegramAPIError:
@@ -93,7 +96,7 @@ async def remember_menu(
     state = current_menu.get()
     if state is not None:
         await state.remember(message.message_id, markup, previous.message_id if previous is not None else None)
-    elif previous is not None:
+    elif previous is not None and not is_start_command(getattr(previous, "text", None)):
         try:
             await previous.delete()
         except TelegramAPIError:
@@ -134,13 +137,10 @@ class MenuMiddleware(BaseMiddleware):
         finish_command = remember_start_command if is_start else remove_command
         try:
             async with menu_session(data["bot"], message.chat.id, wait=0.3 if is_callback else 60) as state:
-                if (
-                    is_start and state.start_message_id is not None
-                    and message.message_id <= state.start_message_id
-                    and state.message_id is not None
-                ):
-                    # Skip already handled updates only while the active menu exists.
-                    # An empty menu state must always be recoverable via /start.
+                # Only ignore a redelivered update for the exact same /start.
+                # New commands must always reopen the menu.
+                if (is_start and state.message_id is not None
+                        and message.message_id == state.start_message_id):
                     return None
                 if blocked:
                     markup = with_close(tracked=True)

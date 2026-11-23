@@ -49,6 +49,18 @@ class StartCommandProtectionTests(unittest.IsolatedAsyncioTestCase):
         finally:
             menu.current_menu.reset(token)
 
+    async def test_menu_cleanup_never_deletes_recorded_start(self):
+        bot = SimpleNamespace(delete_message=AsyncMock())
+        state = menu.ActiveMenu(bot=bot, chat_id=42, key="test", start_message_id=15)
+        await state.remove(15)
+        bot.delete_message.assert_not_awaited()
+
+    async def test_replacement_without_state_preserves_start(self):
+        previous = SimpleNamespace(text="/start referral", delete=AsyncMock())
+        message = SimpleNamespace(message_id=17)
+        await menu.remember_menu(message, None, previous=previous)
+        previous.delete.assert_not_awaited()
+
     async def test_replayed_start_rebuilds_missing_menu(self):
         bot = Bot("123:test")
         self.addAsyncCleanup(bot.session.close)
@@ -80,11 +92,16 @@ class StartCommandProtectionTests(unittest.IsolatedAsyncioTestCase):
             patch.object(menu, "customer_is_blocked", return_value=False),
             patch.object(menu, "get_operations", return_value={"required_channel": ""}),
         ):
-            # Duplicate update with an active menu is ignored.
+            # The exact duplicate is ignored while the active menu exists.
             await middleware(handler, message, {"bot": bot})
             handler.assert_not_awaited()
 
-            # When the menu is closed/cleared, the same /start recovers it.
+            # A newer /start always reaches the handler.
+            newer = message.model_copy(update={"message_id": 51})
+            await middleware(handler, newer, {"bot": bot})
+            handler.assert_awaited_once()
+
+            # A cleared menu must be recoverable even with the original command.
             store[key] = json.dumps({"message_id": None, "callbacks": [], "start_message_id": 50})
             await middleware(handler, message, {"bot": bot})
-            handler.assert_awaited_once()
+            self.assertEqual(handler.await_count, 2)
