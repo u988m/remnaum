@@ -17,7 +17,7 @@ async def initialize_schema(connection):
     await connection.execute(text("SELECT pg_advisory_xact_lock(hashtext('remnaum-schema'))"))
 
     def upgrade(sync_connection):
-        config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+        config = Config(str(Path(__file__).resolve().parents[2] / "migrations" / "alembic.ini"))
         config.attributes["connection"] = sync_connection
         command.upgrade(config, "head")
 

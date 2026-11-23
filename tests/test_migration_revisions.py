@@ -8,7 +8,7 @@ from alembic.script import ScriptDirectory
 
 class MigrationRevisionTests(unittest.TestCase):
     def test_alembic_has_single_head(self):
-        config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+        config = Config(str(Path(__file__).resolve().parents[1] / "migrations" / "alembic.ini"))
         script = ScriptDirectory.from_config(config)
         self.assertEqual(script.get_heads(), ["0010_payment_expiry"])
         self.assertEqual(script.get_revision("0010_payment_expiry").down_revision, "0009_ticket_activity")

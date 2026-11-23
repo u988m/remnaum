@@ -93,15 +93,15 @@ class InstallerTests(unittest.TestCase):
     def test_mode_files_never_load_caddy_on_panel(self):
         self.assertEqual(
             installer.mode_files("standalone"),
-            "compose.yaml:compose.standalone.yaml",
+            "compose.yaml:deploy/compose/compose.standalone.yaml",
         )
         self.assertEqual(
             installer.mode_files("panel"),
-            "compose.yaml:compose.panel.yaml",
+            "compose.yaml:deploy/compose/compose.panel.yaml",
         )
         self.assertEqual(
             installer.mode_files("panel", "remnawave-network"),
-            "compose.yaml:compose.panel.yaml:compose.panel-network.yaml",
+            "compose.yaml:deploy/compose/compose.panel.yaml:deploy/compose/compose.panel-network.yaml",
         )
         with self.assertRaises(ValueError):
             installer.mode_files("unknown")
@@ -260,7 +260,7 @@ class InstallerTests(unittest.TestCase):
              patch.object(installer, "disable_update_timer", return_value=True):
             self.assertEqual(installer.perform_update({
                 "DEPLOY_MODE": "panel",
-                "COMPOSE_FILE": "compose.yaml:compose.panel.yaml",
+                "COMPOSE_FILE": "compose.yaml:deploy/compose/compose.panel.yaml",
             }), 0)
         self.assertEqual(runner.call_args_list[0].args[0], ["bash", "update.sh"])
         self.assertEqual(runner.call_args_list[1].args[0], ["docker", "compose", "ps"])

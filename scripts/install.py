@@ -210,10 +210,10 @@ def loopback_available(port: int) -> bool:
 
 def mode_files(mode: str, network: str = "") -> str:
     if mode == "standalone":
-        return "compose.yaml:compose.standalone.yaml"
+        return "compose.yaml:deploy/compose/compose.standalone.yaml"
     if mode == "panel":
-        return ("compose.yaml:compose.panel.yaml:compose.panel-network.yaml"
-                if network else "compose.yaml:compose.panel.yaml")
+        return ("compose.yaml:deploy/compose/compose.panel.yaml:deploy/compose/compose.panel-network.yaml"
+                if network else "compose.yaml:deploy/compose/compose.panel.yaml")
     raise ValueError("Unsupported deployment mode")
 
 

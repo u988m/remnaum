@@ -26,11 +26,11 @@ jobs:
           chmod 600 .env
           if [ "${{ matrix.mode }}" = panel ]; then
             sed -i 's|^DEPLOY_MODE=.*|DEPLOY_MODE=panel|' .env
-            sed -i 's|^COMPOSE_FILE=.*|COMPOSE_FILE=compose.yaml:compose.panel.yaml|' .env
+            sed -i 's|^COMPOSE_FILE=.*|COMPOSE_FILE=compose.yaml:deploy/compose/compose.panel.yaml|' .env
           elif [ "${{ matrix.mode }}" = panel-network ]; then
             docker network create remnawave-network
             sed -i 's|^DEPLOY_MODE=.*|DEPLOY_MODE=panel|' .env
-            sed -i 's|^COMPOSE_FILE=.*|COMPOSE_FILE=compose.yaml:compose.panel.yaml:compose.panel-network.yaml|' .env
+            sed -i 's|^COMPOSE_FILE=.*|COMPOSE_FILE=compose.yaml:deploy/compose/compose.panel.yaml:deploy/compose/compose.panel-network.yaml|' .env
             sed -i 's|^REMNAUM_PROXY_NETWORK=.*|REMNAUM_PROXY_NETWORK=remnawave-network|' .env
           fi
       - name: Validate scripts, installer and Compose isolation
