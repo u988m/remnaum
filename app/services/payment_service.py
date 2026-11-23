@@ -207,7 +207,12 @@ async def settle_payment(verified: VerifiedPayment, provider_name: str) -> bool:
             raise ValueError("Local payment not found")
         if payment.provider != provider_name:
             raise ValueError("Payment provider mismatch")
-        if payment.amount != verified.amount_minor or payment.currency.upper() != verified.currency.upper():
+        # Platega can charge the payer a variable fee on top of the quoted price.
+        # Accept at most 15% extra, never less than the quoted price, and never another currency.
+        amount_matches = (payment.amount == verified.amount_minor)
+        if provider_name == "platega":
+            amount_matches = payment.amount <= verified.amount_minor <= (payment.amount * 115 // 100)
+        if not amount_matches or payment.currency.upper() != verified.currency.upper():
             raise ValueError("Payment amount or currency mismatch")
         if (
             payment.provider_payment_id
