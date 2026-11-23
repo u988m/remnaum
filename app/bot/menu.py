@@ -61,6 +61,9 @@ class ActiveMenu:
             await self.remove(old_id)
 
     async def remove(self, message_id: int, *, menu: bool = True):
+        # Never delete the recorded /start command, even through menu cleanup.
+        if message_id == self.start_message_id:
+            return
         try:
             await self.bot.delete_message(self.chat_id, message_id)
         except TelegramAPIError:
@@ -93,7 +96,7 @@ async def remember_menu(
     state = current_menu.get()
     if state is not None:
         await state.remember(message.message_id, markup, previous.message_id if previous is not None else None)
-    elif previous is not None:
+    elif previous is not None and not is_start_command(previous.text):
         try:
             await previous.delete()
         except TelegramAPIError:
