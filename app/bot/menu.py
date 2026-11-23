@@ -24,6 +24,11 @@ redis = Redis.from_url(settings.redis_url, decode_responses=True)
 START_COMMAND = re.compile(r'^/start(?:@[A-Za-z0-9_]+)?(?=\s|$)')
 
 
+def is_start_command(text: str | None) -> bool:
+    """Recognize Telegram /start and deep-link starts without deleting them."""
+    return START_COMMAND.match(text or "") is not None
+
+
 @dataclass
 class ActiveMenu:
     bot: Bot
@@ -41,11 +46,9 @@ class ActiveMenu:
         }))
 
     async def remember_start(self, message_id: int):
-        previous = self.start_message_id
-        self.start_message_id = message_id
+        # Keep /start messages in chat. Track the newest ID only for replay protection.
+        self.start_message_id = max(message_id, self.start_message_id or message_id)
         await self.save()
-        if previous is not None and previous != message_id:
-            await self.remove(previous, menu=False)
 
     async def remember(self, message_id: int, markup: InlineKeyboardMarkup | None, previous_id: int | None = None):
         old_ids = {self.message_id, previous_id} - {None, message_id}
@@ -98,6 +101,9 @@ async def remember_menu(
 
 
 async def remove_command(message: Message) -> None:
+    # /start is an entry point, not disposable chat input.
+    if is_start_command(message.text):
+        return
     if state := current_menu.get():
         await state.remove(message.message_id, menu=False)
 
@@ -124,13 +130,17 @@ class MenuMiddleware(BaseMiddleware):
             return None
         if message.chat.type != "private":
             return None if blocked else await handler(event, data)
-        is_start = not is_callback and START_COMMAND.match(message.text or "") is not None
+        is_start = not is_callback and is_start_command(message.text)
         finish_command = remember_start_command if is_start else remove_command
         try:
             async with menu_session(data["bot"], message.chat.id, wait=0.3 if is_callback else 60) as state:
-                if is_start and state.start_message_id is not None and message.message_id <= state.start_message_id:
-                    if message.message_id < state.start_message_id:
-                        await remove_command(message)
+                if (
+                    is_start and state.start_message_id is not None
+                    and message.message_id <= state.start_message_id
+                    and state.message_id is not None
+                ):
+                    # Skip already handled updates only while the active menu exists.
+                    # An empty menu state must always be recoverable via /start.
                     return None
                 if blocked:
                     markup = with_close(tracked=True)
