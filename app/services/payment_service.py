@@ -196,6 +196,13 @@ def _tariff_currency() -> str:
     return settings.tariff_currency.upper()
 
 
+def payment_amount_matches(provider_name: str, expected_minor: int, actual_minor: int) -> bool:
+    """Permit only verified Platega payer surcharges up to 15%; never underpayments."""
+    if provider_name == "platega":
+        return expected_minor <= actual_minor <= expected_minor * 115 // 100
+    return expected_minor == actual_minor
+
+
 async def settle_payment(verified: VerifiedPayment, provider_name: str) -> bool:
     async with SessionLocal() as session:
         payment = await session.scalar(
@@ -207,12 +214,7 @@ async def settle_payment(verified: VerifiedPayment, provider_name: str) -> bool:
             raise ValueError("Local payment not found")
         if payment.provider != provider_name:
             raise ValueError("Payment provider mismatch")
-        # Platega can charge the payer a variable fee on top of the quoted price.
-        # Accept at most 15% extra, never less than the quoted price, and never another currency.
-        amount_matches = (payment.amount == verified.amount_minor)
-        if provider_name == "platega":
-            amount_matches = payment.amount <= verified.amount_minor <= (payment.amount * 115 // 100)
-        if not amount_matches or payment.currency.upper() != verified.currency.upper():
+        if not payment_amount_matches(provider_name, payment.amount, verified.amount_minor) or payment.currency.upper() != verified.currency.upper():
             raise ValueError("Payment amount or currency mismatch")
         if (
             payment.provider_payment_id
