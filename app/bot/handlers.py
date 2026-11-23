@@ -14,7 +14,7 @@ from redis.exceptions import LockError
 from app.bot.buttons import button
 from app.bot.notifications import with_close
 from app.bot.membership import SUBSCRIBE_TEXT, active_member, membership_required, send_subscription_prompt
-from app.bot.menu import MenuMiddleware, current_menu, menu_session, remember_menu, remember_start_command, remove_command
+from app.bot.menu import MenuMiddleware, current_menu, is_start_command, menu_session, remember_menu, remember_start_command, remove_command
 from app.config import settings
 from app.services.store_operations import get_operations
 from app.services.users import customer_is_blocked, set_bot_blocked
@@ -1036,6 +1036,9 @@ USER_CONTENT = {
 
 @unhandled_router.message(F.chat.type == "private", ~F.from_user.is_bot, F.content_type.in_(USER_CONTENT))
 async def delete_unhandled_message(message: Message) -> None:
+    # Even fallback cleanup must never remove the command that opens the bot.
+    if is_start_command(message.text):
+        return
     try:
         await message.delete()
     except TelegramAPIError:
