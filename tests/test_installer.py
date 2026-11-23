@@ -381,12 +381,17 @@ class InstallerTests(unittest.TestCase):
             env_file.write_text(
                 "COMPOSE_FILE=compose.yaml:compose.panel.yaml:compose.panel-network.yaml\n"
             )
+            (root / "deploy" / "compose").mkdir(parents=True)
+            (root / "deploy" / "compose" / "compose.panel.yaml").touch()
             (root / "scripts").mkdir()
             shutil.copyfile(installer.ROOT / "scripts" / "release_version.py", root / "scripts" / "release_version.py")
             (root / "scripts" / "backup_manager.py").write_text(
                 "ROOT = None\ndef prepare_branding_directory(root): pass\n"
             )
-            (root / "backup.sh").write_text('echo backup >> "$TEST_UPDATE_LOG"\n')
+            (root / "backup.sh").write_text(
+                'grep -q "deploy/compose/compose.panel.yaml" .env || exit 9\n'
+                'echo backup >> "$TEST_UPDATE_LOG"\n'
+            )
             (root / "git").write_text(
                 '#!/bin/bash\nif [[ "$*" == *"branch --show-current" ]]; then echo main; fi\n'
             )

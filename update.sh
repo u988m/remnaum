@@ -21,23 +21,8 @@ if ! grep -q "^COMPOSE_FILE=" .env; then
   exit 1
 fi
 
-mkdir -p data
-(umask 077; touch data/.deploy.lock)
-exec 9<data/.deploy.lock
-flock -n 9 || { echo "Другое обновление или смена пароля уже выполняется." >&2; exit 1; }
-
-echo "Создаём резервную копию базы..."
-bash backup.sh
-echo "Получаем последнюю версию..."
-if [[ "$(git_user rev-parse --is-shallow-repository)" == true ]]; then
-  git_user fetch --unshallow --tags origin
-else
-  git_user fetch --tags origin
-fi
-git_user pull --ff-only origin main
-# Earlier releases stored the deployment overlays in the repository root.
-# Migrate existing installations before the first Compose command after pull.
-python3 - <<'PY'
+migrate_compose_paths() {
+  python3 - <<'PY'
 from pathlib import Path
 
 env_path = Path(".env")
@@ -57,6 +42,29 @@ for line in lines:
     updated.append(line)
 env_path.write_text("".join(updated), encoding="utf-8")
 PY
+}
+
+# If a previous update already moved the files, migrate before backup.sh uses Compose.
+if [[ -f deploy/compose/compose.panel.yaml ]]; then
+  migrate_compose_paths
+fi
+
+mkdir -p data
+(umask 077; touch data/.deploy.lock)
+exec 9<data/.deploy.lock
+flock -n 9 || { echo "Другое обновление или смена пароля уже выполняется." >&2; exit 1; }
+
+echo "Создаём резервную копию базы..."
+bash backup.sh
+echo "Получаем последнюю версию..."
+if [[ "$(git_user rev-parse --is-shallow-repository)" == true ]]; then
+  git_user fetch --unshallow --tags origin
+else
+  git_user fetch --tags origin
+fi
+git_user pull --ff-only origin main
+# Migrate installations updated from the previous layout before using Compose.
+migrate_compose_paths
 export REMNAUM_BUILD_VERSION="$(python3 scripts/release_version.py)"
 echo "Собираем новый образ приложения..."
 docker compose config --quiet
