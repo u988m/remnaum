@@ -377,7 +377,10 @@ class InstallerTests(unittest.TestCase):
             root = Path(temp)
             shutil.copyfile(installer.ROOT / "update.sh", root / "update.sh")
             (root / ".git").mkdir()
-            (root / ".env").write_text("COMPOSE_FILE=compose.yaml\n")
+            env_file = root / ".env"
+            env_file.write_text(
+                "COMPOSE_FILE=compose.yaml:compose.panel.yaml:compose.panel-network.yaml\n"
+            )
             (root / "scripts").mkdir()
             shutil.copyfile(installer.ROOT / "scripts" / "release_version.py", root / "scripts" / "release_version.py")
             (root / "scripts" / "backup_manager.py").write_text(
@@ -407,6 +410,11 @@ class InstallerTests(unittest.TestCase):
                         capture_output=True, text=True, check=False,
                     )
                     self.assertEqual(check.returncode, result, check.stderr)
+                    self.assertEqual(
+                        env_file.read_text(),
+                        "COMPOSE_FILE=compose.yaml:deploy/compose/compose.panel.yaml:"
+                        "deploy/compose/compose.panel-network.yaml\n",
+                    )
                     expected = [
                         "backup",
                         "compose config --quiet",
