@@ -104,7 +104,7 @@ class PaymentExpiryTests(unittest.IsolatedAsyncioTestCase):
     async def test_late_payment_is_honored_and_suppresses_unsent_expiry_notice(self):
         order_id = await self.add_order(31, reference="provider-id")
         await payment_expiry.expire_unpaid_payments()
-        wrong = VerifiedPayment(order_id, "provider-id", 101, "RUB")
+        wrong = VerifiedPayment(order_id, "provider-id", 116, "RUB")
         with self.assertRaisesRegex(ValueError, "amount or currency mismatch"):
             await payment_service.settle_payment(wrong, "platega")
         good = VerifiedPayment(order_id, "provider-id", 100, "RUB")
