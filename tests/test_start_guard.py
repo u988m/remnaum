@@ -92,11 +92,16 @@ class StartCommandProtectionTests(unittest.IsolatedAsyncioTestCase):
             patch.object(menu, "customer_is_blocked", return_value=False),
             patch.object(menu, "get_operations", return_value={"required_channel": ""}),
         ):
-            # /start must work even when the stored menu still looks active.
+            # The exact duplicate is ignored while the active menu exists.
             await middleware(handler, message, {"bot": bot})
+            handler.assert_not_awaited()
+
+            # A newer /start always reaches the handler.
+            newer = message.model_copy(update={"message_id": 51})
+            await middleware(handler, newer, {"bot": bot})
             handler.assert_awaited_once()
 
-            # A cleared menu must also be recoverable with the same command.
+            # A cleared menu must be recoverable even with the original command.
             store[key] = json.dumps({"message_id": None, "callbacks": [], "start_message_id": 50})
             await middleware(handler, message, {"bot": bot})
             self.assertEqual(handler.await_count, 2)
