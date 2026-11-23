@@ -834,7 +834,7 @@ def prompt_existing_setting(label: str, current: str, *, hidden: bool = False) -
 
 
 def config_for_install(existing: dict[str, str], mode: str,
-                       network_override: str | None, port: int) -> dict[str, str]:
+                       network_override: str | None, port: int, *, reconfigure: bool = False) -> dict[str, str]:
     cfg = existing.copy()
     old_mode = cfg.get("DEPLOY_MODE", "")
     if not cfg:
@@ -855,7 +855,7 @@ def config_for_install(existing: dict[str, str], mode: str,
                                "@postgres:5432/remnaum")
 
     public = existing.get("PUBLIC_DOMAIN", "").strip().lower()
-    if existing:
+    if existing and reconfigure:
         public = prompt_existing_setting("Домен вебхуков", public).strip().lower()
     if not valid_domain(public):
         public = prompt("Домен вебхуков, например webhook.ваш-домен (без https://)").lower()
@@ -873,7 +873,7 @@ def config_for_install(existing: dict[str, str], mode: str,
         ("BROWSER_DOMAIN", "Поддомен браузерной версии (без https://)", "web"),
     ):
         address = existing.get(key, "").strip().lower()
-        if existing:
+        if existing and reconfigure:
             address = prompt_existing_setting(label, address).strip().lower()
         if not valid_domain(address) or address in used:
             default = f"{prefix}.{zone}"
@@ -886,7 +886,7 @@ def config_for_install(existing: dict[str, str], mode: str,
         used.add(address)
 
     if mode == "standalone":
-        if existing:
+        if existing and reconfigure:
             cfg["ACME_EMAIL"] = prompt_existing_setting("Email SSL-сертификата", cfg.get("ACME_EMAIL", ""))
         if not cfg.get("ACME_EMAIL") or cfg["ACME_EMAIL"].endswith("@example.com"):
             cfg["ACME_EMAIL"] = prompt("Email для SSL-сертификата Caddy")
@@ -918,7 +918,7 @@ def config_for_install(existing: dict[str, str], mode: str,
                 cfg["REMNAWAVE_BASE_URL"] = "https://" + panel_domain
                 print("✅ Адрес установленной панели найден автоматически:", cfg["REMNAWAVE_BASE_URL"])
 
-    if existing:
+    if existing and reconfigure:
         previous_token = cfg.get("TELEGRAM_BOT_TOKEN", "")
         cfg["TELEGRAM_BOT_TOKEN"] = prompt_existing_setting(
             "Токен Telegram-бота", previous_token, hidden=True,
@@ -949,7 +949,7 @@ def config_for_install(existing: dict[str, str], mode: str,
         ("REMNAWAVE_API_TOKEN", "API-токен Remnawave", True),
     )
     for key, label, hidden in required:
-        if existing:
+        if existing and reconfigure:
             cfg[key] = prompt_existing_setting(label, cfg.get(key, ""), hidden=hidden)
         if not cfg.get(key):
             cfg[key] = prompt(label, hidden=hidden)
@@ -1055,7 +1055,7 @@ def main() -> int:
     if existing:
         print("  Remnaum уже установлен. Enter — оставить прежнее значение; новый ввод — заменить.")
         print("  Секретные значения не показываются. База данных и подписки сохраняются.")
-    cfg = config_for_install(existing, mode, args.proxy_network, port)
+    cfg = config_for_install(existing, mode, args.proxy_network, port, reconfigure=bool(existing))
     offer_backup_key()
     if not existing:
         base = ROOT / ".env.example"
