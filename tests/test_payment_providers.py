@@ -117,6 +117,24 @@ class PaymentProviderTests(unittest.IsolatedAsyncioTestCase):
         invoice = await provider.create_payment(local_payment_id=2, amount_minor=10050, currency="RUB", description="VPN")
         self.assertEqual(invoice.url, "https://t.me/CryptoBot?start=invoice")
 
+    async def test_platega_reconciles_confirmed_transaction_without_webhook(self):
+        reference = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+
+        def handle(request):
+            self.assertEqual(request.method, "GET")
+            self.assertEqual(request.url.path, f"/transaction/{reference}")
+            return httpx.Response(200, json={
+                "id": reference, "status": "CONFIRMED", "payload": "remnaum-7",
+                "paymentDetails": {"amount": 99.50, "currency": "RUB"},
+            })
+
+        provider = PlategaProvider(httpx.MockTransport(handle), credentials={
+            "merchant_id": "test-merchant", "secret_key": "test-secret",
+        })
+        verified = await provider.verify_transaction(reference)
+        self.assertEqual((verified.local_payment_id, verified.provider_payment_id), (7, reference))
+        self.assertEqual((verified.amount_minor, verified.currency), (9950, "RUB"))
+
     async def test_platega_checks_confirmed_payment_details_at_provider(self):
         reference = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
         headers = {"x-merchantid": "test-merchant", "x-secret": "test-secret"}
