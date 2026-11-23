@@ -9,6 +9,7 @@ import logging
 import httpx
 from math import ceil
 from pathlib import Path
+from urllib.parse import urlsplit
 from html import escape
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
@@ -93,7 +94,9 @@ async def admin_payment_diagnostics(x_telegram_init_data: str | dict | None = De
     await _require_telegram_admin(x_telegram_init_data)
     methods, credentials = await get_store_payment_settings()
     configured = public_payment_settings(methods, credentials)["configured"]
-    base = settings.public_base_url.rstrip("/")
+    webhook = urlsplit(settings.telegram_webhook_url)
+    base = (f"{webhook.scheme}://{webhook.netloc}" if webhook.scheme == "https" and webhook.netloc
+            else settings.public_base_url.rstrip("/"))
     return {
         "terms_url": await get_terms_url(),
         "presentation": await get_payment_presentation(),
