@@ -13,6 +13,30 @@ import install as installer
 
 
 class InstallerTests(unittest.TestCase):
+    def test_reconfigure_existing_values_can_be_kept_or_replaced(self):
+        existing = {
+            "PUBLIC_DOMAIN": "hook.myvpn.site",
+            "WEBAPP_DOMAIN": "miniapp.myvpn.site",
+            "BROWSER_DOMAIN": "web.myvpn.site",
+            "TELEGRAM_BOT_TOKEN": "1234567:" + "a" * 30,
+            "TELEGRAM_BOT_USERNAME": "myvpn_bot",
+            "ADMIN_IDS": "123",
+            "REMNAWAVE_BASE_URL": "https://panel.myvpn.site",
+            "REMNAWAVE_API_TOKEN": "old-secret",
+        }
+        def ask(label, *, default="", **kwargs):
+            if label.startswith("Telegram ID"):
+                return "456"
+            return default
+        with patch.object(installer, "prompt", side_effect=ask), patch.object(
+            installer, "local_panel_for_url", return_value=None
+        ):
+            cfg = installer.config_for_install(existing, "panel", "none", 18080, reconfigure=True)
+        self.assertEqual(cfg["ADMIN_IDS"], "456")
+        self.assertEqual(cfg["REMNAWAVE_API_TOKEN"], "old-secret")
+        self.assertEqual(cfg["TELEGRAM_BOT_TOKEN"], existing["TELEGRAM_BOT_TOKEN"])
+        self.assertEqual(cfg["PUBLIC_DOMAIN"], existing["PUBLIC_DOMAIN"])
+
     def test_dns_hostname_validation(self):
         self.assertTrue(installer.valid_domain("webhook.myvpn.site"))
         self.assertTrue(installer.valid_domain("vpn-shop.myvpn.site"))

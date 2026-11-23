@@ -823,8 +823,18 @@ def disable_update_timer() -> None:
         run(["systemctl", "disable", "--now", timer.name], check=False, quiet=True)
 
 
+def prompt_existing_setting(label: str, current: str, *, hidden: bool = False) -> str:
+    """Empty input keeps an installed value; never reveal secrets in terminal history."""
+    if hidden:
+        print(f"  {label}: {'настроено' if current else 'не настроено'}")
+        value = prompt(f"{label} (Enter — оставить прежнее)", hidden=True, required=False)
+    else:
+        value = prompt(f"{label} (Enter — оставить прежнее)", default=current, required=False)
+    return value or current
+
+
 def config_for_install(existing: dict[str, str], mode: str,
-                       network_override: str | None, port: int) -> dict[str, str]:
+                       network_override: str | None, port: int, *, reconfigure: bool = False) -> dict[str, str]:
     cfg = existing.copy()
     old_mode = cfg.get("DEPLOY_MODE", "")
     if not cfg:
@@ -845,6 +855,8 @@ def config_for_install(existing: dict[str, str], mode: str,
                                "@postgres:5432/remnaum")
 
     public = existing.get("PUBLIC_DOMAIN", "").strip().lower()
+    if existing and reconfigure:
+        public = prompt_existing_setting("Домен вебхуков", public).strip().lower()
     if not valid_domain(public):
         public = prompt("Домен вебхуков, например webhook.ваш-домен (без https://)").lower()
     if not valid_domain(public):
@@ -861,6 +873,8 @@ def config_for_install(existing: dict[str, str], mode: str,
         ("BROWSER_DOMAIN", "Поддомен браузерной версии (без https://)", "web"),
     ):
         address = existing.get(key, "").strip().lower()
+        if existing and reconfigure:
+            address = prompt_existing_setting(label, address).strip().lower()
         if not valid_domain(address) or address in used:
             default = f"{prefix}.{zone}"
             if default in used:
@@ -872,6 +886,8 @@ def config_for_install(existing: dict[str, str], mode: str,
         used.add(address)
 
     if mode == "standalone":
+        if existing and reconfigure:
+            cfg["ACME_EMAIL"] = prompt_existing_setting("Email SSL-сертификата", cfg.get("ACME_EMAIL", ""))
         if not cfg.get("ACME_EMAIL") or cfg["ACME_EMAIL"].endswith("@example.com"):
             cfg["ACME_EMAIL"] = prompt("Email для SSL-сертификата Caddy")
         if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", cfg["ACME_EMAIL"]):
@@ -902,10 +918,24 @@ def config_for_install(existing: dict[str, str], mode: str,
                 cfg["REMNAWAVE_BASE_URL"] = "https://" + panel_domain
                 print("✅ Адрес установленной панели найден автоматически:", cfg["REMNAWAVE_BASE_URL"])
 
+    if existing and reconfigure:
+        previous_token = cfg.get("TELEGRAM_BOT_TOKEN", "")
+        cfg["TELEGRAM_BOT_TOKEN"] = prompt_existing_setting(
+            "Токен Telegram-бота", previous_token, hidden=True,
+        )
+        if not BOT_TOKEN_RE.fullmatch(cfg["TELEGRAM_BOT_TOKEN"]):
+            raise ValueError("Неверный формат токена Telegram.")
+        if cfg["TELEGRAM_BOT_TOKEN"] != previous_token:
+            # The old username belongs to the old bot and must not be retained.
+            cfg["TELEGRAM_BOT_USERNAME"] = ""
     if not cfg.get("TELEGRAM_BOT_TOKEN"):
         cfg["TELEGRAM_BOT_TOKEN"] = prompt("Токен Telegram-бота из BotFather", hidden=True)
         if not BOT_TOKEN_RE.fullmatch(cfg["TELEGRAM_BOT_TOKEN"]):
             raise ValueError("Неверный формат токена Telegram. Проверьте токен из BotFather.")
+    if existing and reconfigure and cfg.get("TELEGRAM_BOT_USERNAME"):
+        cfg["TELEGRAM_BOT_USERNAME"] = prompt_existing_setting(
+            "Username бота (без @)", cfg["TELEGRAM_BOT_USERNAME"],
+        ).lstrip("@")
     if not cfg.get("TELEGRAM_BOT_USERNAME"):
         info = identify_telegram_bot(cfg["TELEGRAM_BOT_TOKEN"])
         if info is not None:
@@ -919,6 +949,8 @@ def config_for_install(existing: dict[str, str], mode: str,
         ("REMNAWAVE_API_TOKEN", "API-токен Remnawave", True),
     )
     for key, label, hidden in required:
+        if existing and reconfigure:
+            cfg[key] = prompt_existing_setting(label, cfg.get(key, ""), hidden=hidden)
         if not cfg.get(key):
             cfg[key] = prompt(label, hidden=hidden)
     # On a shared host reuse the already configured secret so other Panel
@@ -1020,7 +1052,10 @@ def main() -> int:
         port = chosen_port
 
     ui.section(3, 5, "Настройки Remnaum")
-    cfg = config_for_install(existing, mode, args.proxy_network, port)
+    if existing:
+        print("  Remnaum уже установлен. Enter — оставить прежнее значение; новый ввод — заменить.")
+        print("  Секретные значения не показываются. База данных и подписки сохраняются.")
+    cfg = config_for_install(existing, mode, args.proxy_network, port, reconfigure=bool(existing))
     offer_backup_key()
     if not existing:
         base = ROOT / ".env.example"
