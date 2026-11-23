@@ -95,7 +95,8 @@ async def admin_payment_diagnostics(x_telegram_init_data: str | dict | None = De
     methods, credentials = await get_store_payment_settings()
     configured = public_payment_settings(methods, credentials)["configured"]
     webhook = urlsplit(settings.telegram_webhook_url)
-    base = f"{webhook.scheme}://{webhook.netloc}" if webhook.scheme == "https" and webhook.netloc else ""
+    base = (f"{webhook.scheme}://{webhook.netloc}" if webhook.scheme == "https" and webhook.netloc
+            else settings.public_base_url.rstrip("/"))
     return {
         "terms_url": await get_terms_url(),
         "presentation": await get_payment_presentation(),
