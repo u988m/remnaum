@@ -49,6 +49,18 @@ class StartCommandProtectionTests(unittest.IsolatedAsyncioTestCase):
         finally:
             menu.current_menu.reset(token)
 
+    async def test_menu_cleanup_never_deletes_recorded_start(self):
+        bot = SimpleNamespace(delete_message=AsyncMock())
+        state = menu.ActiveMenu(bot=bot, chat_id=42, key="test", start_message_id=15)
+        await state.remove(15)
+        bot.delete_message.assert_not_awaited()
+
+    async def test_replacement_without_state_preserves_start(self):
+        previous = SimpleNamespace(text="/start referral", delete=AsyncMock())
+        message = SimpleNamespace(message_id=17)
+        await menu.remember_menu(message, None, previous=previous)
+        previous.delete.assert_not_awaited()
+
     async def test_replayed_start_rebuilds_missing_menu(self):
         bot = Bot("123:test")
         self.addAsyncCleanup(bot.session.close)
