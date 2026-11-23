@@ -932,7 +932,7 @@ def config_for_install(existing: dict[str, str], mode: str,
         cfg["TELEGRAM_BOT_TOKEN"] = prompt("Токен Telegram-бота из BotFather", hidden=True)
         if not BOT_TOKEN_RE.fullmatch(cfg["TELEGRAM_BOT_TOKEN"]):
             raise ValueError("Неверный формат токена Telegram. Проверьте токен из BotFather.")
-    if existing and cfg.get("TELEGRAM_BOT_USERNAME"):
+    if existing and reconfigure and cfg.get("TELEGRAM_BOT_USERNAME"):
         cfg["TELEGRAM_BOT_USERNAME"] = prompt_existing_setting(
             "Username бота (без @)", cfg["TELEGRAM_BOT_USERNAME"],
         ).lstrip("@")
